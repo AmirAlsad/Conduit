@@ -1,9 +1,13 @@
-"""`loopback` pipeline — raw audio passthrough.
+"""`loopback` pipeline — echo the caller's audio back.
 
-``transport.input() -> transport.output()``. No model, no keys, no external
-deps, zero added latency (design §2.2). This isolates the audio path so a problem
+`transport.input() -> echo -> transport.output()`. No model, no keys, no external
+deps, ~zero added latency (design §2.2). This isolates the audio path so a problem
 here is the *pipe* (CallKit↔WebRTC activation, route switching, mute, the
 speaker-not-earpiece default, raw quality), not the agent.
+
+Note: a bare `input() -> output()` does NOT echo — the output transport only emits
+`OutputAudioRawFrame`, while the mic yields `InputAudioRawFrame` (a sibling class).
+`AudioEcho` converts one to the other so the bot actually speaks the caller's audio.
 
 RTVI is still on (PipelineWorker default), but with no TTS the bot-speaking glow
 would stay dark. Optionally insert a tiny energy-gate that synthesizes
@@ -22,6 +26,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     InputAudioRawFrame,
+    OutputAudioRawFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -75,12 +80,37 @@ class SyntheticBotSpeaking(FrameProcessor):
             await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
 
+class AudioEcho(FrameProcessor):
+    """Re-emit inbound mic audio as the bot's output audio.
+
+    The output transport only writes `OutputAudioRawFrame`; the mic produces
+    `InputAudioRawFrame`. Without this conversion the audio is silently dropped at
+    the sink and the caller hears nothing. The output transport resamples to its
+    own rate, so we just forward the same PCM with the source rate/channels.
+    """
+
+    async def process_frame(self, frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, InputAudioRawFrame):
+            await self.push_frame(
+                OutputAudioRawFrame(
+                    audio=frame.audio,
+                    sample_rate=frame.sample_rate,
+                    num_channels=frame.num_channels,
+                ),
+                FrameDirection.DOWNSTREAM,
+            )
+        else:
+            await self.push_frame(frame, direction)
+
+
 def build(transport) -> BotBuild:
     processors = [transport.input()]
 
     if settings.loopback_bot_speaking:
         processors.append(SyntheticBotSpeaking(threshold=settings.loopback_rms_threshold))
 
+    processors.append(AudioEcho())  # the actual echo (input audio -> output audio)
     processors.append(transport.output())
 
     worker = PipelineWorker(

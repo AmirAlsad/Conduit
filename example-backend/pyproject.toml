@@ -17,6 +17,10 @@ dependencies = [
     "pydantic-settings>=2.4",
     "python-dotenv>=1.0",
     "loguru>=0.7",
+    # Portable CA bundle: the dispatcher's aiohttp session and scripts/daily_webhook.py
+    # verify TLS against this rather than the OS trust store (the python.org/uv Python
+    # on macOS doesn't read the system store).
+    "certifi>=2024.0.0",
     # LiveKit server SDK: token minting + WebhookReceiver/TokenVerifier.
     # Usually pulled in by pipecat's [livekit] extra, pinned here so the webhook
     # path doesn't silently depend on a transitive.

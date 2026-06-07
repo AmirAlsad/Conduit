@@ -6,9 +6,11 @@ not sleep on Railway (it serves /connect and webhooks promptly at any time).
 
 from __future__ import annotations
 
+import ssl
 from contextlib import asynccontextmanager
 
 import aiohttp
+import certifi
 from fastapi import FastAPI
 
 from app.config import settings
@@ -38,7 +40,12 @@ async def lifespan(app: FastAPI):
     # silent trap. Crash on startup instead so the deploy never goes "green" broken.
     settings.require("engine_api_key")
 
-    session = aiohttp.ClientSession()
+    # Verify TLS against certifi's CA bundle rather than the OS trust store. The
+    # python.org / uv Python builds (notably on macOS) don't read the system store,
+    # so the default aiohttp context fails to verify api.daily.co. certifi is
+    # self-contained and works the same on macOS dev and Linux prod.
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context))
     registry = InMemoryRegistry()
     app.state.session = session
     app.state.registry = registry
