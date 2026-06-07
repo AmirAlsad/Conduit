@@ -1,0 +1,28 @@
+{
+  "enabledMcpjsonServers": [
+    "xcodebuildmcp",
+    "context7",
+    "apple-docs",
+    "pipecat-docs"
+  ],
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(cat:*)",
+      "Bash(tree:*)",
+      "Bash(wc:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(xcodegen generate:*)",
+      "mcp__xcodebuildmcp__discover_projs",
+      "mcp__xcodebuildmcp__list_schemes",
+      "mcp__xcodebuildmcp__list_sims",
+      "mcp__xcodebuildmcp__session_show_defaults",
+      "mcp__xcodebuildmcp__build_sim",
+      "mcp__xcodebuildmcp__test_sim"
+    ]
+  }
+}

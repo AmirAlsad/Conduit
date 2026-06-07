@@ -1,0 +1,180 @@
+name: Conduit
+options:
+  bundleIdPrefix: com.amiralsad
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "26.0"
+  defaultConfig: Debug
+  groupSortPosition: top
+  generateEmptyDirectories: true
+  transitivelyLinkDependencies: true
+
+settings:
+  base:
+    ALWAYS_SEARCH_USER_PATHS: false
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: true
+    CLANG_ANALYZER_NONNULL: true
+    CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION: YES_AGGRESSIVE
+    CLANG_CXX_LANGUAGE_STANDARD: gnu++20
+    CLANG_ENABLE_MODULES: true
+    CLANG_ENABLE_OBJC_ARC: true
+    CLANG_ENABLE_OBJC_WEAK: true
+    CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING: true
+    CLANG_WARN_BOOL_CONVERSION: true
+    CLANG_WARN_COMMA: true
+    CLANG_WARN_CONSTANT_CONVERSION: true
+    CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS: true
+    CLANG_WARN_DIRECT_OBJC_ISA_USAGE: YES_ERROR
+    CLANG_WARN_DOCUMENTATION_COMMENTS: true
+    CLANG_WARN_EMPTY_BODY: true
+    CLANG_WARN_ENUM_CONVERSION: true
+    CLANG_WARN_INFINITE_RECURSION: true
+    CLANG_WARN_INT_CONVERSION: true
+    CLANG_WARN_NON_LITERAL_NULL_CONVERSION: true
+    CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF: true
+    CLANG_WARN_OBJC_LITERAL_CONVERSION: true
+    CLANG_WARN_OBJC_ROOT_CLASS: YES_ERROR
+    CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER: true
+    CLANG_WARN_RANGE_LOOP_ANALYSIS: true
+    CLANG_WARN_STRICT_PROTOTYPES: true
+    CLANG_WARN_SUSPICIOUS_MOVE: true
+    CLANG_WARN_UNGUARDED_AVAILABILITY: YES_AGGRESSIVE
+    CLANG_WARN_UNREACHABLE_CODE: true
+    CLANG_WARN__DUPLICATE_METHOD_MATCH: true
+    ENABLE_STRICT_OBJC_MSGSEND: true
+    ENABLE_USER_SCRIPT_SANDBOXING: true
+    GCC_C_LANGUAGE_STANDARD: gnu17
+    GCC_NO_COMMON_BLOCKS: true
+    GCC_WARN_64_TO_32_BIT_CONVERSION: true
+    GCC_WARN_ABOUT_RETURN_TYPE: YES_ERROR
+    GCC_WARN_UNDECLARED_SELECTOR: true
+    GCC_WARN_UNINITIALIZED_AUTOS: YES_AGGRESSIVE
+    GCC_WARN_UNUSED_FUNCTION: true
+    GCC_WARN_UNUSED_VARIABLE: true
+    LOCALIZATION_PREFERS_STRING_CATALOGS: true
+    MTL_FAST_MATH: true
+    SDKROOT: iphoneos
+    SWIFT_VERSION: "5.0"
+  configs:
+    Debug:
+      COPY_PHASE_STRIP: false
+      DEBUG_INFORMATION_FORMAT: dwarf
+      ENABLE_TESTABILITY: true
+      GCC_DYNAMIC_NO_PIC: false
+      GCC_OPTIMIZATION_LEVEL: "0"
+      GCC_PREPROCESSOR_DEFINITIONS:
+        - DEBUG=1
+        - $(inherited)
+      MTL_ENABLE_DEBUG_INFO: INCLUDE_SOURCE
+      ONLY_ACTIVE_ARCH: true
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG $(inherited)
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    Release:
+      COPY_PHASE_STRIP: false
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+      ENABLE_NS_ASSERTIONS: false
+      MTL_ENABLE_DEBUG_INFO: false
+      SWIFT_COMPILATION_MODE: wholemodule
+      VALIDATE_PRODUCT: true
+
+# Swift Package dependencies are intentionally empty for now. Transport SDKs
+# (pipecat-client-ios-daily, LiveKit) are added when call/transport feature work begins.
+packages: {}
+
+targets:
+  Conduit:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    configFiles:
+      Debug: Config/Base.xcconfig
+      Release: Config/Base.xcconfig
+    sources:
+      - path: Conduit
+        excludes:
+          - "**/*.md"
+          - "**/.claude/**"
+          - "**/.gitkeep"
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_IDENTITY: Apple Development
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_PREVIEWS: true
+        GENERATE_INFOPLIST_FILE: false
+        INFOPLIST_FILE: Conduit/Info.plist
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/Frameworks"
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_IDENTIFIER)
+        PRODUCT_NAME: $(TARGET_NAME)
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        SUPPORTED_PLATFORMS: iphoneos iphonesimulator
+        SUPPORTS_MACCATALYST: false
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: false
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: false
+        SWIFT_EMIT_LOC_STRINGS: true
+        TARGETED_DEVICE_FAMILY: "1"
+
+  ConduitTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "18.0"
+    configFiles:
+      Debug: Config/Base.xcconfig
+      Release: Config/Base.xcconfig
+    sources:
+      - path: ConduitTests
+    settings:
+      base:
+        BUNDLE_LOADER: $(TEST_HOST)
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: true
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_IDENTIFIER).tests
+        PRODUCT_NAME: $(TARGET_NAME)
+        SWIFT_EMIT_LOC_STRINGS: false
+        TARGETED_DEVICE_FAMILY: "1"
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Conduit.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Conduit
+    dependencies:
+      - target: Conduit
+
+  ConduitUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "18.0"
+    configFiles:
+      Debug: Config/Base.xcconfig
+      Release: Config/Base.xcconfig
+    sources:
+      - path: ConduitUITests
+    settings:
+      base:
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: true
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_IDENTIFIER).uitests
+        PRODUCT_NAME: $(TARGET_NAME)
+        SWIFT_EMIT_LOC_STRINGS: false
+        TARGETED_DEVICE_FAMILY: "1"
+        TEST_TARGET_NAME: Conduit
+    dependencies:
+      - target: Conduit
+
+schemes:
+  Conduit:
+    build:
+      targets:
+        Conduit: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ConduitTests
+        - ConduitUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

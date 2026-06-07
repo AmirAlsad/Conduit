@@ -1,0 +1,34 @@
+{
+  "mcpServers": {
+    "xcodebuildmcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "xcodebuildmcp",
+        "mcp"
+      ]
+    },
+    "context7": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ],
+      "env": {}
+    },
+    "apple-docs": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "apple-doc-mcp-server@latest"
+      ],
+      "env": {}
+    },
+    "pipecat-docs": {
+      "type": "http",
+      "url": "https://daily-docs.mcp.kapa.ai"
+    }
+  }
+}

@@ -2,7 +2,7 @@
 //  ConduitUITestsLaunchTests.swift
 //  ConduitUITests
 //
-//  Created by Amir Alsad on 6/7/26.
+//  Captures a launch-screen screenshot for each UI configuration.
 //
 
 import XCTest
@@ -21,9 +21,6 @@ final class ConduitUITestsLaunchTests: XCTestCase {
     func testLaunch() throws {
         let app = XCUIApplication()
         app.launch()
-
-        // Insert steps here to perform after app launch but before taking a screenshot,
-        // such as logging into a test account or navigating somewhere in the app
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Launch Screen"

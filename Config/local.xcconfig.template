@@ -1,0 +1,14 @@
+// local.xcconfig.template
+// Copy this file to Config/local.xcconfig and fill in your values.
+// DO NOT commit local.xcconfig — it is gitignored and per-developer.
+//
+// This is the single canonical place for per-developer build overrides
+// (team id + bundle id). There is intentionally no project.local.yml.
+
+// Your Apple Developer Team ID (find it in Xcode > Settings > Accounts, or
+// at developer.apple.com > Membership).
+DEVELOPMENT_TEAM = YOUR_TEAM_ID_HERE
+
+// Your unique app bundle identifier. Tests/UITests derive from this
+// automatically (.tests / .uitests). Example: com.yourname.Conduit
+APP_BUNDLE_IDENTIFIER = com.yourname.Conduit
