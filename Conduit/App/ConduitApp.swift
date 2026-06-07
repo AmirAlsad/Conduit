@@ -6,13 +6,18 @@
 //  (CallKit + WebRTC); see voice-agent-callkit-plan.md.
 //
 
+import SwiftData
 import SwiftUI
 
 @main
 struct ConduitApp: App {
+    @State private var environment = AppEnvironment.inMemory()
+
     var body: some Scene {
         WindowGroup {
-            RootView()
+            RootTabView()
+                .environment(environment)
+                .modelContainer(environment.modelContainer)
         }
     }
 }

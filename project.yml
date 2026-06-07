@@ -77,9 +77,18 @@ settings:
       SWIFT_COMPILATION_MODE: wholemodule
       VALIDATE_PRODUCT: true
 
-# Swift Package dependencies are intentionally empty for now. Transport SDKs
-# (pipecat-client-ios-daily, LiveKit) are added when call/transport feature work begins.
-packages: {}
+# Transport SDKs. Daily ships first (WS-2): the Daily transport pulls in
+# daily-client-ios (DailyCore + Google WebRTC) transitively. Native LiveKit is
+# added in the fast-follow (WS-6). The packages are resolved here at the
+# foundation milestone to flush out package/binary resolution early; the Daily
+# adapter that imports them lands in WS-2.
+packages:
+  PipecatClientIOS:
+    url: https://github.com/pipecat-ai/pipecat-client-ios.git
+    from: "1.2.0"
+  PipecatClientIOSDaily:
+    url: https://github.com/pipecat-ai/pipecat-client-ios-daily.git
+    from: "1.2.0"
 
 targets:
   Conduit:
@@ -116,6 +125,9 @@ targets:
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: false
         SWIFT_EMIT_LOC_STRINGS: true
         TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - package: PipecatClientIOS
+      - package: PipecatClientIOSDaily
 
   ConduitTests:
     type: bundle.unit-test

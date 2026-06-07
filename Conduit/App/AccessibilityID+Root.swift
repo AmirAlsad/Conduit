@@ -2,25 +2,20 @@
 //  AccessibilityID+Root.swift
 //  Conduit
 //
-//  Example feature extension demonstrating the AccessibilityID convention.
-//  See AccessibilityID.swift for the convention itself.
+//  Identifiers for the app's root shell. See AccessibilityID.swift for the
+//  convention itself.
 //
 
 import Foundation
 
 extension AccessibilityID {
-    /// Identifiers for the app's root container view.
+    /// Identifiers for the root tab shell.
     enum Root {
-        /// The root screen container.
+        /// The root tab container.
         static let screen = "Root_Screen"
-        /// The app title label.
-        static let titleLabel = "Root_TitleLabel"
-        /// The app tagline label.
-        static let taglineLabel = "Root_TaglineLabel"
 
-        /// Identifier for an indexed tab in the (future) root tab bar.
-        /// - Parameter index: Zero-based tab position.
-        /// - Returns: The element's accessibility identifier.
+        /// Identifier for an indexed tab's root content.
+        /// - Parameter index: Zero-based tab position (0 Recents, 1 Contacts, 2 Settings).
         static func tab(_ index: Int) -> String { "Root_Tab_\(index)" }
     }
 }
