@@ -86,9 +86,16 @@ curl -s -X POST http://localhost:8000/credentials \
 ```
 
 At call time the app joins that room directly; the SFU fires a participant-joined
-webhook and the engine dispatches the bot reactively. To test locally, expose the
-dispatcher with a tunnel (`ngrok http 8000`) and register the webhook against it
-(see *Deploy* below).
+webhook and the engine dispatches the bot reactively. To test locally, front the
+dispatcher with a tunnel and register the webhook against it:
+
+```bash
+cloudflared tunnel --url http://localhost:8000     # or: ngrok http 8000
+uv run python scripts/daily_webhook.py register --base-url https://<tunnel-host>
+```
+
+The full flow, the webhook secret, and the operational caveats are in
+**[docs/direct-mode.md](./docs/direct-mode.md)**.
 
 ### 4. Tests
 
@@ -191,14 +198,18 @@ this engine instead:
    `/health` check; Nixpacks builds the uv project.
 2. **Disable Serverless / App Sleeping** on the service (dashboard → Settings) —
    the dispatcher must receive webhooks and serve `/connect` without a cold start.
-3. Set env vars from `.env` (`ENGINE_API_KEY`, `DAILY_*`, `LIVEKIT_*`, provider
-   keys, `PUBLIC_BASE_URL`, webhook secrets).
-4. Register webhooks against `PUBLIC_BASE_URL`:
-   - **Daily**: `POST https://api.daily.co/v1/webhooks` with
-     `eventTypes: ["participant.joined"]` and `url: $PUBLIC_BASE_URL/webhooks/daily`;
-     store the returned `hmac` as `DAILY_WEBHOOK_SECRET`.
-   - **LiveKit**: add `$PUBLIC_BASE_URL/webhooks/livekit` in the project's webhook
-     settings (verification uses your `LIVEKIT_API_KEY`/`SECRET`).
+3. Set env vars from `.env` (`ENGINE_API_KEY`, `DAILY_*` including the same
+   `DAILY_WEBHOOK_SECRET`, `LIVEKIT_*`, provider keys, `PUBLIC_BASE_URL`).
+4. For **direct mode only**, register the webhook **once** against the Railway URL
+   (it persists across redeploys — not a per-deploy step):
+   ```bash
+   uv run python scripts/daily_webhook.py register --base-url https://<your>.up.railway.app
+   ```
+   LiveKit: add `$PUBLIC_BASE_URL/webhooks/livekit` in the project's webhook
+   settings (verification uses your `LIVEKIT_API_KEY`/`SECRET`).
+
+See **[docs/direct-mode.md](./docs/direct-mode.md)** for the webhook secret, local
+tunnel testing, and the redeploy-orphan caveat.
 
 ## Out of scope (fast-follows)
 
