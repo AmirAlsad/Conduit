@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -52,36 +52,43 @@ jobs:
       - name: Publish test results
         if: always()
         run: |
-          # Parse test results from xcodebuild log and write to GitHub step summary
-          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Test Results"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          # Extract pass/fail counts
-          PASSED=$(grep -c "^✔ Test " xcodebuild.log || true)
-          FAILED=$(grep -c "^✘ Test " xcodebuild.log || true)
-          TOTAL=$((PASSED + FAILED))
+          if [ ! -d TestResults.xcresult ]; then
+            echo "⚠️ No \`TestResults.xcresult\` was produced — the build likely failed before tests ran." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
 
-          if [ "$FAILED" -eq 0 ]; then
-            echo "✅ **All $PASSED tests passed**" >> $GITHUB_STEP_SUMMARY
+          # Authoritative counts straight from the result bundle. Do NOT grep the
+          # log: xcodebuild's non-TTY CI output omits the ✔/✘ glyphs, so a
+          # log-based count always reported 0. `xcresulttool get test-results
+          # summary` (Xcode 16+) is the source of truth.
+          xcrun xcresulttool get test-results summary \
+            --path TestResults.xcresult --format json > test-summary.json 2>/dev/null \
+            || echo '{}' > test-summary.json
+
+          TOTAL=$(jq -r '.totalTestCount // 0' test-summary.json)
+          PASSED=$(jq -r '.passedTests // 0' test-summary.json)
+          FAILED=$(jq -r '.failedTests // 0' test-summary.json)
+          SKIPPED=$(jq -r '.skippedTests // 0' test-summary.json)
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "⚠️ **0 tests ran.** Check that the scheme's test targets are wired and the destination resolved." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$FAILED" -eq 0 ]; then
+            echo "✅ **All $PASSED tests passed** ($TOTAL total, $SKIPPED skipped)" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "❌ **$FAILED of $TOTAL tests failed**" >> $GITHUB_STEP_SUMMARY
+            {
+              echo "❌ **$FAILED of $TOTAL tests failed** ($PASSED passed, $SKIPPED skipped)"
+              echo ""
+              echo "### Failed tests"
+              echo '```'
+              jq -r '.testFailures[]? | "- \(.testName // .testIdentifier // "unknown"): \(.failureText // "")"' test-summary.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # List failed tests (if any)
-          if [ "$FAILED" -gt 0 ]; then
-            echo "### Failed Tests" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            grep "^✘ Test " xcodebuild.log >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # List all suites with pass/fail
-          echo "### Suites" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          grep -E "^[✔✘] Suite " xcodebuild.log >> $GITHUB_STEP_SUMMARY || true
-          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Check for Swift warnings
         if: always()
@@ -94,7 +101,7 @@ jobs:
 
       - name: Upload test results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: TestResults
           path: TestResults.xcresult
