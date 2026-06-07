@@ -12,9 +12,22 @@ present. Each feature validates the keys it actually needs at point of use via
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
+import certifi
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Make TLS verification work regardless of the OS trust store. The python.org / uv
+# Python builds (notably on macOS) ship an *empty* default CA set, so every outbound
+# TLS connection in this process — Daily REST (aiohttp), Deepgram/Cartesia
+# (websockets), Groq (httpx), LiveKit — fails with "unable to get local issuer
+# certificate". Pointing the process's default SSL context at certifi's bundle fixes
+# all of them at once. config.py is imported early by both the dispatcher and every
+# bot subprocess, so this runs before any connection. setdefault so a deploy that
+# sets its own bundle (e.g. a corporate CA) still wins; on Linux the system store
+# already works, and certifi is a valid superset there too.
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
 
 class MissingSettingError(RuntimeError):
@@ -52,6 +65,10 @@ class Settings(BaseSettings):
     cartesia_api_key: str | None = None
     # Default Cartesia voice ("British Reading Lady"), matches upstream examples.
     cartesia_voice_id: str = "71a7ad14-091c-4e8e-a314-022ece01c121"
+    # TTS provider for the `live` bot: "cartesia" (default) | "deepgram" | "groq".
+    # Each uses that provider's existing key (Cartesia→CARTESIA_API_KEY, Deepgram
+    # Aura→DEEPGRAM_API_KEY, Groq PlayAI→GROQ_API_KEY).
+    tts_provider: str = "cartesia"
 
     # --- Behaviour knobs ---
     bot_name: str = "Conduit Bot"

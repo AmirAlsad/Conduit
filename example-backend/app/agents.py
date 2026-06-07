@@ -33,7 +33,20 @@ AGENTS: dict[str, AgentConfig] = {
         "live",
         default_transport=settings.default_transport,
         description="Reference STT→LLM→TTS agent (Deepgram · Groq · Cartesia) with RTVI.",
-        required_settings=("deepgram_api_key", "groq_api_key", "cartesia_api_key"),
+        # STT + LLM keys, plus whichever TTS provider TTS_PROVIDER selects (deduped).
+        required_settings=tuple(
+            dict.fromkeys(
+                (
+                    "deepgram_api_key",
+                    "groq_api_key",
+                    {
+                        "cartesia": "cartesia_api_key",
+                        "deepgram": "deepgram_api_key",
+                        "groq": "groq_api_key",
+                    }.get(settings.tts_provider.lower(), "cartesia_api_key"),
+                )
+            )
+        ),
     ),
 }
 

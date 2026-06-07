@@ -19,12 +19,18 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.groq.llm import GroqLLMService
 
-from app.config import settings
+from app.config import MissingSettingError, settings
 from bot.buildresult import BotBuild
+
+# Which setting each TTS provider needs (mirrored in app/agents.py for pre-validation).
+TTS_KEY = {
+    "cartesia": "cartesia_api_key",
+    "deepgram": "deepgram_api_key",
+    "groq": "groq_api_key",
+}
 
 # Spoken-first thinking-partner persona. No formatting that can't be read aloud;
 # tolerate silence rather than snap-respond.
@@ -37,9 +43,34 @@ PERSONA = (
 )
 
 
+def _build_tts():
+    """TTS is the one-line-swappable stage (design §2.3), here as a TTS_PROVIDER knob.
+    Each provider reuses that provider's existing key."""
+    provider = settings.tts_provider.lower()
+    if provider == "cartesia":
+        from pipecat.services.cartesia.tts import CartesiaTTSService
+
+        settings.require("cartesia_api_key")
+        return CartesiaTTSService(
+            api_key=settings.cartesia_api_key,
+            settings=CartesiaTTSService.Settings(voice=settings.cartesia_voice_id),
+        )
+    if provider == "deepgram":
+        from pipecat.services.deepgram.tts import DeepgramTTSService
+
+        settings.require("deepgram_api_key")
+        return DeepgramTTSService(api_key=settings.deepgram_api_key)  # Aura default voice
+    if provider == "groq":
+        from pipecat.services.groq.tts import GroqTTSService
+
+        settings.require("groq_api_key")
+        return GroqTTSService(api_key=settings.groq_api_key)  # PlayAI default voice
+    raise MissingSettingError(f"Unknown TTS_PROVIDER: {settings.tts_provider!r}")
+
+
 def build(transport) -> BotBuild:
-    # Validate exactly the keys this pipeline needs, with a specific error.
-    settings.require("deepgram_api_key", "groq_api_key", "cartesia_api_key")
+    # Validate STT + LLM keys here; the TTS provider validates its own key.
+    settings.require("deepgram_api_key", "groq_api_key")
 
     stt = DeepgramSTTService(api_key=settings.deepgram_api_key)
 
@@ -51,10 +82,7 @@ def build(transport) -> BotBuild:
         ),
     )
 
-    tts = CartesiaTTSService(
-        api_key=settings.cartesia_api_key,
-        settings=CartesiaTTSService.Settings(voice=settings.cartesia_voice_id),
-    )
+    tts = _build_tts()
 
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
