@@ -7,7 +7,7 @@ the same ids to pipeline builders; this side carries dispatch-time defaults.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.config import settings
 
@@ -17,6 +17,10 @@ class AgentConfig:
     agent_id: str
     default_transport: str
     description: str
+    # Settings the agent's pipeline needs (validated by the dispatcher BEFORE
+    # spawning, so a missing key returns a clean 503 instead of minting creds for a
+    # bot that crashes on launch — which would leave the client connected to silence).
+    required_settings: tuple[str, ...] = field(default_factory=tuple)
 
 
 AGENTS: dict[str, AgentConfig] = {
@@ -29,6 +33,7 @@ AGENTS: dict[str, AgentConfig] = {
         "live",
         default_transport=settings.default_transport,
         description="Reference STT→LLM→TTS agent (Deepgram · Groq · Cartesia) with RTVI.",
+        required_settings=("deepgram_api_key", "groq_api_key", "cartesia_api_key"),
     ),
 }
 

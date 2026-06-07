@@ -117,7 +117,9 @@ uv run pytest
 Bearer = `Authorization: Bearer $ENGINE_API_KEY`. Webhooks authenticate by
 signature (the caller is the SFU). Body for `/connect` and `/credentials`:
 `{"agent_id": "loopback"|"live", "transport": "daily"|"livekit"}` (transport
-optional → agent/engine default).
+optional → agent/engine default). Body for `/admin/disconnect`:
+`{"room_key": "<room>"}` — the Daily room name / LiveKit `room_name` from the
+connection payload (404 if no bot is active in that room).
 
 ### Connection contract (internal, not a frozen public spec)
 
@@ -151,10 +153,12 @@ driven entirely by RTVI speaking-state events (emitted automatically by the
 
 ## Key knobs
 
-- **`VAD_STOP_SECS`** (default `0.2`) — the endpointing delay. Smart-Turn is the
-  default stop strategy and was trained on 0.2; **raise it** to give a
-  thinking-partner more silence tolerance, at some latency cost. The single most
-  important conversational tuning parameter.
+- **`VAD_STOP_SECS`** (default `0.2`) — the endpointing delay. Turn-end detection is
+  Pipecat's default stop strategy, **Smart Turn v3**, applied automatically by the
+  context aggregator (you'll see it load at startup — it isn't wired explicitly in
+  `live.py`). It was trained at 0.2, which the VAD feeds it; **raise `VAD_STOP_SECS`**
+  to give a thinking-partner more silence tolerance, at some latency cost. The single
+  most important conversational tuning parameter.
 - **`HUMAN_ABSENT_GRACE_SECS`** (default `60`) — see below.
 
 ## Teardown, reconnection, and the end-call signal (important)
@@ -184,6 +188,12 @@ this engine instead:
   to silence). The `Registry` interface in `app/registry.py` is the seam — wire a
   Postgres/Redis impl before relying on direct mode in production. (Pairing is
   unaffected; it creates everything within one request.)
+- **Run a single dispatcher process.** Idempotency relies on the in-memory registry
+  + per-room asyncio locks, which only serialize *within one event loop*. Do **not**
+  run multiple replicas or `uvicorn --workers > 1`: two concurrent webhooks on
+  different processes would each see an empty registry and both spawn a bot into the
+  same room. Horizontal scaling needs the shared `Registry` swap above (with atomic
+  compare-and-set). The provided `railway.json`/`Procfile` are single-process.
 - **Daily webhooks** require a credit card on the Daily account and fire
   **domain-wide** (every room). The engine filters to registered rooms and ignores
   the bot's own join.
@@ -192,20 +202,33 @@ this engine instead:
   to test LiveKit.
 - **Redeploys kill in-flight bots** and drop active calls — deploy when quiet.
 
-## Deploy to Railway (follow-up — not done in the local-first pass)
+## Deploy (your own way)
 
-1. Create a service from this repo. `railway.json` sets the start command and
-   `/health` check; Nixpacks builds the uv project.
-2. **Disable Serverless / App Sleeping** on the service (dashboard → Settings) —
-   the dispatcher must receive webhooks and serve `/connect` without a cold start.
-3. Set env vars from `.env` (`ENGINE_API_KEY`, `DAILY_*` including the same
-   `DAILY_WEBHOOK_SECRET`, `LIVEKIT_*`, provider keys, `PUBLIC_BASE_URL`).
-4. For **direct mode only**, register the webhook **once** against the Railway URL
+The dispatcher is a single always-on web process; the only inbound surface is HTTPS
+(`/connect`, `/credentials`, `/webhooks/*`, `/health`). Deploy it however you like —
+just keep it a **single process** (see the scaling caveat above) and **always-on**
+(no app-sleeping; it must answer webhooks and `/connect` without a cold start).
+
+- **Docker / any host**: a [`Dockerfile`](./Dockerfile) is provided (Python 3.12 +
+  uv, `uv sync --frozen`, binds `${PORT:-8000}`). `docker build -t conduit . &&
+  docker run -p 8000:8000 --env-file .env conduit`. A `.dockerignore` keeps
+  `.venv`/`.env`/`node_modules` out of the image — inject secrets via your platform's
+  env/secret store, never the image.
+- **Railway**: `railway.json` sets the start command + `/health` check (Nixpacks
+  builds the uv project). **Disable Serverless / App Sleeping** on the service.
+
+Then, regardless of host:
+
+1. Set the env vars from `.env` on the platform (`ENGINE_API_KEY`, `DAILY_*`
+   including the same `DAILY_WEBHOOK_SECRET`, `LIVEKIT_*`, provider keys). The
+   dispatcher **fails fast on boot if `ENGINE_API_KEY` is unset** — a missing key
+   is a crash, not a silent 500.
+2. For **direct mode only**, register the webhook **once** against your public URL
    (it persists across redeploys — not a per-deploy step):
    ```bash
-   uv run python scripts/daily_webhook.py register --base-url https://<your>.up.railway.app
+   uv run python scripts/daily_webhook.py register --base-url https://<your-public-host>
    ```
-   LiveKit: add `$PUBLIC_BASE_URL/webhooks/livekit` in the project's webhook
+   LiveKit: add `<your-public-host>/webhooks/livekit` in the project's webhook
    settings (verification uses your `LIVEKIT_API_KEY`/`SECRET`).
 
 See **[docs/direct-mode.md](./docs/direct-mode.md)** for the webhook secret, local

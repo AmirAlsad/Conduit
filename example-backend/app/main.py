@@ -19,7 +19,7 @@ from app.routes import admin, connect, webhooks
 from app.transports.daily import DailyService
 
 
-def _make_livekit(session: aiohttp.ClientSession):
+def _make_livekit():
     """Build the LiveKit service if fully configured, else None."""
     if not (settings.livekit_api_key and settings.livekit_api_secret and settings.livekit_url):
         return None
@@ -33,13 +33,18 @@ async def lifespan(app: FastAPI):
     setup_logging()
     log = get_logger("main")
 
+    # Fail fast on a misconfigured deploy. Every billable endpoint needs this; without
+    # it the container would boot, pass /health, and 500 on every real request — a
+    # silent trap. Crash on startup instead so the deploy never goes "green" broken.
+    settings.require("engine_api_key")
+
     session = aiohttp.ClientSession()
     registry = InMemoryRegistry()
     app.state.session = session
     app.state.registry = registry
     app.state.dispatcher = Dispatcher(registry)
     app.state.daily = DailyService(session) if settings.daily_api_key else None
-    app.state.livekit = _make_livekit(session)
+    app.state.livekit = _make_livekit()
 
     event(
         log,

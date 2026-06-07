@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.agents import get_agent, resolve_transport
 from app.auth import require_engine_key
+from app.config import MissingSettingError, settings
 from app.models import ConnectionPayload, ConnectRequest
 from app.provisioning import (
     TransportUnavailable,
@@ -30,10 +31,15 @@ async def _provision(request: Request, req: ConnectRequest, *, direct: bool) -> 
         raise HTTPException(status_code=404, detail=f"Unknown agent_id: {req.agent_id!r}")
     transport = resolve_transport(agent, req.transport)
     try:
+        # Validate the agent's model keys up front. Without this, requesting `live`
+        # with missing provider keys would mint valid creds, then the bot would crash
+        # on launch — leaving the client connected to a silent (and, for pairing,
+        # promptly deleted) room. Fail clean with 503 instead.
+        settings.require(*agent.required_settings)
         if direct:
             return await provision_direct(request.app.state, agent.agent_id, transport)
         return await provision_pairing(request.app.state, agent.agent_id, transport)
-    except TransportUnavailable as e:
+    except (TransportUnavailable, MissingSettingError) as e:
         raise HTTPException(status_code=503, detail=str(e))
 
 

@@ -24,9 +24,11 @@ SFU has to be able to **reach your engine over the public internet**.
 ## The Daily webhook secret
 
 `DAILY_WEBHOOK_SECRET` is Daily's **HMAC-SHA256 signing secret** (base-64). Daily
-signs each webhook with it (`X-Webhook-Signature` header); the dispatcher recomputes
-the signature to prove the request is really from Daily and not someone hitting your
-public `/webhooks/daily`. Facts that trip people up:
+signs each webhook over `"{X-Webhook-Timestamp}.{body}"` and sends the result in the
+`X-Webhook-Signature` header; the dispatcher recomputes it (both the `X-Webhook-Signature`
+and `X-Webhook-Timestamp` headers must be present, or it's rejected 401) to prove the
+request is really from Daily and not someone hitting your public `/webhooks/daily`.
+Facts that trip people up:
 
 - **There is no dashboard for Daily webhooks.** They are created/managed only through
   Daily's REST API. The secret doesn't exist until you *create* a webhook.

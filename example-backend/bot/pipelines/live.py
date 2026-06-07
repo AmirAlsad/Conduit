@@ -60,10 +60,12 @@ def build(transport) -> BotBuild:
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            # The endpointing knob (design §2.2). Smart-Turn is the default stop
-            # strategy; raising VAD_STOP_SECS buys a thinking-partner more silence
-            # tolerance. Surfaced as config so builders can tune the single most
-            # important conversational parameter.
+            # Turn-end detection is Pipecat's default stop strategy — Smart Turn v3
+            # (LocalSmartTurnAnalyzerV3), applied automatically by the aggregator (you
+            # don't wire it explicitly; you can see it load at startup). VAD here only
+            # provides the trailing-silence signal Smart Turn consumes. VAD_STOP_SECS
+            # is the endpointing knob (design §2.2): Smart Turn was trained at 0.2;
+            # raising it buys a thinking-partner more silence tolerance, at some latency.
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=settings.vad_stop_secs)),
         ),
     )

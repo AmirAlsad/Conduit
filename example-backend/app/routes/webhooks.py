@@ -14,7 +14,7 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.config import settings
+from app.config import MissingSettingError, settings
 from app.obs import event, get_logger
 from app.provisioning import dispatch_for_webhook
 from app.transports.daily import DailyService, DailyWebhookError
@@ -22,6 +22,16 @@ from app.transports.livekit import LiveKitService, LiveKitWebhookError
 
 router = APIRouter(prefix="/webhooks")
 _log = get_logger("webhook")
+
+# Hold strong references to in-flight dispatch tasks: a bare asyncio.create_task()
+# can be garbage-collected mid-flight, silently cancelling the dispatch.
+_inflight: set[asyncio.Task] = set()
+
+
+def _spawn_dispatch(state, record) -> None:
+    task = asyncio.create_task(_safe_dispatch(state, record))
+    _inflight.add(task)
+    task.add_done_callback(_inflight.discard)
 
 
 async def _safe_dispatch(state, record) -> None:
@@ -54,6 +64,12 @@ async def daily_webhook(request: Request):
     except DailyWebhookError as e:
         event(_log, "webhook.daily_rejected", error=str(e))
         raise HTTPException(status_code=401, detail="Invalid webhook signature.")
+    except MissingSettingError as e:
+        # DAILY_WEBHOOK_SECRET unset — server misconfig, not a bad signature. Return a
+        # clean 503 rather than a 500 (a 500 still counts toward Daily's FAILED breaker,
+        # but at least this won't read as an unhandled crash in logs/alerts).
+        event(_log, "webhook.daily_misconfigured", error=str(e))
+        raise HTTPException(status_code=503, detail="Webhook secret not configured.")
 
     parsed = DailyService.parse_participant_joined(evt)
     if parsed is None:
@@ -72,7 +88,7 @@ async def daily_webhook(request: Request):
         event(_log, "webhook.unregistered_room", room=room_name)
         return {"ok": True}
 
-    asyncio.create_task(_safe_dispatch(state, record))
+    _spawn_dispatch(state, record)
     return {"ok": True}
 
 
@@ -112,5 +128,5 @@ async def livekit_webhook(request: Request):
         event(_log, "webhook.unregistered_room", room=room_name)
         return {"ok": True}
 
-    asyncio.create_task(_safe_dispatch(state, record))
+    _spawn_dispatch(state, record)
     return {"ok": True}

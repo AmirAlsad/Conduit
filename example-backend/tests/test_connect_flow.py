@@ -76,3 +76,16 @@ def test_credentials_direct_registers_room_without_dispatch():
         assert rec is not None
         assert rec.agent_id == "live"
         assert rec.room_url == "https://x.daily.co/room-abc"
+
+
+def test_live_without_model_keys_returns_503_not_silent_room(monkeypatch):
+    # Requesting `live` with a missing model key must fail clean BEFORE minting creds —
+    # otherwise the client connects to a room whose bot crashes on launch (silence).
+    monkeypatch.setattr(settings, "groq_api_key", None)
+    with TestClient(app) as c:
+        app.state.daily = FakeDaily()
+        app.state.dispatcher = FakeDispatcher()
+
+        r = c.post("/connect", json={"agent_id": "live", "transport": "daily"}, headers=AUTH)
+        assert r.status_code == 503, r.text
+        assert app.state.dispatcher.calls == []  # nothing dispatched, no room minted

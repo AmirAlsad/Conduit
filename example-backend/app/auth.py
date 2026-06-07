@@ -15,7 +15,8 @@ from app.config import settings
 
 
 async def require_engine_key(authorization: str = Header(default="")) -> None:
-    settings.require("engine_api_key")
+    # engine_api_key presence is guaranteed at startup (app.main lifespan fails fast
+    # if unset), so we never 500 here — just compare and 401 on mismatch.
     expected = f"Bearer {settings.engine_api_key}"
     # Constant-time compare so the token can't be recovered by timing.
     if not hmac.compare_digest(authorization, expected):

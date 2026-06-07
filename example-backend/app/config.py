@@ -17,6 +17,11 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class MissingSettingError(RuntimeError):
+    """A feature was used without the setting(s) it needs. Raised by ``require()``
+    so callers can catch it and return a clean error (e.g. 503) instead of a 500."""
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
@@ -30,7 +35,9 @@ class Settings(BaseSettings):
     # --- Daily Cloud ---
     daily_api_key: str | None = None
     daily_api_url: str = "https://api.daily.co/v1"
-    # Base-64 HMAC secret returned by Daily when the webhook is created.
+    # Base-64 HMAC secret used to sign/verify the participant-joined webhook. You set
+    # it here; the registration script registers it with Daily as the webhook `hmac`
+    # (bring-your-own), so what Daily signs with always matches what we verify with.
     daily_webhook_secret: str | None = None
 
     # --- LiveKit Cloud ---
@@ -91,7 +98,7 @@ class Settings(BaseSettings):
         feature needs a key, so partial environments fail loudly and specifically."""
         missing = [n for n in names if not getattr(self, n)]
         if missing:
-            raise RuntimeError(
+            raise MissingSettingError(
                 f"Missing required setting(s): {', '.join(missing)}. "
                 "Set them in the environment or .env."
             )

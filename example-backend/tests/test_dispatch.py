@@ -1,10 +1,8 @@
 """Idempotent dispatch (the load-bearing guarantee) + admin disconnect."""
 
 import asyncio
-import os
-import signal
 
-from app.dispatch import SPAWNING, Dispatcher
+from app.dispatch import Dispatcher
 from app.registry import InMemoryRegistry
 
 
@@ -15,12 +13,19 @@ class FakeProc:
         FakeProc._counter += 1
         self.pid = FakeProc._counter
         self._done = asyncio.Event()
+        self.returncode = None
+        self.terminated = False
 
     async def wait(self):
         await self._done.wait()
         return 0
 
+    def terminate(self):
+        self.terminated = True
+        self.finish()
+
     def finish(self):
+        self.returncode = 0
         self._done.set()
 
 
@@ -88,20 +93,30 @@ async def test_dispatch_runs_cleanup_on_exit(monkeypatch):
     assert cleaned.is_set()
 
 
-async def test_disconnect(monkeypatch):
+async def test_disconnect_terminates_held_handle(monkeypatch):
     reg = InMemoryRegistry()
     disp = Dispatcher(reg)
-    killed: list[tuple[int, int]] = []
-    monkeypatch.setattr(os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    proc = FakeProc()
 
-    # No active bot → False
+    async def fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    # No bot in this room → False (and nothing to terminate)
     assert await disp.disconnect("nope") is False
 
-    # Active bot → SIGTERM
-    await reg.set_active_bot("r1", 9999)
+    # Dispatch a bot, then disconnect terminates the HELD handle (not a bare pid →
+    # no PID-reuse hazard).
+    await disp.dispatch(
+        room_key="r1", agent_id="loopback", transport="daily", bot_argv=["--token", "t"]
+    )
     assert await disp.disconnect("r1") is True
-    assert killed == [(9999, signal.SIGTERM)]
+    assert proc.terminated is True
 
-    # Spawning sentinel must not be killed
-    await reg.set_active_bot("r2", SPAWNING)
-    assert await disp.disconnect("r2") is False
+    # Once the bot has exited and the watcher cleared it, a second disconnect is a no-op.
+    for _ in range(50):
+        await asyncio.sleep(0)
+        if await reg.active_bot("r1") is None:
+            break
+    assert await disp.disconnect("r1") is False

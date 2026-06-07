@@ -94,7 +94,13 @@ async def run_bot(
     worker = bot_build.worker
     controller = TeardownController(worker, settings.human_absent_grace_secs, log)
 
-    rtvi = getattr(worker, "rtvi", None)
+    # worker.rtvi is a property that *raises* (not AttributeError) when RTVI is
+    # disabled, so getattr's default wouldn't catch it — guard explicitly. Both
+    # shipped pipelines enable RTVI; this keeps a future no-RTVI pipeline from crashing.
+    try:
+        rtvi = worker.rtvi
+    except Exception:
+        rtvi = None
     if rtvi is not None:
 
         @rtvi.event_handler("on_client_ready")
