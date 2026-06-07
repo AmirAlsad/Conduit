@@ -26,5 +26,6 @@ protocol CallProviding: AnyObject {
     /// Tell the system the call ended (transport-initiated / failure).
     func reportCallEnded(_ id: UUID, reason: CallEndReason)
     func setMuted(_ id: UUID, muted: Bool) async
+    /// Hold/unhold — used to yield the audio route to a real incoming phone call (WS-3).
     func setOnHold(_ id: UUID, held: Bool) async
 }

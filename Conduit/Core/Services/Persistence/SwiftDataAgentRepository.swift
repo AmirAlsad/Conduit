@@ -38,6 +38,10 @@ final class SwiftDataAgentRepository: AgentRepository {
         context.delete(agent)
     }
 
+    func addCallLogEntry(_ entry: CallLogEntry) {
+        context.insert(entry)
+    }
+
     func deleteCallLogEntry(_ entry: CallLogEntry) {
         context.delete(entry)
     }

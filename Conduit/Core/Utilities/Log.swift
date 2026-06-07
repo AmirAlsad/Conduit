@@ -145,9 +145,6 @@ enum Log {
         return "\(value.prefix(chars))..."
     }
 
-    /// Redacts a phone number, keeping a short leading prefix.
-    static func redactPhone(_ phone: String?) -> String { redact(phone, chars: 4) }
-
     /// Redacts an email address, keeping a short leading prefix.
     static func redactEmail(_ email: String?) -> String { redact(email, chars: 3) }
 }

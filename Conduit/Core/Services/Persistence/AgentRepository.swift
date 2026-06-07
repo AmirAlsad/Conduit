@@ -16,6 +16,7 @@ protocol AgentRepository {
     func fetch(id: UUID) throws -> Agent?
     func insert(_ agent: Agent)
     func delete(_ agent: Agent)
+    func addCallLogEntry(_ entry: CallLogEntry)
     func deleteCallLogEntry(_ entry: CallLogEntry)
     func save() throws
 }

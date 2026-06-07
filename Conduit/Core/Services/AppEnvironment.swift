@@ -23,7 +23,9 @@ final class AppEnvironment {
     let contacts: ContactsMirroring
     let callProvider: CallProviding
     let agentRepository: AgentRepository
+    let announcer: SpokenStateAnnouncing
     let transportFactory: (TransportKind) -> Transport
+    let callSession: CallSessionCoordinator
 
     init(
         modelContainer: ModelContainer,
@@ -31,14 +33,27 @@ final class AppEnvironment {
         contacts: ContactsMirroring,
         callProvider: CallProviding,
         agentRepository: AgentRepository,
-        transportFactory: @escaping (TransportKind) -> Transport
+        announcer: SpokenStateAnnouncing,
+        transportFactory: @escaping (TransportKind) -> Transport,
+        isPushToTalkEnabled: @escaping () -> Bool = { false }
     ) {
         self.modelContainer = modelContainer
         self.keychain = keychain
         self.contacts = contacts
         self.callProvider = callProvider
         self.agentRepository = agentRepository
+        self.announcer = announcer
         self.transportFactory = transportFactory
+        self.callSession = CallSessionCoordinator(
+            callProvider: callProvider,
+            transportFactory: transportFactory,
+            keychain: keychain,
+            repository: agentRepository,
+            announcer: announcer,
+            now: { .now },
+            sleep: { try await Task.sleep(for: $0) },
+            isPushToTalkEnabled: isPushToTalkEnabled
+        )
     }
 
     /// All-fakes environment over an in-memory SwiftData store.
@@ -58,6 +73,7 @@ final class AppEnvironment {
             contacts: FakeContactsMirror(),
             callProvider: FakeCallProvider(),
             agentRepository: SwiftDataAgentRepository(context: container.mainContext),
+            announcer: FakeSpokenStateAnnouncer(),
             transportFactory: { _ in FakeTransport() }
         )
     }

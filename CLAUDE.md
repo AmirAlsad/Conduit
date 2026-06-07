@@ -71,7 +71,7 @@ ConduitTests/             # Unit tests (logic, state machines, parsing — run i
 ConduitUITests/           # UI tests (iPhone 16 / iOS 18.6)
 ```
 
-> **Target layout, not current state.** Today only `App/` and `Core/Utilities/` are populated (entry point, `RootView`, `Log`, `AccessibilityID`). `Core/Models`, `Core/Services`, and the `Features/` modules are the planned shape from `voice-agent-callkit-plan.md`; create them as features land rather than assuming they exist.
+> **Current state.** `App/` (entry point, `RootTabView`), `Core/Utilities/` (`Log`, `AccessibilityID`), `Core/Models/`, and `Core/Services/` are populated — the M0 foundation (protocol seams + fakes, SwiftData models, `AppEnvironment`) and M1 call state machine (`CallSessionCoordinator`, reconnection, spoken state). The **real** CallKit/transport/Keychain/Contacts implementations and the `Features/` modules and `Shared/` components are the planned shape from `voice-agent-callkit-plan.md`; create them as features land rather than assuming they exist. See [`docs/CORE_SYSTEMS.md`](./docs/CORE_SYSTEMS.md).
 
 ## Conventions
 

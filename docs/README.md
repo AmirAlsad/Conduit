@@ -12,7 +12,7 @@ backend of ours, no accounts, no per-minute cost.
 |----------|---------|
 | [ARCHITECTURE](./ARCHITECTURE.md) | The three-layer model (CallKit / WebRTC transport / the user's agent), folder structure, the key seams. |
 | [CONVENTIONS](./CONVENTIONS.md) | Code style, naming, AccessibilityID convention, the per-developer build override model, logging standards. |
-| [CORE_SYSTEMS](./CORE_SYSTEMS.md) | Shared infrastructure: the call state machine, transport abstraction, audio-session/CallKit integration, reconnection (skeleton — fills in as those land). |
+| [CORE_SYSTEMS](./CORE_SYSTEMS.md) | Shared infrastructure: the protocol seams + fakes, SwiftData models, AppEnvironment, the call state machine, and reconnection/spoken state (built); audio-session/CallKit real wiring is pending. |
 | [AGENT_WORKFLOW](./AGENT_WORKFLOW.md) | Operational playbook for agents driving the app: build nuances, UI verification, flow testing, the reporting contract, and the shell fallback. |
 
 Feature docs (`docs/features/<Feature>.md`) are added as features land — see the

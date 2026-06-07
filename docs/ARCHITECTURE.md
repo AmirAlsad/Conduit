@@ -1,8 +1,11 @@
 # Architecture
 
-> Skeleton — this is a brand-new app with no feature code yet. It captures the
-> intended shape from `voice-agent-callkit-plan.md` so it can grow as code lands.
-> Don't infer that anything described below already exists in source.
+> Status: the foundation (M0) and the call state machine (M1) are built —
+> `Core/Models/` and `Core/Services/` are populated (protocol seams + fakes,
+> SwiftData models, `AppEnvironment`, `CallSessionCoordinator`, reconnection,
+> spoken state). The `Features/` modules and `Shared/` components are not yet
+> built, and the **real** CallKit/transport/Keychain/Contacts implementations are
+> pending (WS-2/3/4). See [CORE_SYSTEMS](./CORE_SYSTEMS.md) for what exists today.
 
 ## Overview
 
@@ -92,18 +95,29 @@ Related hazards to design for (detailed in `voice-agent-callkit-plan.md`):
 
 ```
 Conduit/
-├── App/            # Entry point + root view (ConduitApp, RootView)
+├── App/            # Entry point + tab shell (ConduitApp, RootTabView)
 ├── Core/           # Shared, app-agnostic infrastructure
+│   ├── Models/     # Pure value types + SwiftData @Models (Agent, CallLogEntry,
+│   │               #   CallState, TransportKind, ReconnectionPolicy, …)
+│   ├── Services/   # AppEnvironment (composition root) + the protocol seams:
+│   │               #   Call/, CallKit/, Transport/, Keychain/, Contacts/,
+│   │               #   Persistence/, Audio/  (each: protocol + fake [+ real])
 │   └── Utilities/  # Log (os.log), AccessibilityID base namespace, helpers
 ├── Features/       # Self-contained feature modules (Recents, Contacts,
-│                   #   Settings, AgentDetail, AddEditAgent, InCall) — added as built
-├── Shared/         # Reusable UI components, navigation
+│                   #   Settings, AgentDetail, AddEditAgent, InCall) — NOT YET BUILT
+├── Shared/         # Reusable UI components, navigation — NOT YET BUILT
 └── Resources/      # Assets, audio, data files
 ```
 
 Within a feature: `Views/`, `ViewModels/`, optional `Models/`, `Services/`,
 `Coordinators/`. Naming and the per-feature `AccessibilityID+<Feature>.swift`
 convention are in [CONVENTIONS](./CONVENTIONS.md).
+
+> **Coordinator placement.** `CallSessionCoordinator` lives in
+> `Core/Services/Call/`, not under `Features/InCall/`. It is an app-wide service
+> owned by `AppEnvironment` and consumed by multiple features (Recents redial,
+> Contacts/AgentDetail call, the InCall projection), so placing it inside one
+> feature would invert the dependency.
 
 ## App Surface (planned, from the plan)
 
@@ -122,7 +136,9 @@ Modeled on the iOS Phone app — three tabs plus two detail/modal surfaces:
 Three layers (full detail in `voice-agent-callkit-plan.md` and the CI workflow):
 
 - **Layer 1 — logic, simulator, automated.** State machine, connection parsing,
-  transport selection, error handling against fakes. Most bugs live here. Runs in CI.
+  transport selection, error handling against fakes. Most bugs live here. Runs in
+  CI. The `CallSessionCoordinator` + `ReconnectionPolicy` suites
+  (`ConduitTests/Call/`) are the current Layer-1 coverage.
 - **Layer 2 — integration, tethered device, scripted.** Genuine live CallKit +
   WebRTC calls. **Device-only — NOT run on CI simulator runners.**
 - **Layer 3 — audio/routing, manual.** AirPods stand in for the car; validates
