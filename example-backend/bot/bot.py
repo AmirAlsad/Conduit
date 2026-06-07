@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import sys
 
 from pipecat.runner.types import DailyRunnerArguments, RunnerArguments
 from pipecat.runner.utils import create_transport
 
+from app.config import settings
 from bot.runtime import run_bot
 from bot.transport_factory import DEV_TRANSPORT_PARAMS, build_transport
 
@@ -33,7 +33,7 @@ async def bot(runner_args: RunnerArguments) -> None:
     """Dev-runner entry. The runner calls this once per local session."""
     transport = await create_transport(runner_args, DEV_TRANSPORT_PARAMS)
     body = getattr(runner_args, "body", None) or {}
-    agent_id = body.get("agent") or os.getenv("CONDUIT_AGENT", "loopback")
+    agent_id = body.get("agent") or settings.conduit_agent
     await run_bot(
         transport,
         agent_id,

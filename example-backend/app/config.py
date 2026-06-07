@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     bot_name: str = "Conduit Bot"
     default_transport: str = "daily"  # "daily" | "livekit"
 
+    # Dev-runner convenience: which agent `python -m bot.bot` (no dispatch args) runs.
+    conduit_agent: str = "loopback"
+    # loopback: synthesize bot-speaking RTVI state while echoing so the client's glow
+    # can be exercised without a model. False = the truly pure pipe.
+    loopback_bot_speaking: bool = True
+    loopback_rms_threshold: float = 500.0
+
     # Endpointing delay (design §2.2). Silero VAD trailing-silence before a turn is
     # considered ended. Default 0.2 (Smart-Turn's trained value); raise it to give a
     # thinking-partner more silence tolerance, at some latency cost.

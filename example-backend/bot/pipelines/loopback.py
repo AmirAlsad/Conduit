@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import array
 import math
-import os
 import time
 
 from pipecat.frames.frames import (
@@ -79,9 +78,8 @@ class SyntheticBotSpeaking(FrameProcessor):
 def build(transport) -> BotBuild:
     processors = [transport.input()]
 
-    if os.getenv("LOOPBACK_BOT_SPEAKING", "true").lower() != "false":
-        threshold = float(os.getenv("LOOPBACK_RMS_THRESHOLD", "500"))
-        processors.append(SyntheticBotSpeaking(threshold=threshold))
+    if settings.loopback_bot_speaking:
+        processors.append(SyntheticBotSpeaking(threshold=settings.loopback_rms_threshold))
 
     processors.append(transport.output())
 
