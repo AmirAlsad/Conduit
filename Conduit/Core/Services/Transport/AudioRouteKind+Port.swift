@@ -2,10 +2,10 @@
 //  AudioRouteKind+Port.swift
 //  Conduit
 //
-//  Maps a live `AVAudioSession` output port to an `AudioRouteKind`, so the in-call
-//  picker can mark the route that's ACTUALLY active (the source of truth) rather
-//  than trust the transport's "preferred device", which it doesn't report until
-//  the user explicitly picks one.
+//  Maps a live `AVAudioSession` output port to an `AudioRouteKind`. Used to read
+//  the route that's ACTUALLY active (the source of truth) — for the in-call
+//  picker's checkmark, and so the coordinator can make the transport follow a
+//  route the user picks from the native CallKit call screen.
 //
 
 import AVFoundation

@@ -182,6 +182,25 @@ struct CallSessionCoordinatorTests {
         #expect(h.transport.selectedAudioDeviceID == "bluetooth") // didn't yank to speaker
     }
 
+    @Test func systemRouteChangeMakesTransportFollow() async throws {
+        let h = try CoordinatorHarness()
+        h.transport.fakeAudioDevices = [
+            AudioDeviceInfo(id: "bluetooth", name: "Bluetooth Speaker & Mic"),
+            AudioDeviceInfo(id: "speaker", name: "Built-in Speaker & Mic"),
+            AudioDeviceInfo(id: "earpiece", name: "Built-in Earpiece & Mic"),
+        ]
+        await h.transport.setAudioDevice("speaker")
+        await h.coordinator.placeCall(h.agent)
+        h.coordinator.handle(.connected)
+        await waitUntil { h.coordinator.audioDevices.contains { $0.id == "bluetooth" } }
+
+        // The user picks Bluetooth on the native CallKit screen → the system route
+        // changes; the coordinator mirrors it into the transport so Daily follows.
+        await h.coordinator.syncTransportToRoute(matching: .bluetooth)
+
+        #expect(h.transport.selectedAudioDeviceID == "bluetooth")
+    }
+
     @Test func pushToTalkKeepsMicOffOnActivation() async throws {
         let h = try CoordinatorHarness(pushToTalk: true)
         await h.coordinator.placeCall(h.agent)
