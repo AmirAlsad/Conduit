@@ -7,6 +7,29 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### Native CallKit call screen can't control Daily/WebRTC audio output
+First seen: 2026-06-08 (M5b, native route button)
+
+**Pattern:** Tapping the audio/route button on the SYSTEM CallKit call screen
+changes `AVAudioSession.currentRoute` (the metadata) but Daily's WebRTC audio
+engine keeps outputting to the previous device — the route *looks* changed while
+the audio doesn't move. Mirroring the system route into Daily (observe
+`routeChangeNotification` → `setPreferredAudioDevice`) does NOT fix it: it
+reinforces the lying metadata, the audio still doesn't follow, and it races
+Daily's own revert. The real fix (`RTCAudioSession.useManualAudio = true`) needs
+control of WebRTC's audio unit, which the Daily SDK owns and doesn't expose.
+
+**Rule:** Route control must go through the SDK's own API
+(`Daily.setPreferredAudioDevice`, via `PipecatClient.updateMic`) from an **in-app
+picker** — that switches audibly and stays in sync. Treat the native screen's
+audio button as unreliable for SDK-managed audio; don't try to sync system→SDK.
+(Apps also can't present the native call screen for outgoing calls — it's
+system-controlled — so it can't be the primary surface regardless.)
+
+**Why it's missed:** `currentRoute` reports the new route, so logs say "Speaker"
+while the audio is actually on AirPods — only *listening* on a device reveals it.
+Research: medium.com/@tsivilko mastering-voip-audio-with-callkit-and-webrtc.
+
 ### Mic stays off when CallKit activates before the transport connects
 First seen: 2026-06-08 (M5b, pairing-flow device test)
 

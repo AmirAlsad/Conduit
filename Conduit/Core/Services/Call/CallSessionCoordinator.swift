@@ -13,7 +13,6 @@
 //  CallKit owns the session; the transport attaches to it.
 //
 
-import AVFoundation
 import Foundation
 
 @MainActor
@@ -57,7 +56,6 @@ final class CallSessionCoordinator: CallProviderDelegate {
     private var eventTask: Task<Void, Never>?
     private(set) var reconnectTask: Task<Void, Never>?
     private var activationTask: Task<Void, Never>?
-    private var routeObserver: NSObjectProtocol?
 
     init(
         callProvider: CallProviding,
@@ -93,7 +91,6 @@ final class CallSessionCoordinator: CallProviderDelegate {
         activeAgent = agent
         callStartedAt = now()
         state = .dialing
-        observeAudioRouteChanges()
 
         let id: UUID
         do {
@@ -413,29 +410,6 @@ final class CallSessionCoordinator: CallProviderDelegate {
         await refreshAudioDevices()
     }
 
-    /// Make the transport follow a route the system chose — e.g. the user tapping
-    /// the audio button on the native CallKit call screen. The system broadcasts
-    /// the change (`routeChangeNotification`); we mirror it into the transport so
-    /// Daily, which manages its own session, honors it instead of reverting.
-    func syncTransportToRoute(matching kind: AudioRouteKind) async {
-        guard let device = audioDevices.first(where: { AudioRouteKind(deviceID: $0.id) == kind }),
-              device.id != selectedAudioDeviceID
-        else { return }
-        await transport?.setAudioDevice(device.id)
-        await refreshAudioDevices()
-    }
-
-    private func observeAudioRouteChanges() {
-        guard routeObserver == nil else { return }
-        routeObserver = NotificationCenter.default.addObserver(
-            forName: AVAudioSession.routeChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in await self?.syncTransportToRoute(matching: .active) }
-        }
-    }
-
     private func refreshAudioDevices() async {
         audioDevices = await transport?.availableAudioDevices() ?? []
         selectedAudioDeviceID = await transport?.selectedAudioDevice()?.id
@@ -520,10 +494,6 @@ final class CallSessionCoordinator: CallProviderDelegate {
         audioDevices = []
         selectedAudioDeviceID = nil
         didApplyHandsFreeDefault = false
-        if let routeObserver {
-            NotificationCenter.default.removeObserver(routeObserver)
-            self.routeObserver = nil
-        }
     }
 
     private func writeLog(outcome: CallOutcome) {
