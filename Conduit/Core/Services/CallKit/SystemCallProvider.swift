@@ -44,8 +44,15 @@ final class SystemCallProvider: NSObject, CallProviding, CXProviderDelegate {
         let uuid = UUID()
         let cxHandle = CXHandle(type: .emailAddress, value: handle.value)
         let action = CXStartCallAction(call: uuid, handle: cxHandle)
-        action.contactIdentifier = displayName
         try await callController.request(CXTransaction(action: action))
+
+        // Show the agent's name on the call/lock screen instead of the raw
+        // synthetic email handle. The photo (and Contacts/Siri matching) comes
+        // from the optional contact mirror (WS-4); this name shows with or without it.
+        let update = CXCallUpdate()
+        update.localizedCallerName = displayName
+        provider.reportCall(with: uuid, updated: update)
+
         return uuid
     }
 

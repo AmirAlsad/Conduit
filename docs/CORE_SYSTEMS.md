@@ -1,10 +1,11 @@
 # Core Systems
 
-The shared, app-agnostic infrastructure under `Conduit/Core/`. The foundation
-(M0) and the call state machine (M1) are built; the **real** CallKit/transport/
-Keychain/Contacts implementations are still to land (WS-2 Daily transport, WS-3
-CallKit + audio session, WS-4 Keychain/Contacts) — each already has a protocol
-seam and an in-app fake, so everything above them is testable today.
+The shared, app-agnostic infrastructure under `Conduit/Core/`. Built so far: the
+foundation (M0), the call state machine (M1), the Daily transport (M2), the
+CallKit + audio-session seam (M3), and the Keychain + Contacts-mirror reals
+(WS-4). What remains is the feature UI (WS-5) and the native LiveKit transport
+(WS-6). Every external boundary already has a protocol seam and an in-app fake,
+so everything above them is testable at sim speed today.
 
 ## The testability spine: protocol seams + fakes
 
@@ -16,10 +17,10 @@ suite, SwiftUI previews, and the future CallKit-free debug path all reuse them.
 
 | Seam | Protocol (`Core/Services/…`) | Fake (present) | Real (status) |
 |---|---|---|---|
-| CallKit | `CallProviding` + `CallProviderDelegate` + `AudioSessionActivating` (`CallKit/`) | `FakeCallProvider` / `FakeAudioSession` | `SystemCallProvider` — WS-3 |
+| CallKit | `CallProviding` + `CallProviderDelegate` + `AudioSessionActivating` (`CallKit/`) | `FakeCallProvider` / `FakeAudioSession` | `SystemCallProvider` (built, M3) |
 | Transport | `Transport` (`Transport/`) | `FakeTransport` | `PipecatDailyTransport` (built, M2); `LiveKitTransport` — WS-6 |
-| Keychain | `KeychainStoring` (`Keychain/`) | `InMemoryKeychain` | `KeychainService` — WS-4 |
-| Contacts | `ContactsMirroring` (`Contacts/`) | `FakeContactsMirror` | `ContactsService` — WS-4 |
+| Keychain | `KeychainStoring` (`Keychain/`) | `InMemoryKeychain` | `KeychainService` (built, WS-4) |
+| Contacts | `ContactsMirroring` (`Contacts/`) | `FakeContactsMirror` | `ContactsService` (built, WS-4) |
 | Persistence | `AgentRepository` (`Persistence/`) | — | `SwiftDataAgentRepository` (built) |
 
 The `Transport` event surface is Conduit's own vocabulary (`TransportEvent`:
@@ -65,6 +66,32 @@ minted once from the immutable `id` as `<slug>-<id8>.agent.conduit.invalid` — 
 email-type handle on the reserved `.invalid` TLD, so Siri/CallKit read the display
 name rather than the raw ID. `AgentRepository` (main-actor) wraps `ModelContext`
 for mutations and non-view fetches; list screens use `@Query` directly.
+
+## Keychain & the contacts mirror (WS-4)
+
+`KeychainService` (`Keychain/`) stores each agent's connection token as a
+generic-password item keyed by `(service, KeychainTokenRef.account)`, with
+`kSecAttrAccessibleAfterFirstUnlock` so a call can connect from the lock screen /
+CarPlay after the first post-boot unlock. `setToken` is update-or-add (no
+duplicate items on re-save); `token` returns `nil` (not an error) when absent;
+`delete` treats "not found" as success. **The token never leaves the Keychain** —
+SwiftData persists only the `KeychainTokenRef`. The round-trip is unit-tested on
+the simulator under a per-test service namespace.
+
+`ContactsService` (`Contacts/`) is the **optional, per-agent** system-contact
+mirror over `CNContactStore`. When enabled it writes a contact whose email field
+holds the agent's synthetic `.invalid` handle, so iOS matches an outgoing call to
+it and the native call UI shows the agent's **name + photo** instead of the raw
+handle. Lifecycle edges are owned with the caller (WS-5): permission is requested
+only when the toggle is flipped on, `upsertMirror` runs on add/edit,
+`removeMirror` on delete/toggle-off. `removeMirror` gets only the agent id, so it
+locates the contact by the **stable `id8` suffix** of the synthetic email (minted
+once at creation, unchanged on rename) — that suffix-matches-minted-email
+invariant is the key unit test. The `CNContactStore` round-trip needs Contacts
+permission and writes the address book, so it's device/manual-verified; the pure
+mapping (`configure`, `emailSuffix`) is unit-tested. *Known caveat:* an
+app-created contact can linger after the app is uninstalled (iOS gives no
+uninstall hook).
 
 ## Call state machine — `CallSessionCoordinator`
 
@@ -116,14 +143,25 @@ cadence, "Connected"/"Disconnected" once. The real `SpeechSpokenStateAnnouncer`
 uses `AVSpeechSynthesizer`; it must mix with (never deactivate) the
 CallKit-owned session — that ducking/session wiring is finalized in WS-3.
 
-## Audio-session / CallKit integration (pending real impl)
+## Audio-session / CallKit integration (built, M3)
 
-The seam is modeled (`AudioSessionActivating`, the `providerDidActivate` /
-`providerDidDeactivate` callbacks, the route decision), and the ownership
-invariant is enforced and unit-tested against fakes. The real `CXProvider` /
-`CXCallController` wiring, the live `AVAudioSession` activation handshake, route
-defaults on device, and interruption/incoming-PSTN handling land in WS-3 and are
-device-only (Layer 2–3).
+`SystemCallProvider` (`CallKit/`) wraps `CXProvider` + `CXCallController` and
+bridges the `CXProviderDelegate` callbacks onto `CallProviderDelegate`. The
+`CXProviderDelegate` methods are `nonisolated` and hop onto the main actor via
+`MainActor.assumeIsolated` (the delegate queue is `nil` → the main queue).
+`SystemAudioSession` (`AudioSessionActivating`) pre-configures the session
+(`.playAndRecord` / `.voiceChat`, Bluetooth + A2DP + duck) **without activating
+it** — CallKit activates, the coordinator attaches media in `providerDidActivate`,
+and on activation forces speaker only when no external (car/Bluetooth) route is
+present. The seam was device-verified end-to-end in M3: connect + two-way audio +
+Dynamic Island pill + lock-screen call screen + clean teardown.
+
+On an outgoing call, `SystemCallProvider` reports a `CXCallUpdate` with
+`localizedCallerName` set to the agent's name, so the call/lock screen shows the
+name rather than the raw synthetic email handle. The **photo** (and
+Contacts/Siri matching) comes from the optional contact mirror above; the name
+shows with or without it. Device-only (CallKit doesn't run in the sim);
+interruption / incoming-PSTN handling is the remaining device-flagged work.
 
 ## Shared utilities
 
