@@ -52,6 +52,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
     private var callStartedAt: Date?
     private var firstConnectedAt: Date?
     private var reconnectAttempt = 0
+    private var didApplyHandsFreeDefault = false
     private var eventTask: Task<Void, Never>?
     private(set) var reconnectTask: Task<Void, Never>?
     private var activationTask: Task<Void, Never>?
@@ -181,7 +182,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
             remoteAudioLevel = level
 
         case .audioDevicesChanged:
-            Task { [weak self] in await self?.refreshAudioDevices() }
+            Task { [weak self] in await self?.updateAudioDevices() }
 
         case .error(let error):
             handleError(error)
@@ -198,6 +199,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
             announcer.stopRepeating()
             announcer.announce(.connected)
             applyMicIfActivated()
+            Task { [weak self] in await self?.updateAudioDevices() }
             Log.info(.call, "Connected")
 
         case .reconnecting:
@@ -327,20 +329,33 @@ final class CallSessionCoordinator: CallProviderDelegate {
     /// Attach media to the CallKit-activated session. THE ONLY place media attaches.
     func activate(_ audioSession: AudioSessionActivating) async {
         isAudioActivated = true
-        // Route decision (hands-free default): force speaker only when no external
-        // route is present, so we never yank audio off a connected car/Bluetooth.
-        do {
-            if !audioSession.hasExternalAudioRoute {
-                try audioSession.overrideOutputToSpeaker()
-            }
-        } catch {
-            Log.error(.audio, "Output route override failed: \(error)")
-        }
         await transport?.attachAudioSession()
         // Enabling the mic only takes effect once the transport is connected. If
         // CallKit activates BEFORE connect (e.g. a slow pairing fetch delays the
         // join), this is a no-op and the mic is (re)enabled in `handleConnected`.
         await transport?.setMicEnabled(micShouldBeOn)
+        await refreshAudioDevices()
+    }
+
+    /// Hands-free default: prefer the loudspeaker when nothing external (car /
+    /// Bluetooth / wired) is connected, so call audio isn't stuck on the quiet
+    /// earpiece. Driven through the transport (an AVAudioSession override doesn't
+    /// stick — the WebRTC SDK manages the session and reverts it). Runs once per
+    /// call, after connect, when the device list is populated.
+    private func applyHandsFreeDefaultIfNeeded() async {
+        // Caller refreshes the device list first; bail until it's populated so a
+        // later trigger (connect / devices-changed) can apply the default instead.
+        guard !didApplyHandsFreeDefault, !audioDevices.isEmpty else { return }
+        didApplyHandsFreeDefault = true
+
+        let hasExternalRoute = audioDevices.contains {
+            let kind = AudioRouteKind(deviceID: $0.id)
+            return kind == .bluetooth || kind == .wired
+        }
+        guard !hasExternalRoute,
+              let speaker = audioDevices.first(where: { AudioRouteKind(deviceID: $0.id) == .speaker })
+        else { return }
+        await transport?.setAudioDevice(speaker.id)
         await refreshAudioDevices()
     }
 
@@ -398,6 +413,13 @@ final class CallSessionCoordinator: CallProviderDelegate {
     private func refreshAudioDevices() async {
         audioDevices = await transport?.availableAudioDevices() ?? []
         selectedAudioDeviceID = await transport?.selectedAudioDevice()?.id
+    }
+
+    /// Refresh the route list (keeps the picker live) and apply the hands-free
+    /// default once it's available. Called on connect and on device changes.
+    private func updateAudioDevices() async {
+        await refreshAudioDevices()
+        await applyHandsFreeDefaultIfNeeded()
     }
 
     /// Return to idle after a terminal state (called by the UI on dismiss).
@@ -471,6 +493,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
         isAudioActivated = false
         audioDevices = []
         selectedAudioDeviceID = nil
+        didApplyHandsFreeDefault = false
     }
 
     private func writeLog(outcome: CallOutcome) {

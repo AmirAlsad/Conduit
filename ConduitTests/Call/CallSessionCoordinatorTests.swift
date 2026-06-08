@@ -145,7 +145,7 @@ struct CallSessionCoordinatorTests {
 
     // MARK: - Audio-session handshake (the ownership invariant)
 
-    @Test func activationAttachesMediaAndRoutesToSpeakerWithoutExternalRoute() async throws {
+    @Test func activationAttachesMediaAndEnablesMic() async throws {
         let h = try CoordinatorHarness()
         await h.coordinator.placeCall(h.agent)
         h.coordinator.handle(.connected)
@@ -153,20 +153,33 @@ struct CallSessionCoordinatorTests {
         let session = FakeAudioSession(hasExternalAudioRoute: false)
         await h.coordinator.activate(session)
 
-        #expect(session.didOverrideToSpeaker)
         #expect(h.transport.isAudioAttached)
         #expect(h.transport.isMicEnabled)
     }
 
-    @Test func activationDoesNotForceSpeakerWhenExternalRoutePresent() async throws {
-        let h = try CoordinatorHarness()
+    @Test func handsFreeDefaultRoutesToSpeakerWithoutExternalRoute() async throws {
+        let h = try CoordinatorHarness() // FakeTransport routes: speaker + receiver (no external)
+        await h.transport.setAudioDevice("receiver") // start on the earpiece
         await h.coordinator.placeCall(h.agent)
+        h.coordinator.handle(.connected)
 
-        let session = FakeAudioSession(hasExternalAudioRoute: true)
-        await h.coordinator.activate(session)
+        await waitUntil { h.transport.selectedAudioDeviceID == "speaker" }
+        #expect(h.transport.selectedAudioDeviceID == "speaker")
+    }
 
-        #expect(!session.didOverrideToSpeaker)
-        #expect(h.transport.isAudioAttached)
+    @Test func handsFreeDefaultLeavesExternalRouteAlone() async throws {
+        let h = try CoordinatorHarness()
+        h.transport.fakeAudioDevices = [
+            AudioDeviceInfo(id: "bluetooth", name: "Bluetooth Speaker & Mic"),
+            AudioDeviceInfo(id: "speaker", name: "Built-in Speaker & Mic"),
+            AudioDeviceInfo(id: "earpiece", name: "Built-in Earpiece & Mic"),
+        ]
+        await h.transport.setAudioDevice("bluetooth") // on AirPods
+        await h.coordinator.placeCall(h.agent)
+        h.coordinator.handle(.connected)
+
+        await waitUntil { h.coordinator.audioDevices.contains { $0.id == "bluetooth" } }
+        #expect(h.transport.selectedAudioDeviceID == "bluetooth") // didn't yank to speaker
     }
 
     @Test func pushToTalkKeepsMicOffOnActivation() async throws {
@@ -327,7 +340,6 @@ struct CallSessionCoordinatorTests {
         h.provider.simulateActivate(session) // the real CallKit delegate path
         await h.coordinator.awaitPendingActivation()
 
-        #expect(session.didOverrideToSpeaker)
         #expect(h.transport.isAudioAttached)
         #expect(h.transport.isMicEnabled)
     }

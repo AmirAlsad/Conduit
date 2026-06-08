@@ -7,12 +7,14 @@
 //  Every control just forwards intent to the coordinator; all call logic lives there.
 //
 
+import AVFoundation
 import SwiftUI
 
 struct InCallView: View {
     @Environment(AppEnvironment.self) private var environment
     @AppStorage(SettingsStore.pushToTalkKey) private var pushToTalk = false
     @State private var isHolding = false
+    @State private var activeRouteKind: AudioRouteKind = .other
 
     private var coordinator: CallSessionCoordinator { environment.callSession }
 
@@ -42,6 +44,10 @@ struct InCallView: View {
                 coordinator.reset()
             }
         }
+        .onAppear { activeRouteKind = .active }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
+            activeRouteKind = .active
+        }
         #if DEBUG
         .task { await traceCall() }
         #endif
@@ -56,7 +62,14 @@ struct InCallView: View {
         var last = ""
         while !Task.isCancelled {
             let c = coordinator
-            let snapshot = "state=\(c.state) muted=\(c.isMuted) audioActivated=\(c.isAudioActivated) botSpeaking=\(c.isBotSpeaking)"
+            let devices = c.audioDevices.map { "\($0.id)|\($0.name)" }.joined(separator: " ;; ")
+            let route = AVAudioSession.sharedInstance().currentRoute.outputs
+                .map { "\($0.portType.rawValue):\($0.portName)" }
+                .joined(separator: ",")
+            let snapshot = """
+            state=\(c.state) muted=\(c.isMuted) audioActivated=\(c.isAudioActivated) \
+            selected=\(c.selectedAudioDeviceID ?? "nil") activeRoute=[\(route)] devices=[\(devices)]
+            """
             if snapshot != last {
                 CallTrace.record(snapshot)
                 last = snapshot
@@ -216,13 +229,13 @@ struct InCallView: View {
         Menu {
             Picker("Audio Output", selection: routeSelection) {
                 ForEach(sortedDevices) { device in
-                    Label(AudioRouteDisplay.name(for: device.name),
-                          systemImage: AudioRouteDisplay.icon(for: device.name))
+                    let kind = AudioRouteKind(deviceID: device.id)
+                    Label(kind.displayName, systemImage: kind.iconName)
                         .tag(Optional(device.id))
                 }
             }
         } label: {
-            controlCircle(systemImage: selectedRouteIcon, filled: false)
+            controlCircle(systemImage: activeRouteKind.iconName, filled: false)
         }
         .accessibilityLabel("Audio Output")
         .accessibilityIdentifier(AccessibilityID.InCall.routePicker)
@@ -230,20 +243,22 @@ struct InCallView: View {
 
     private var sortedDevices: [AudioDeviceInfo] {
         coordinator.audioDevices.sorted {
-            AudioRouteDisplay.rank(for: $0.name) < AudioRouteDisplay.rank(for: $1.name)
+            AudioRouteKind(deviceID: $0.id).sortRank < AudioRouteKind(deviceID: $1.id).sortRank
         }
     }
 
+    /// The Picker's selection is the route that's ACTUALLY active (from
+    /// AVAudioSession), not the transport's preferred device — which stays nil
+    /// until the user explicitly picks one, so the checkmark would never show.
     private var routeSelection: Binding<String?> {
         Binding(
-            get: { coordinator.selectedAudioDeviceID },
+            get: { activeDeviceID },
             set: { if let id = $0 { Task { await coordinator.selectAudioDevice(id) } } }
         )
     }
 
-    private var selectedRouteIcon: String {
-        let name = coordinator.audioDevices.first { $0.id == coordinator.selectedAudioDeviceID }?.name ?? ""
-        return AudioRouteDisplay.icon(for: name)
+    private var activeDeviceID: String? {
+        coordinator.audioDevices.first { AudioRouteKind(deviceID: $0.id) == activeRouteKind }?.id
     }
 
     // MARK: - End button
