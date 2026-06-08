@@ -332,6 +332,27 @@ struct CallSessionCoordinatorTests {
         #expect(h.transport.isMicEnabled)
     }
 
+    @Test func micReappliedOnConnectWhenActivationCameFirst() async throws {
+        let h = try CoordinatorHarness()
+        await h.coordinator.placeCall(h.agent)
+
+        // CallKit activates the session BEFORE the transport reports connected —
+        // the race a slow pairing fetch exposes. The one-shot enable in activate()
+        // can't turn on a not-yet-joined mic, so the coordinator must re-apply it
+        // once connected. (The fake doesn't model the no-op, so we assert the
+        // re-apply happens, not the device-only end state.)
+        let session = FakeAudioSession(hasExternalAudioRoute: false)
+        h.provider.simulateActivate(session)
+        await h.coordinator.awaitPendingActivation()
+        #expect(h.coordinator.isAudioActivated)
+        let callsBeforeConnect = h.transport.setMicEnabledCallCount
+
+        h.transport.emit(.connected)
+        await waitUntil { h.transport.setMicEnabledCallCount > callsBeforeConnect }
+        #expect(h.transport.setMicEnabledCallCount > callsBeforeConnect)
+        #expect(h.transport.isMicEnabled)
+    }
+
     @Test func transportEventsReachCoordinatorViaStream() async throws {
         let h = try CoordinatorHarness()
         await h.coordinator.placeCall(h.agent)

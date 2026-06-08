@@ -18,6 +18,7 @@ final class FakeTransport: Transport, @unchecked Sendable {
     private(set) var disconnectCount = 0
     private(set) var lastConfig: TransportConfig?
     private(set) var isMicEnabled = false
+    private(set) var setMicEnabledCallCount = 0
     private(set) var isAudioAttached = false
 
     /// When set, the next `connect(_:)` throws this instead of succeeding.
@@ -41,6 +42,7 @@ final class FakeTransport: Transport, @unchecked Sendable {
 
     func setMicEnabled(_ enabled: Bool) async {
         isMicEnabled = enabled
+        setMicEnabledCallCount += 1
     }
 
     func attachAudioSession() async {

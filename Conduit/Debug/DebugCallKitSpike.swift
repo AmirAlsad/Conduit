@@ -33,16 +33,7 @@ enum DebugCallKitSpike {
         let agentID = env["CONDUIT_DEBUG_AGENT_ID"] ?? "live"
 
         truncateLog()
-        record("SPIKE START agent=\(agentID)")
-
-        let creds: DebugEngineConnect.DailyCreds
-        do {
-            creds = try await DebugEngineConnect.fetchDaily(baseURL: baseURL, apiKey: apiKey, agentID: agentID)
-        } catch {
-            record("PAIR-FAILED \(error)")
-            return
-        }
-        record("PAIRED room=\(creds.roomURL.host() ?? "?")")
+        record("SPIKE START agent=\(agentID) (in-app pairing)")
 
         let container: ModelContainer
         do {
@@ -55,12 +46,24 @@ enum DebugCallKitSpike {
             return
         }
         let repository = SwiftDataAgentRepository(context: container.mainContext)
-        let agent = Agent(name: "Conduit Spike", detail: agentID, transportKind: .daily, connectionURL: creds.roomURL)
+
+        // Exercise the real in-app pairing path: the transport POSTs this endpoint
+        // (via PairingClient) for a fresh room+token per call, rather than the spike
+        // pre-fetching them. This is what the user-facing add-agent flow does.
+        let pairingEndpoint = baseURL.appendingPathComponent("connect")
+        let agent = Agent(
+            name: "Conduit Spike",
+            detail: agentID,
+            transportKind: .daily,
+            pairingEndpoint: pairingEndpoint,
+            pairingAgentID: agentID
+        )
         repository.insert(agent)
         try? repository.save()
 
         let keychain = InMemoryKeychain()
-        try? keychain.setToken(creds.token, for: KeychainTokenRef(account: agent.keychainTokenRef))
+        try? keychain.setToken(apiKey, for: KeychainTokenRef(account: agent.keychainTokenRef))
+        record("agent created (pairing endpoint host=\(pairingEndpoint.host() ?? "?"))")
 
         let coordinator = CallSessionCoordinator(
             callProvider: SystemCallProvider(),
@@ -80,9 +83,14 @@ enum DebugCallKitSpike {
         // the agent's greet. Records state and bot-speaking transitions.
         var lastState = ""
         var lastSpeaking = false
+        var lastActivated = false
         for _ in 0..<90 {
             let state = String(describing: coordinator.state)
             if state != lastState { record("state=\(state)"); lastState = state }
+            if coordinator.isAudioActivated != lastActivated {
+                record("audioActivated=\(coordinator.isAudioActivated)")
+                lastActivated = coordinator.isAudioActivated
+            }
             if coordinator.isBotSpeaking != lastSpeaking {
                 record("botSpeaking=\(coordinator.isBotSpeaking)")
                 lastSpeaking = coordinator.isBotSpeaking

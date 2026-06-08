@@ -26,6 +26,8 @@ final class CallSessionCoordinator: CallProviderDelegate {
     private(set) var isMuted = false
     private(set) var isBotSpeaking = false
     private(set) var remoteAudioLevel: Float = 0
+    /// Whether CallKit has activated the audio session for the live call.
+    private(set) var isAudioActivated = false
 
     // MARK: - Dependencies
 
@@ -189,6 +191,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
             if let id = activeCallID { callProvider.reportOutgoingCallConnected(id) }
             announcer.stopRepeating()
             announcer.announce(.connected)
+            applyMicIfActivated()
             Log.info(.call, "Connected")
 
         case .reconnecting:
@@ -198,10 +201,22 @@ final class CallSessionCoordinator: CallProviderDelegate {
             state = .connected(since: firstConnectedAt ?? now())
             announcer.stopRepeating()
             announcer.announce(.connected)
+            applyMicIfActivated()
             Log.info(.call, "Reconnected")
 
         default:
             break
+        }
+    }
+
+    /// Re-apply the mic state once connected — covers the case where CallKit
+    /// activated the audio session before the transport finished connecting (so
+    /// the `activate(_:)` call to `setMicEnabled` no-op'd on a not-yet-joined client).
+    private func applyMicIfActivated() {
+        guard isAudioActivated else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.transport?.setMicEnabled(self.micShouldBeOn)
         }
     }
 
@@ -305,6 +320,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
 
     /// Attach media to the CallKit-activated session. THE ONLY place media attaches.
     func activate(_ audioSession: AudioSessionActivating) async {
+        isAudioActivated = true
         // Route decision (hands-free default): force speaker only when no external
         // route is present, so we never yank audio off a connected car/Bluetooth.
         do {
@@ -315,11 +331,15 @@ final class CallSessionCoordinator: CallProviderDelegate {
             Log.error(.audio, "Output route override failed: \(error)")
         }
         await transport?.attachAudioSession()
+        // Enabling the mic only takes effect once the transport is connected. If
+        // CallKit activates BEFORE connect (e.g. a slow pairing fetch delays the
+        // join), this is a no-op and the mic is (re)enabled in `handleConnected`.
         await transport?.setMicEnabled(micShouldBeOn)
     }
 
     func providerDidDeactivate(_ audioSession: AudioSessionActivating) {
         Log.info(.callkit, "Audio session deactivated")
+        isAudioActivated = false
         Task { [weak self] in await self?.transport?.detachAudioSession() }
     }
 
@@ -429,6 +449,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
         isMuted = false
         isBotSpeaking = false
         remoteAudioLevel = 0
+        isAudioActivated = false
     }
 
     private func writeLog(outcome: CallOutcome) {

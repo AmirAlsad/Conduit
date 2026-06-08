@@ -7,6 +7,27 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### Mic stays off when CallKit activates before the transport connects
+First seen: 2026-06-08 (M5b, pairing-flow device test)
+
+**Pattern:** With the pairing flow, `transport.connect` does an HTTP POST
+(`PairingClient`) before joining Daily, which delays the join. CallKit, meanwhile,
+fires `providerDidActivate` right after the start action is fulfilled — i.e.
+BEFORE the transport is connected. The coordinator's `activate(_:)` called
+`setMicEnabled(true)` once, but Daily's `enableMic` is a no-op on a not-yet-joined
+client, so the mic never came on (no uplink, no permission prompt) even though
+downlink audio played (Daily manages its own session). The direct path connected
+fast enough to win the race, so it never showed. Device log proved the order:
+`audioActivated=true` → `connected`.
+
+**Fix/Rule:** Don't treat audio-activation as a one-shot mic enable. Re-apply the
+mic state whenever EITHER edge fires — on `providerDidActivate` AND on `.connected`
+(gated by an `isAudioActivated` flag) — so whichever lands last turns the mic on.
+
+**Why it's missed:** `FakeTransport.setMicEnabled` isn't connection-gated (it flips
+the flag regardless), so the race is invisible in the unit suite; only a real
+Daily client on device exhibits the no-op-before-join. See `potential_skills/callkit.md`.
+
 ### snapshot_ui returns 0×0 / coordinate taps no-op (UI automation flaky)
 First seen: 2026-06-08 (WS-5 batch 1, verifying the Contacts/Add flow)
 
