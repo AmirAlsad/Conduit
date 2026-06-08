@@ -18,6 +18,9 @@ struct ConduitApp: App {
             RootTabView()
                 .environment(environment)
                 .modelContainer(environment.modelContainer)
+                #if DEBUG
+                .task { await DebugDailyAutoConnect.runIfRequested() }
+                #endif
         }
     }
 }

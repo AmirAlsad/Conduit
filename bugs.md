@@ -7,6 +7,24 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### Daily/WebRTC audio aborts in the iOS Simulator (device-only)
+First seen: 2026-06-07 (M2 connect-and-downlink)
+
+**Pattern:** Calling `transport.connect` (joining a Daily room) from the iOS
+Simulator crashes with SIGABRT in Daily's bundled WebRTC audio device module:
+`webrtc::ios_adm::AudioDeviceIOS::InitPlayout` → `AURemoteIO::Initialize` /
+`AUVoiceIO::SetProperty` → AudioToolbox `_ReportRPCTimeout` → `abort`. The
+voice-processing I/O (VPIO) audio unit WebRTC uses for echo cancellation has no
+working HAL in the simulator. Pairing (`/connect`) and SDP/media negotiation
+succeed first, so it looks like a mid-connect crash, not an audio-unit limit.
+
+**Rule:** Anything that brings up Daily/WebRTC audio is **device-only**. Guard sim
+paths with `#if targetEnvironment(simulator)` to pair/negotiate but skip the audio
+connect. Verify real connect + downlink + two-way audio on a device.
+
+**Why it's missed:** The abort is on a background WebRTC thread (uncatchable
+SIGABRT), deep in the SDK, and only after pairing/negotiation appear to succeed.
+
 ### CallKit terminal transitions must be idempotent (end round-trips)
 First seen: 2026-06-07 (M1 review, before commit)
 

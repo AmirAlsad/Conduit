@@ -38,11 +38,26 @@ struct RootTabView: View {
 
             Tab("Settings", systemImage: "gearshape") {
                 NavigationStack {
-                    ContentUnavailableView(
-                        "Settings",
-                        systemImage: "gearshape",
-                        description: Text("Always-listening, push-to-talk, and About.")
-                    )
+                    Group {
+                        #if DEBUG
+                        List {
+                            Section("Developer") {
+                                NavigationLink {
+                                    DebugDailyConnectView()
+                                } label: {
+                                    Label("Daily connect (debug)", systemImage: "ladybug")
+                                }
+                                .accessibilityIdentifier(AccessibilityID.Debug.dailyConnectLink)
+                            }
+                        }
+                        #else
+                        ContentUnavailableView(
+                            "Settings",
+                            systemImage: "gearshape",
+                            description: Text("Always-listening, push-to-talk, and About.")
+                        )
+                        #endif
+                    }
                     .navigationTitle("Settings")
                     .accessibilityIdentifier(AccessibilityID.Root.tab(2))
                 }

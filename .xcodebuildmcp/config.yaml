@@ -1,0 +1,9 @@
+# XcodeBuildMCP workflow enablement.
+# Default is ["simulator"]. We add:
+#  - device:        build / install / launch on a tethered iPhone (device-only
+#                   layers: real CallKit, Daily/WebRTC audio — see CLAUDE.md).
+#  - ui-automation: tap / type / screenshot, to drive on-device verification
+#                   (reading files off a physical device isn't possible like the sim).
+# Reload the session after changing this so the new tools are exposed.
+schemaVersion: 1
+enabledWorkflows: ["simulator", "device", "ui-automation"]
