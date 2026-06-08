@@ -85,6 +85,7 @@ ConduitUITests/           # UI tests (iPhone 16 / iOS 18.6)
 - **Comments.** Default to none; well-named identifiers self-document. When you must, explain WHY (a constraint, invariant, workaround), never WHAT, and never reference the task/callers ("added for X") — that context rots.
 - **Dead code.** Remove it, don't comment it out; also drop backwards-compat shims and `// removed:` markers.
 - **Dependencies.** No new SPM dependencies without explicit approval — propose first.
+- **Git workflow.** Solo repo — commit and push **directly to `main`** when asked. Don't create feature branches or open PRs for routine work.
 - **No backend / Firebase / analytics.** Never introduce any. Credentials are user-supplied, live in the Keychain, and never touch a contact, a log, or source control.
 - **Don't** launch the sim for pure code changes, `clean` reflexively, commit secrets or the generated `Conduit.xcodeproj`, or write screenshots/logs into the repo (those go to `/tmp/`).
 
