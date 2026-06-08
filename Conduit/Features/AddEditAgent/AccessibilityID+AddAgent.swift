@@ -12,6 +12,7 @@ extension AccessibilityID {
         static let screen = "AddAgent_Screen"
         static let nameField = "AddAgent_NameField"
         static let detailField = "AddAgent_DetailField"
+        static let photoPicker = "AddAgent_PhotoPicker"
         static let transportPicker = "AddAgent_TransportPicker"
         static let urlField = "AddAgent_URLField"
         static let tokenField = "AddAgent_TokenField"

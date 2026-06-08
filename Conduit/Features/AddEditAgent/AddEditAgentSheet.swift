@@ -7,10 +7,12 @@
 //  all validation, persistence, and test-connection logic lives there.
 //
 
+import PhotosUI
 import SwiftUI
 
 struct AddEditAgentSheet: View {
     @State private var viewModel: AddEditAgentViewModel
+    @State private var photoItem: PhotosPickerItem?
     @Environment(\.dismiss) private var dismiss
 
     init(editing: Agent? = nil, environment: AppEnvironment) {
@@ -56,11 +58,48 @@ struct AddEditAgentSheet: View {
 
     private var identitySection: some View {
         Section("Identity") {
+            avatarPicker
             TextField("Name", text: $viewModel.name)
                 .accessibilityIdentifier(AccessibilityID.AddAgent.nameField)
             TextField("Label (optional)", text: $viewModel.detail)
                 .accessibilityIdentifier(AccessibilityID.AddAgent.detailField)
         }
+    }
+
+    private var avatarPicker: some View {
+        let hasPhoto = viewModel.avatarData != nil
+        return VStack(spacing: 12) {
+            AgentAvatarView(name: viewModel.name, imageData: viewModel.avatarData, size: 88)
+
+            PhotosPicker(
+                selection: $photoItem,
+                matching: .images,
+                photoLibrary: .shared()
+            ) {
+                Text(hasPhoto ? "Change Photo" : "Add Photo")
+            }
+            .accessibilityIdentifier(AccessibilityID.AddAgent.photoPicker)
+
+            if hasPhoto {
+                Button("Remove Photo", role: .destructive) {
+                    viewModel.avatarData = nil
+                    photoItem = nil
+                }
+                .font(.callout)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .listRowBackground(Color.clear)
+        .onChange(of: photoItem) { _, item in
+            Task { await loadAvatar(item) }
+        }
+    }
+
+    @MainActor
+    private func loadAvatar(_ item: PhotosPickerItem?) async {
+        guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+        let avatar = await Task.detached { UIImage(data: data)?.conduitAvatarData() }.value
+        viewModel.avatarData = avatar ?? data
     }
 
     private var pairingSection: some View {

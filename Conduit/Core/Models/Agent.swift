@@ -51,7 +51,7 @@ final class Agent {
         self.name = name
         self.detail = detail
         self.avatarData = avatarData
-        self.syntheticEmail = Agent.makeSyntheticEmail(name: name, id: id)
+        self.syntheticEmail = Agent.makeSyntheticEmail(name: name)
         self.transportKindRaw = transportKind.rawValue
         self.connectionURL = connectionURL
         self.pairingEndpoint = pairingEndpoint

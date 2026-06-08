@@ -15,8 +15,9 @@
 import Contacts
 
 enum AgentContactBuilder {
-    /// Custom email label tagging Conduit-created entries in the address book.
-    static let emailLabel = "Conduit"
+    /// Neutral system label ("other") for the synthetic email — the `@conduit.invalid`
+    /// value already identifies it, so no need for a prominent custom label.
+    static let emailLabel = CNLabelOther
 
     static func makeContact(from info: AgentMirrorInfo) -> CNMutableContact {
         let contact = CNMutableContact()
