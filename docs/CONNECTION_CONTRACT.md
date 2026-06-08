@@ -45,16 +45,23 @@ Authorization: Bearer <API key>      # the key the user entered; omitted if blan
 Return **HTTP 2xx** with a JSON body carrying the room URL and the access token.
 Conduit accepts either of these shapes:
 
-**Flat** (this is what a default Pipecat `/connect` server already returns):
+**Flat** (this is what a default Pipecat `/connect` server already returns) — Daily:
 
 ```json
-{ "room_url": "https://your-domain.daily.co/abc123", "token": "eyJhbGci..." }
+{ "room_url": "https://your-domain.daily.co/abc123", "token": "<daily-meeting-token>" }
 ```
 
-**Nested** under a `connection` object:
+The **same shape** for LiveKit — the URL is your LiveKit server `wss://` URL and the
+token is a LiveKit access token:
 
 ```json
-{ "connection": { "room_url": "https://your-domain.daily.co/abc123", "token": "eyJhbGci..." } }
+{ "room_url": "wss://your-project.livekit.cloud", "token": "<livekit-access-token-jwt>" }
+```
+
+**Nested** under a `connection` object (accepted for either transport):
+
+```json
+{ "connection": { "room_url": "...", "token": "..." } }
 ```
 
 Accepted keys, precisely:
@@ -65,11 +72,14 @@ Accepted keys, precisely:
 | Token | `token` | yes |
 | Wrapper | top level **or** nested under `connection` | either works |
 
-For **Daily**, `room_url` is the room URL (`https://<domain>.daily.co/<room>`) and
-`token` is a Daily meeting token. For **LiveKit**, put the LiveKit server URL
-(`wss://<project>.livekit.cloud`) under `room_url`/`roomUrl` and the participant
-access token under `token`. If your token server returns the URL under a different
-key (e.g. LiveKit's `serverUrl`), map it to `room_url`/`roomUrl` in the response.
+Per transport:
+- **Daily:** `room_url` is the room URL (`https://<domain>.daily.co/<room>`); `token`
+  is a Daily meeting token scoped to that room.
+- **LiveKit:** `room_url` is your LiveKit **server** URL (`wss://<project>.livekit.cloud`),
+  the same for every call; `token` is a LiveKit **access token** (a JWT) carrying a
+  join grant for the specific room. If your token server names the URL `serverUrl` or
+  `url`, map it to `room_url`/`roomUrl` in the response — Conduit reads only
+  `room_url`/`roomUrl`.
 
 ### Errors
 
@@ -103,6 +113,31 @@ async def connect(req: PairRequest, authorization: str | None = Header(default=N
 
 > If you already run a **default Pipecat** server, its `/connect` route is likely
 > compatible as-is: point Conduit's pairing endpoint at it.
+
+For **LiveKit**, the endpoint mints an access token and ensures your agent is
+dispatched to the room (the URL stays constant — the token scopes the room):
+
+```python
+from livekit import api  # livekit-server-sdk
+
+@app.post("/connect")
+async def connect(req: PairRequest, authorization: str | None = Header(default=None)):
+    if authorization != f"Bearer {EXPECTED_API_KEY}":
+        raise HTTPException(status_code=401)
+    room = f"conduit-{uuid4().hex}"
+    token = (api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+             .with_identity("caller")
+             .with_grants(api.VideoGrants(room_join=True, room=room))
+             .to_jwt())
+    # Make sure your agent joins `room` (e.g. LiveKit Agents explicit dispatch).
+    await dispatch_agent_to(room)
+    return {"room_url": "wss://your-project.livekit.cloud", "token": token}
+```
+
+> **LiveKit: the agent must be a participant.** Conduit marks the call connected only
+> once the room connects **and** a remote participant (your agent) is present — so
+> dispatch/join the agent to that room when you mint the token. If no agent joins, the
+> call sits at "connecting." (On Daily the same principle holds via the Pipecat bot.)
 
 ---
 

@@ -1,11 +1,13 @@
 # Architecture
 
-> Status: the foundation (M0) and the call state machine (M1) are built —
-> `Core/Models/` and `Core/Services/` are populated (protocol seams + fakes,
-> SwiftData models, `AppEnvironment`, `CallSessionCoordinator`, reconnection,
-> spoken state). The `Features/` modules and `Shared/` components are not yet
-> built, and the **real** CallKit/transport/Keychain/Contacts implementations are
-> pending (WS-2/3/4). See [CORE_SYSTEMS](./CORE_SYSTEMS.md) for what exists today.
+> Status: built through **M6**. `Core/Models/` and `Core/Services/` are populated
+> (protocol seams + fakes, SwiftData models, `AppEnvironment`,
+> `CallSessionCoordinator`, reconnection, spoken state); all `Features/` modules and
+> `Shared/` components are built; the **real** implementations are in —
+> CallKit (`SystemCallProvider`, M3), both transports (`PipecatDailyTransport` M2,
+> `LiveKitTransport` M6), and Keychain (`KeychainService`). Adding an agent to
+> Contacts is permission-free (system Add-Contact sheet). Remaining: device
+> verification of the LiveKit call path. See [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 ## Overview
 

@@ -123,7 +123,17 @@ struct AddEditAgentSheet: View {
         } header: {
             Text("Connection")
         } footer: {
-            Text("Conduit POSTs this endpoint with your API key as a bearer token to get a fresh room and token for each call — the usual setup for a Pipecat or LiveKit server. The endpoint identifies the agent, so for multiple agents use one endpoint each. The key is stored only in your device Keychain.")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Conduit POSTs this endpoint with your API key as a bearer token to get a fresh room and token for each call — the usual setup for a Pipecat or LiveKit server. The endpoint identifies the agent, so for multiple agents use one endpoint each. The key is stored only in your device Keychain.")
+                if viewModel.transportKind == .daily {
+                    Label {
+                        Text("On Daily, switch the speaker/Bluetooth output from Conduit's in-call controls — Daily doesn't follow the system call screen's audio button, so only the in-app picker moves the sound. LiveKit doesn't have this limit.")
+                    } icon: {
+                        Image(systemName: "info.circle")
+                    }
+                    .accessibilityIdentifier(AccessibilityID.AddAgent.dailyAudioNotice)
+                }
+            }
         }
     }
 
