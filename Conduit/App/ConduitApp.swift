@@ -15,7 +15,7 @@ struct ConduitApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootTabView()
+            rootView
                 .environment(environment)
                 .modelContainer(environment.modelContainer)
                 #if DEBUG
@@ -28,5 +28,21 @@ struct ConduitApp: App {
                 }
                 #endif
         }
+    }
+
+    @ViewBuilder
+    private var rootView: some View {
+        #if DEBUG
+        // CONDUIT_DEBUG_INCALL=1 boots straight into the in-call surface (idle
+        // coordinator) so its look can be screenshotted in the simulator without
+        // placing a real call.
+        if ProcessInfo.processInfo.environment["CONDUIT_DEBUG_INCALL"] == "1" {
+            InCallView()
+        } else {
+            RootTabView()
+        }
+        #else
+        RootTabView()
+        #endif
     }
 }

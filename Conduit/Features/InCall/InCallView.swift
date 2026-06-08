@@ -42,7 +42,30 @@ struct InCallView: View {
                 coordinator.reset()
             }
         }
+        #if DEBUG
+        .task { await traceCall() }
+        #endif
     }
+
+    #if DEBUG
+    /// Poll the coordinator and log every change for the duration this screen is up
+    /// (i.e. the call). Pulled off-device to diagnose mute/state behavior.
+    private func traceCall() async {
+        CallTrace.reset()
+        CallTrace.record("trace start")
+        var last = ""
+        while !Task.isCancelled {
+            let c = coordinator
+            let snapshot = "state=\(c.state) muted=\(c.isMuted) audioActivated=\(c.isAudioActivated) botSpeaking=\(c.isBotSpeaking)"
+            if snapshot != last {
+                CallTrace.record(snapshot)
+                last = snapshot
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        CallTrace.record("trace end")
+    }
+    #endif
 
     // MARK: - Background
 
@@ -187,8 +210,10 @@ struct InCallView: View {
     // MARK: - Route picker
 
     private var routePicker: some View {
-        RoutePickerView()
-            .frame(width: 44, height: 44)
+        // Sized to match the other control circles; AVRoutePickerView draws its own
+        // glyph, so we frame + background it identically rather than use controlCircle.
+        RoutePickerView(tint: .white)
+            .frame(width: 64, height: 64)
             .background(.white.opacity(0.15), in: .circle)
             .accessibilityLabel("Audio Output")
             .accessibilityIdentifier(AccessibilityID.InCall.routePicker)
