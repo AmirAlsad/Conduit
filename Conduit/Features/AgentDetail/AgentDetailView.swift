@@ -21,6 +21,12 @@ struct AgentDetailView: View {
         agent.callLog.sorted { $0.startedAt > $1.startedAt }
     }
 
+    /// The host of whichever connection the agent uses (direct room or pairing endpoint).
+    private var connectionSummary: String {
+        if let host = agent.connectionURL?.host() ?? agent.pairingEndpoint?.host() { return host }
+        return agent.connectionURL?.absoluteString ?? agent.pairingEndpoint?.absoluteString ?? "—"
+    }
+
     var body: some View {
         List {
             header
@@ -74,7 +80,7 @@ struct AgentDetailView: View {
                     .background(.tint.opacity(0.15), in: .capsule)
                     .foregroundStyle(.tint)
 
-                Text(agent.connectionURL.host() ?? agent.connectionURL.absoluteString)
+                Text(connectionSummary)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

@@ -21,6 +21,7 @@ final class AddEditAgentViewModel {
     var connectionURLText: String
     var token: String
     var pairingEndpointText: String
+    var pairingAgentID = ""
     var mirrorsToContacts: Bool = false
     var avatarData: Data? = nil
 
@@ -56,8 +57,9 @@ final class AddEditAgentViewModel {
             self.name = agent.name
             self.detail = agent.detail
             self.transportKind = agent.transportKind
-            self.connectionURLText = agent.connectionURL.absoluteString
+            self.connectionURLText = agent.connectionURL?.absoluteString ?? ""
             self.pairingEndpointText = agent.pairingEndpoint?.absoluteString ?? ""
+            self.pairingAgentID = agent.pairingAgentID ?? ""
             self.mirrorsToContacts = agent.mirrorsToContacts
             self.avatarData = agent.avatarData
             self.token = (try? keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef))).flatMap { $0 } ?? ""
@@ -92,13 +94,14 @@ final class AddEditAgentViewModel {
     }
 
     var canSave: Bool {
-        !name.trimmed.isEmpty && connectionURL != nil && (!token.isEmpty || pairingEndpoint != nil)
+        !name.trimmed.isEmpty && (connectionURL != nil || pairingEndpoint != nil)
     }
 
     // MARK: - Save
 
     func save() async throws {
-        guard let url = connectionURL else { return }
+        guard connectionURL != nil || pairingEndpoint != nil else { return }
+        let agentID = pairingAgentID.trimmed.isEmpty ? nil : pairingAgentID.trimmed
 
         let agent: Agent
         if let editingAgent {
@@ -107,8 +110,9 @@ final class AddEditAgentViewModel {
             agent.detail = detail.trimmed
             agent.avatarData = avatarData
             agent.transportKindRaw = transportKind.rawValue
-            agent.connectionURL = url
+            agent.connectionURL = connectionURL
             agent.pairingEndpoint = pairingEndpoint
+            agent.pairingAgentID = agentID
             agent.mirrorsToContacts = mirrorsToContacts
         } else {
             agent = Agent(
@@ -116,8 +120,9 @@ final class AddEditAgentViewModel {
                 detail: detail.trimmed,
                 avatarData: avatarData,
                 transportKind: transportKind,
-                connectionURL: url,
+                connectionURL: connectionURL,
                 pairingEndpoint: pairingEndpoint,
+                pairingAgentID: agentID,
                 mirrorsToContacts: mirrorsToContacts
             )
             repository.insert(agent)
@@ -163,8 +168,8 @@ final class AddEditAgentViewModel {
     }
 
     func testConnection() async {
-        guard let url = connectionURL else {
-            testState = .failure("Enter a valid connection URL")
+        guard connectionURL != nil || pairingEndpoint != nil else {
+            testState = .failure("Enter a connection URL or pairing endpoint")
             return
         }
 
@@ -172,9 +177,10 @@ final class AddEditAgentViewModel {
 
         let config = TransportConfig(
             kind: transportKind,
-            url: url,
+            url: connectionURL,
             token: token,
-            pairingEndpoint: pairingEndpoint
+            pairingEndpoint: pairingEndpoint,
+            pairingAgentID: pairingAgentID.trimmed.isEmpty ? nil : pairingAgentID.trimmed
         )
         let transport = transportFactory(transportKind)
 
@@ -182,7 +188,9 @@ final class AddEditAgentViewModel {
             try await transport.connect(config)
         } catch {
             Log.warning(.transport, "Test connection failed to start: \(error)")
-            testState = .failure("Couldn't reach the agent")
+            let message = (error as? TransportError) == .authenticationFailed
+                ? "Authentication failed" : "Couldn't reach the agent"
+            testState = .failure(message)
             await transport.disconnect()
             return
         }

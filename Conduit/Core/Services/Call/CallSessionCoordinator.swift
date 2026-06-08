@@ -99,7 +99,10 @@ final class CallSessionCoordinator: CallProviderDelegate {
         state = .connecting
         announcer.startRepeating(.connecting)
 
-        guard let token = loadToken(for: agent) else {
+        let token = loadToken(for: agent) ?? ""
+        // Direct mode needs a token; pairing mode authenticates with the API key
+        // (also the token field), but an endpoint may be open, so don't hard-require it.
+        if token.isEmpty, agent.pairingEndpoint == nil {
             Log.error(.call, "No token for agent \(Log.redactEmail(agent.syntheticEmail))")
             fail(.badToken)
             return
@@ -109,7 +112,8 @@ final class CallSessionCoordinator: CallProviderDelegate {
             kind: agent.transportKind,
             url: agent.connectionURL,
             token: token,
-            pairingEndpoint: agent.pairingEndpoint
+            pairingEndpoint: agent.pairingEndpoint,
+            pairingAgentID: agent.pairingAgentID
         )
         currentConfig = config
 
@@ -121,7 +125,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
             try await transport.connect(config)
         } catch {
             Log.error(.transport, "connect failed: \(error)")
-            fail(.transportError)
+            fail((error as? TransportError) == .authenticationFailed ? .badToken : .transportError)
         }
     }
 

@@ -22,9 +22,12 @@ final class Agent {
     /// Stable synthetic `.invalid` email used as the call's email-type handle.
     var syntheticEmail: String
     var transportKindRaw: String
-    var connectionURL: URL
-    /// Later QR/pairing flow: a URL the app calls for a fresh room+token per call.
+    /// Direct-mode room URL. `nil` for a pairing-only agent (see `pairingEndpoint`).
+    var connectionURL: URL?
+    /// Pairing flow: a URL the app POSTs for a fresh room+token per call.
     var pairingEndpoint: URL?
+    /// Which agent the pairing endpoint should connect (the engine's `agent_id`).
+    var pairingAgentID: String?
     var mirrorsToContacts: Bool
     /// `CNContact.identifier` of the mirrored system contact, once created.
     var contactIdentifier: String?
@@ -41,8 +44,9 @@ final class Agent {
         detail: String = "",
         avatarData: Data? = nil,
         transportKind: TransportKind,
-        connectionURL: URL,
+        connectionURL: URL? = nil,
         pairingEndpoint: URL? = nil,
+        pairingAgentID: String? = nil,
         mirrorsToContacts: Bool = false,
         createdAt: Date = .now
     ) {
@@ -54,6 +58,7 @@ final class Agent {
         self.transportKindRaw = transportKind.rawValue
         self.connectionURL = connectionURL
         self.pairingEndpoint = pairingEndpoint
+        self.pairingAgentID = pairingAgentID
         self.mirrorsToContacts = mirrorsToContacts
         self.contactIdentifier = nil
         self.keychainTokenRef = KeychainTokenRef(agentID: id).account

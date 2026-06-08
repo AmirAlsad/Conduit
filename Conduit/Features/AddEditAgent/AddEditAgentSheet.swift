@@ -30,6 +30,7 @@ struct AddEditAgentSheet: View {
             Form {
                 identitySection
                 connectionSection
+                pairingSection
                 testSection
                 mirrorSection
             }
@@ -73,24 +74,37 @@ struct AddEditAgentSheet: View {
             }
             .accessibilityIdentifier(AccessibilityID.AddAgent.transportPicker)
 
-            TextField("Connection URL", text: $viewModel.connectionURLText)
+            TextField("Room URL", text: $viewModel.connectionURLText)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
                 .accessibilityIdentifier(AccessibilityID.AddAgent.urlField)
 
-            SecureField("Token", text: $viewModel.token)
+            SecureField("Token / API key", text: $viewModel.token)
                 .accessibilityIdentifier(AccessibilityID.AddAgent.tokenField)
+        } header: {
+            Text("Connection")
+        } footer: {
+            Text("Two ways to connect, your choice: a direct room URL + token, or a pairing endpoint below. The token / API key is stored only in your device Keychain.")
+        }
+    }
 
-            TextField("Pairing endpoint (optional)", text: $viewModel.pairingEndpointText)
+    private var pairingSection: some View {
+        Section {
+            TextField("Pairing endpoint", text: $viewModel.pairingEndpointText)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
                 .accessibilityIdentifier(AccessibilityID.AddAgent.pairingField)
+
+            TextField("Agent ID", text: $viewModel.pairingAgentID)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier(AccessibilityID.AddAgent.pairingAgentIDField)
         } header: {
-            Text("Connection")
+            Text("Pairing (optional)")
         } footer: {
-            Text("Bring your own agent: paste the room URL and token from your own Daily/LiveKit deployment. The token is stored only in your device Keychain.")
+            Text("If set, the app POSTs this endpoint (bearer = the API key above) for a fresh room + token each call. Agent ID tells your server which agent to connect.")
         }
     }
 

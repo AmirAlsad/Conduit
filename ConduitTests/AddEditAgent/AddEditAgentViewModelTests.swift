@@ -42,23 +42,20 @@ struct AddEditAgentViewModelTests {
 
     // MARK: - Validation
 
-    @Test func canSaveRequiresNameURLAndCredential() throws {
+    @Test func canSaveRequiresNameAndAConnection() throws {
         let vm = makeViewModel(repository: try makeRepository())
         #expect(!vm.canSave)
         vm.name = "Jarvis"
-        #expect(!vm.canSave) // no URL
+        #expect(!vm.canSave) // no connection method yet
         vm.connectionURLText = "https://x.daily.co/room"
-        #expect(!vm.canSave) // no token or pairing endpoint
-        vm.token = "secret"
-        #expect(vm.canSave)
+        #expect(vm.canSave) // name + a direct room URL is enough
     }
 
-    @Test func pairingEndpointSatisfiesCredentialRequirement() throws {
+    @Test func pairingEndpointAloneIsEnough() throws {
         let vm = makeViewModel(repository: try makeRepository())
         vm.name = "Jarvis"
-        vm.connectionURLText = "https://x.daily.co/room"
-        vm.pairingEndpointText = "https://x.daily.co/pair"
-        #expect(vm.canSave) // pairing endpoint stands in for a static token
+        vm.pairingEndpointText = "https://engine.example.com/connect"
+        #expect(vm.canSave) // pairing endpoint, no direct room URL
     }
 
     @Test func connectionURLValidatesScheme() throws {
@@ -91,9 +88,25 @@ struct AddEditAgentViewModelTests {
         let agent = try #require(agents.first)
         #expect(agent.name == "Jarvis")
         #expect(agent.detail == "Personal")
-        #expect(agent.connectionURL.absoluteString == "https://x.daily.co/room")
+        #expect(agent.connectionURL?.absoluteString == "https://x.daily.co/room")
         // Token lives ONLY in the Keychain.
         #expect(try keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef)) == "secret-token")
+    }
+
+    @Test func savingPairingAgentPersistsEndpointAndAgentID() async throws {
+        let repo = try makeRepository()
+        let vm = makeViewModel(repository: repo)
+        vm.name = "Engine Agent"
+        vm.pairingEndpointText = "https://engine.example.com/connect"
+        vm.pairingAgentID = "live"
+        vm.token = "api-key"
+
+        try await vm.save()
+
+        let agent = try #require(try repo.fetchAll().first)
+        #expect(agent.connectionURL == nil)
+        #expect(agent.pairingEndpoint?.absoluteString == "https://engine.example.com/connect")
+        #expect(agent.pairingAgentID == "live")
     }
 
     @Test func editingKeepsSyntheticIdentityStableAndDoesNotDuplicate() async throws {
@@ -184,7 +197,7 @@ struct AddEditAgentViewModelTests {
 
     @Test func testConnectionFailsWhenConnectThrows() async throws {
         let fake = FakeTransport()
-        fake.connectError = .authenticationFailed
+        fake.connectError = .timedOut
         let vm = makeViewModel(repository: try makeRepository(), transportFactory: { _ in fake })
         vm.connectionURLText = "https://x.daily.co/room"
         vm.token = "t"
@@ -192,5 +205,17 @@ struct AddEditAgentViewModelTests {
         await vm.testConnection()
 
         #expect(vm.testState == .failure("Couldn't reach the agent"))
+    }
+
+    @Test func testConnectionReportsAuthFailureWhenConnectThrowsAuth() async throws {
+        let fake = FakeTransport()
+        fake.connectError = .authenticationFailed
+        let vm = makeViewModel(repository: try makeRepository(), transportFactory: { _ in fake })
+        vm.connectionURLText = "https://x.daily.co/room"
+        vm.token = "bad"
+
+        await vm.testConnection()
+
+        #expect(vm.testState == .failure("Authentication failed"))
     }
 }

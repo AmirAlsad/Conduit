@@ -54,19 +54,35 @@ final class PipecatDailyTransport: Conduit.Transport, PipecatClientDelegate {
         didReportConnected = false
         userRequestedDisconnect = false
         do {
+            let roomURL: String
+            let token: String?
             if let endpoint = config.pairingEndpoint {
-                // The user's server mints a fresh room + token per call and the bot
-                // joins it; we POST the endpoint and connect with what it returns.
-                let _: DailyTransportConnectionParams = try await client.startBotAndConnect(
-                    startBotParams: APIRequest(endpoint: endpoint)
+                // The user's server mints a fresh room + token per call. We POST it
+                // (bearer = the API key) and connect directly with what it returns —
+                // the engine nests credentials under `connection`, which the SDK's
+                // own pairing decoder doesn't handle, so we resolve it ourselves.
+                let creds = try await PairingClient.resolve(
+                    endpoint: endpoint,
+                    apiKey: config.token,
+                    agentID: config.pairingAgentID ?? "",
+                    transport: config.kind
                 )
+                roomURL = creds.roomURL.absoluteString
+                token = creds.token
+            } else if let url = config.url {
+                roomURL = url.absoluteString
+                token = config.token.isEmpty ? nil : config.token
             } else {
-                let params = DailyTransportConnectionParams(
-                    roomUrl: config.url.absoluteString,
-                    token: config.token.isEmpty ? nil : config.token
-                )
-                try await client.connect(transportParams: params)
+                throw TransportError.connectionFailed("No room URL or pairing endpoint")
             }
+            let params = DailyTransportConnectionParams(roomUrl: roomURL, token: token)
+            try await client.connect(transportParams: params)
+        } catch let error as PairingError {
+            Log.error(.transport, "Pairing failed: \(error)")
+            throw error == .unauthorized ? TransportError.authenticationFailed
+                                         : TransportError.connectionFailed("pairing: \(error)")
+        } catch let error as TransportError {
+            throw error
         } catch {
             Log.error(.transport, "Daily connect failed: \(error)")
             throw TransportError.connectionFailed(String(describing: error))
