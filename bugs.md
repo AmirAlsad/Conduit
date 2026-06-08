@@ -26,6 +26,12 @@ audio button as unreliable for SDK-managed audio; don't try to sync system→SDK
 (Apps also can't present the native call screen for outgoing calls — it's
 system-controlled — so it can't be the primary surface regardless.)
 
+**Update (M6):** This is a *Daily* limitation, not a CallKit one. `LiveKitTransport`
+runs LiveKit in **manual audio** (`AudioManager.audioSession.isAutomaticConfigurationEnabled
+= false` + `setEngineAvailability` gated on CallKit `didActivate`/`didDeactivate`), so on
+LiveKit calls CallKit owns the `AVAudioSession` and the **native route button works**;
+the in-app picker routes via `AVAudioSession` directly (`LiveKitAudioRouter`).
+
 **Why it's missed:** `currentRoute` reports the new route, so logs say "Speaker"
 while the audio is actually on AirPods — only *listening* on a device reveals it.
 Research: medium.com/@tsivilko mastering-voip-audio-with-callkit-and-webrtc.

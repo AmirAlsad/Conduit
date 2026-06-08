@@ -2,10 +2,9 @@
 
 The shared, app-agnostic infrastructure under `Conduit/Core/`. Built so far: the
 foundation (M0), the call state machine (M1), the Daily transport (M2), the
-CallKit + audio-session seam (M3), and the Keychain real + persistence (WS-4).
-What remains is the native LiveKit transport (WS-6). Every external boundary has a
-protocol seam and an in-app fake, so everything above them is testable at sim
-speed today.
+CallKit + audio-session seam (M3), the Keychain real + persistence (WS-4), and the
+native LiveKit transport (M6). Every external boundary has a protocol seam and an
+in-app fake, so everything above them is testable at sim speed today.
 
 ## The testability spine: protocol seams + fakes
 
@@ -18,7 +17,7 @@ suite, SwiftUI previews, and the future CallKit-free debug path all reuse them.
 | Seam | Protocol (`Core/Services/…`) | Fake (present) | Real (status) |
 |---|---|---|---|
 | CallKit | `CallProviding` + `CallProviderDelegate` + `AudioSessionActivating` (`CallKit/`) | `FakeCallProvider` / `FakeAudioSession` | `SystemCallProvider` (built, M3) |
-| Transport | `Transport` (`Transport/`) | `FakeTransport` | `PipecatDailyTransport` (built, M2); `LiveKitTransport` — WS-6 |
+| Transport | `Transport` (`Transport/`) | `FakeTransport` | `PipecatDailyTransport` (built, M2); `LiveKitTransport` (built, M6) |
 | Keychain | `KeychainStoring` (`Keychain/`) | `InMemoryKeychain` | `KeychainService` (built, WS-4) |
 | Contacts sync | `ContactSyncing` (`Contacts/`) | `FakeContactSync` | `ContactSyncService` (built) |
 | Persistence | `AgentRepository` (`Persistence/`) | — | `SwiftDataAgentRepository` (built) |
@@ -41,6 +40,22 @@ is never hot before CallKit activation. **Daily audio is device-only:** its WebR
 voice-processing audio unit aborts in the iOS Simulator (see `bugs.md`), so the sim
 verifies pairing/negotiation only; real connect + downlink is verified on device
 (confirmed M2: the `live` agent greets on connect via RTVI `client-ready`).
+
+`LiveKitTransport` (`Transport/`, M6) is the native second transport over
+`livekit/client-sdk-swift`, behind the same protocol. It re-derives the RTVI-style
+signals from LiveKit: `.connected` only when the room **and** the agent (a remote
+participant) are both ready — the pure, unit-tested `LiveKitConnectGate` — and
+bot-speaking from `didUpdateSpeakingParticipants`. It reuses `PairingClient` (the
+pairing contract is transport-neutral; the response's `room_url` is LiveKit's `wss://`
+URL). The decisive difference from Daily is **manual audio**: at init it sets
+`AudioManager.shared.audioSession.isAutomaticConfigurationEnabled = false`, and it
+gates LiveKit's audio engine on CallKit via the `attachAudioSession`/`detachAudioSession`
+seam (`setEngineAvailability(.default/.none)` in `providerDidActivate`/`Deactivate`).
+Because CallKit then truly owns the `AVAudioSession`, **the native call-screen route
+button moves the audio** (Daily can't — see `bugs.md`), and the in-app picker routes
+through `AVAudioSession` directly (`LiveKitAudioRouter`) instead of the SDK. Like
+Daily, it's **device-only** (WebRTC audio aborts in the sim), so `live()` uses
+`FakeTransport` in the simulator; the only sim-tested logic is `LiveKitConnectGate`.
 
 ## AppEnvironment (composition root)
 

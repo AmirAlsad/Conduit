@@ -83,7 +83,7 @@ final class AppEnvironment {
         transportFactory = { kind in
             switch kind {
             case .daily: PipecatDailyTransport()
-            case .livekit: UnavailableTransport(kind: .livekit) // M6
+            case .livekit: LiveKitTransport()
             }
         }
         #endif

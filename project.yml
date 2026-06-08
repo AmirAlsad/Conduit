@@ -77,11 +77,10 @@ settings:
       SWIFT_COMPILATION_MODE: wholemodule
       VALIDATE_PRODUCT: true
 
-# Transport SDKs. Daily ships first (WS-2): the Daily transport pulls in
-# daily-client-ios (DailyCore + Google WebRTC) transitively. Native LiveKit is
-# added in the fast-follow (WS-6). The packages are resolved here at the
-# foundation milestone to flush out package/binary resolution early; the Daily
-# adapter that imports them lands in WS-2.
+# Transport SDKs. Daily (WS-2) pulls in daily-client-ios (DailyCore + Google
+# WebRTC) transitively; native LiveKit (M6) pulls in LiveKitWebRTC. Both ship as
+# binary xcframeworks, so the two WebRTC stacks coexist. LiveKit's manual-audio
+# API (AudioManager.setEngineAvailability) lets CallKit own the AVAudioSession.
 packages:
   PipecatClientIOS:
     url: https://github.com/pipecat-ai/pipecat-client-ios.git
@@ -89,6 +88,9 @@ packages:
   PipecatClientIOSDaily:
     url: https://github.com/pipecat-ai/pipecat-client-ios-daily.git
     from: "1.2.0"
+  LiveKit:
+    url: https://github.com/livekit/client-sdk-swift.git
+    from: "2.9.0"
 
 targets:
   Conduit:
@@ -128,6 +130,7 @@ targets:
     dependencies:
       - package: PipecatClientIOS
       - package: PipecatClientIOSDaily
+      - package: LiveKit
 
   ConduitTests:
     type: bundle.unit-test

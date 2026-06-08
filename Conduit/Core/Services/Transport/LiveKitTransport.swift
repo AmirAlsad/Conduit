@@ -1,0 +1,203 @@
+//
+//  LiveKitTransport.swift
+//  Conduit
+//
+//  Native LiveKit transport behind Conduit's `Transport` seam. Unlike Daily,
+//  LiveKit supports manual audio: we disable its automatic `AVAudioSession`
+//  management and gate its audio engine on CallKit activation
+//  (`attachAudioSession`/`detachAudioSession` → `AudioManager.setEngineAvailability`).
+//  Because CallKit then truly owns the session, the native call-screen route button
+//  moves the audio and the in-app picker routes via `AVAudioSession`
+//  (`LiveKitAudioRouter`). RTVI-style signals are re-derived from LiveKit: `.connected`
+//  when the room and the agent (a remote participant) are both ready, bot-speaking
+//  from active speakers. Device-only (WebRTC audio aborts in the simulator).
+//
+
+import AVFoundation
+import Foundation
+import LiveKit
+
+@MainActor
+final class LiveKitTransport: NSObject, Conduit.Transport {
+    nonisolated let events: AsyncStream<TransportEvent>
+    private nonisolated let continuation: AsyncStream<TransportEvent>.Continuation
+
+    private var room: Room!
+    private var gate = LiveKitConnectGate()
+    private var wasBotSpeaking = false
+    private var routeObserver: NSObjectProtocol?
+
+    override init() {
+        let (stream, continuation) = AsyncStream.makeStream(of: TransportEvent.self)
+        self.events = stream
+        self.continuation = continuation
+        super.init()
+
+        // Manual audio: CallKit owns the AVAudioSession; the engine starts only
+        // inside the CallKit activation window (see attachAudioSession).
+        AudioManager.shared.audioSession.isAutomaticConfigurationEnabled = false
+        self.room = Room(delegate: self)
+
+        // The route can change from the native CallKit screen too — keep the in-app
+        // picker in sync. Continuation is thread-safe, so yield directly.
+        routeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil
+        ) { [continuation] _ in
+            continuation.yield(.audioDevicesChanged)
+        }
+    }
+
+    deinit {
+        if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
+    }
+
+    // MARK: - Conduit.Transport
+
+    func connect(_ config: TransportConfig) async throws {
+        gate = LiveKitConnectGate()
+        wasBotSpeaking = false
+        do {
+            let roomURL: String
+            let token: String
+            if let endpoint = config.pairingEndpoint {
+                let creds = try await PairingClient.resolve(
+                    endpoint: endpoint, apiKey: config.token, transport: config.kind
+                )
+                roomURL = creds.roomURL.absoluteString
+                token = creds.token
+            } else if let url = config.url {
+                roomURL = url.absoluteString
+                token = config.token
+            } else {
+                throw TransportError.connectionFailed("No room URL or pairing endpoint")
+            }
+            try AudioManager.shared.setEngineAvailability(.none)
+            try await room.connect(url: roomURL, token: token)
+        } catch let error as PairingError {
+            Log.error(.transport, "Pairing failed: \(error)")
+            throw error == .unauthorized ? TransportError.authenticationFailed
+                                         : TransportError.connectionFailed("pairing: \(error)")
+        } catch let error as TransportError {
+            throw error
+        } catch {
+            Log.error(.transport, "LiveKit connect failed: \(error)")
+            throw mapConnectError(error)
+        }
+    }
+
+    func disconnect() async {
+        gate.userRequestedDisconnect = true
+        await room.disconnect()
+    }
+
+    func setMicEnabled(_ enabled: Bool) async {
+        do {
+            _ = try await room.localParticipant.setMicrophone(enabled: enabled)
+        } catch {
+            Log.error(.transport, "LiveKit setMicrophone(\(enabled)) error: \(error)")
+        }
+    }
+
+    func availableAudioDevices() async -> [AudioDeviceInfo] {
+        LiveKitAudioRouter.availableDevices()
+    }
+
+    func selectedAudioDevice() async -> AudioDeviceInfo? {
+        guard let id = LiveKitAudioRouter.selectedDeviceID() else { return nil }
+        return LiveKitAudioRouter.availableDevices().first { $0.id == id }
+    }
+
+    func setAudioDevice(_ id: String) async {
+        LiveKitAudioRouter.select(id)
+    }
+
+    func attachAudioSession() async {
+        // CallKit activated the session — let LiveKit's engine run now.
+        do { try AudioManager.shared.setEngineAvailability(.default) }
+        catch { Log.error(.audio, "LiveKit setEngineAvailability(.default) error: \(error)") }
+    }
+
+    func detachAudioSession() async {
+        do { try AudioManager.shared.setEngineAvailability(.none) }
+        catch { Log.error(.audio, "LiveKit setEngineAvailability(.none) error: \(error)") }
+    }
+
+    // MARK: - Event mapping (main-actor)
+
+    private func onRoomConnected(hasRemote: Bool) {
+        if let event = gate.roomDidConnect() { continuation.yield(event) }
+        if hasRemote, let event = gate.remoteDidJoin() { continuation.yield(event) }
+    }
+
+    private func onSpeakers(botSpeaking: Bool, level: Float) {
+        if botSpeaking != wasBotSpeaking {
+            wasBotSpeaking = botSpeaking
+            continuation.yield(botSpeaking ? .botStartedSpeaking : .botStoppedSpeaking)
+        }
+        if botSpeaking { continuation.yield(.remoteAudioLevel(level)) }
+    }
+
+    private func mapConnectError(_ error: Error) -> TransportError {
+        if let lkError = error as? LiveKitError {
+            if lkError.type == .insufficientPermissions { return .authenticationFailed }
+            let description = String(describing: lkError).lowercased()
+            if ["unauthorized", "401", "permission", "token"].contains(where: description.contains) {
+                return .authenticationFailed
+            }
+        }
+        return .connectionFailed(String(describing: error))
+    }
+}
+
+// MARK: - RoomDelegate (called off the main actor → hop before touching state)
+
+extension LiveKitTransport: RoomDelegate {
+    nonisolated func room(_ room: Room, didUpdateConnectionState state: ConnectionState, from oldState: ConnectionState) {
+        switch state {
+        case .connecting:
+            continuation.yield(.connecting)
+        case .connected:
+            let hasRemote = !room.remoteParticipants.isEmpty
+            Task { @MainActor in self.onRoomConnected(hasRemote: hasRemote) }
+        case .reconnecting:
+            continuation.yield(.reconnecting)
+        default:
+            break
+        }
+    }
+
+    nonisolated func room(_ room: Room, participantDidConnect participant: RemoteParticipant) {
+        Task { @MainActor in
+            if let event = self.gate.remoteDidJoin() { self.continuation.yield(event) }
+        }
+    }
+
+    nonisolated func room(_ room: Room, participantDidDisconnect participant: RemoteParticipant) {
+        let remotesRemain = !room.remoteParticipants.isEmpty
+        Task { @MainActor in
+            if let event = self.gate.remoteDidLeave(remotesRemain: remotesRemain) {
+                self.continuation.yield(event)
+            }
+        }
+    }
+
+    nonisolated func room(_ room: Room, didStartReconnectWithMode mode: ReconnectMode) {
+        continuation.yield(.reconnecting)
+    }
+
+    nonisolated func room(_ room: Room, didCompleteReconnectWithMode mode: ReconnectMode) {
+        // The coordinator's `.reconnecting` display recovers on a fresh `.connected`.
+        continuation.yield(.connected)
+    }
+
+    nonisolated func room(_ room: Room, didDisconnectWithError error: LiveKitError?) {
+        Task { @MainActor in self.continuation.yield(self.gate.roomDidDisconnect()) }
+    }
+
+    nonisolated func room(_ room: Room, didUpdateSpeakingParticipants participants: [Participant]) {
+        let remoteSpeakers = participants.compactMap { $0 as? RemoteParticipant }
+        let botSpeaking = !remoteSpeakers.isEmpty
+        let level = remoteSpeakers.map(\.audioLevel).max() ?? 0
+        Task { @MainActor in self.onSpeakers(botSpeaking: botSpeaking, level: level) }
+    }
+}
