@@ -230,7 +230,7 @@ struct InCallView: View {
             Picker("Audio Output", selection: routeSelection) {
                 ForEach(sortedDevices) { device in
                     let kind = AudioRouteKind(deviceID: device.id)
-                    Label(kind.displayName, systemImage: kind.iconName)
+                    Label(displayName(for: kind), systemImage: kind.iconName)
                         .tag(Optional(device.id))
                 }
             }
@@ -259,6 +259,20 @@ struct InCallView: View {
 
     private var activeDeviceID: String? {
         coordinator.audioDevices.first { AudioRouteKind(deviceID: $0.id) == activeRouteKind }?.id
+    }
+
+    /// Friendly route label. For Bluetooth, use the system's real device name
+    /// ("AirPods Pro", the car's name) from AVAudioSession — Daily only reports it
+    /// generically as "Bluetooth Speaker & Mic".
+    private func displayName(for kind: AudioRouteKind) -> String {
+        if kind == .bluetooth, let name = bluetoothRouteName { return name }
+        return kind.displayName
+    }
+
+    private var bluetoothRouteName: String? {
+        AVAudioSession.sharedInstance().availableInputs?
+            .first { AudioRouteKind(portType: $0.portType) == .bluetooth }?
+            .portName
     }
 
     // MARK: - End button
