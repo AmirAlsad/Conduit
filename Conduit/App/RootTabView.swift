@@ -26,13 +26,7 @@ struct RootTabView: View {
 
             Tab("Contacts", systemImage: "person.crop.circle") {
                 NavigationStack {
-                    ContentUnavailableView(
-                        "No Agents",
-                        systemImage: "person.crop.circle.badge.plus",
-                        description: Text("Add an agent to start calling.")
-                    )
-                    .navigationTitle("Contacts")
-                    .accessibilityIdentifier(AccessibilityID.Root.tab(1))
+                    ContactsView()
                 }
             }
 

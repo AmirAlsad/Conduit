@@ -24,11 +24,11 @@
 	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<!-- Portrait-only, like the Phone app on iPhone: the call/list surfaces are designed
+	     vertically, and CarPlay/Bluetooth routing is independent of the app's own orientation. -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<!-- Conduit places VoIP calls (CallKit + WebRTC). The voip background mode lets a
 	     call keep running when the app is backgrounded / the screen is locked, and the

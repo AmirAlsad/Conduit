@@ -7,6 +7,27 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### snapshot_ui returns 0×0 / coordinate taps no-op (UI automation flaky)
+First seen: 2026-06-08 (WS-5 batch 1, verifying the Contacts/Add flow)
+
+**Pattern:** `snapshot_ui` reports the app frame as `{0,0}` with no children even
+though the app is fully rendered (the `screenshot` is correct). When the tree is in
+this state, `tap` by coordinate also silently no-ops (it relies on the same
+accessibility injection). CLAUDE.md attributes the 0×0 tree to iOS 26, but it also
+hit on the **iOS 18.6** "iPhone 16" sim after a rapid reinstall + foreground
+relaunch (the relaunch reused the same PID instead of restarting). TabView `Tab`
+items also never appear as their own a11y elements, so tabs can't be tapped by
+id/label regardless.
+
+**Rule:** Don't block verification on interactive UI driving. Verify logic with
+unit tests (sim, deterministic) and rendering with `screenshot`. If you must drive
+the UI: fully terminate the app first (don't just relaunch), or reboot the sim, to
+get a fresh a11y tree; tap tab-bar items by coordinate only.
+
+**Why it's missed:** `screenshot` looks perfect, so the screen seems automatable;
+the 0×0 tree only shows up when you query it, and a "successful" tap that does
+nothing reads like a wrong coordinate rather than a dead injection path.
+
 ### Daily/WebRTC audio aborts in the iOS Simulator (device-only)
 First seen: 2026-06-07 (M2 connect-and-downlink)
 
