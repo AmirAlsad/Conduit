@@ -19,7 +19,13 @@ struct ConduitApp: App {
                 .environment(environment)
                 .modelContainer(environment.modelContainer)
                 #if DEBUG
-                .task { await DebugDailyAutoConnect.runIfRequested() }
+                .task {
+                    if ProcessInfo.processInfo.environment["CONDUIT_DEBUG_CALLKIT"] == "1" {
+                        await DebugCallKitSpike.runIfRequested()
+                    } else {
+                        await DebugDailyAutoConnect.runIfRequested()
+                    }
+                }
                 #endif
         }
     }
