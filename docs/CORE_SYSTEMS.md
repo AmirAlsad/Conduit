@@ -17,7 +17,7 @@ suite, SwiftUI previews, and the future CallKit-free debug path all reuse them.
 | Seam | Protocol (`Core/Services/…`) | Fake (present) | Real (status) |
 |---|---|---|---|
 | CallKit | `CallProviding` + `CallProviderDelegate` + `AudioSessionActivating` (`CallKit/`) | `FakeCallProvider` / `FakeAudioSession` | `SystemCallProvider` — WS-3 |
-| Transport | `Transport` (`Transport/`) | `FakeTransport` | `DailyTransport` — WS-2; `LiveKitTransport` — WS-6 |
+| Transport | `Transport` (`Transport/`) | `FakeTransport` | `PipecatDailyTransport` (built, M2); `LiveKitTransport` — WS-6 |
 | Keychain | `KeychainStoring` (`Keychain/`) | `InMemoryKeychain` | `KeychainService` — WS-4 |
 | Contacts | `ContactsMirroring` (`Contacts/`) | `FakeContactsMirror` | `ContactsService` — WS-4 |
 | Persistence | `AgentRepository` (`Persistence/`) | — | `SwiftDataAgentRepository` (built) |
@@ -26,6 +26,15 @@ The `Transport` event surface is Conduit's own vocabulary (`TransportEvent`:
 `connecting` / `connected` / `reconnecting` / `disconnected(reason:)` /
 `botStartedSpeaking` / … / `remoteAudioLevel` / `error`), deliberately **not**
 Daily/LiveKit/RTVI types, so a second transport drops in behind the same protocol.
+
+`PipecatDailyTransport` (`Transport/`) wraps `PipecatClient` + the Daily transport
+and maps RTVI/Daily callbacks to `TransportEvent`s. `.connected` is emitted only on
+RTVI `.ready`/`onBotReady` (transport **and** bot ready), never raw connectivity. It
+joins with the mic disabled — capture enables only via `setMicEnabled` — so the mic
+is never hot before CallKit activation. **Daily audio is device-only:** its WebRTC
+voice-processing audio unit aborts in the iOS Simulator (see `bugs.md`), so the sim
+verifies pairing/negotiation only; real connect + downlink is verified on device
+(confirmed M2: the `live` agent greets on connect via RTVI `client-ready`).
 
 ## AppEnvironment (composition root)
 
