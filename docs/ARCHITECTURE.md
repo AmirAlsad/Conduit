@@ -127,9 +127,10 @@ Modeled on the iOS Phone app — three tabs plus two detail/modal surfaces:
   empty state funnels to "add your first agent."
 - **Contacts** — the list of agents, each treated as a contact (quick-call button).
 - **Settings** — sparse: About + the global always-listening vs. push-to-talk toggle.
-- **Agent Detail** — a contact-card view of one agent with a prominent Call button.
+- **Agent Detail** — a contact-card view of one agent with a prominent Call
+  button, plus "Add to Contacts" (the permission-free system Add-Contact sheet).
 - **Add / Edit Agent** (sheet) — the bring-your-own configuration surface
-  (name, description, avatar, connection, system-contact mirror, test-connection).
+  (name, description, avatar, connection, test-connection).
 
 ## Testing Posture (summary)
 

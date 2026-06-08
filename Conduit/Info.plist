@@ -40,10 +40,5 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Conduit uses the microphone to carry your voice to your agent during a call.</string>
-	<!-- Optional, per-agent: when you turn on the contact mirror for an agent, Conduit adds a
-	     contact so the agent's name and photo show on the call screen, lock screen, and CarPlay
-	     in place of the raw connection handle. Nothing is uploaded; the contact stays on-device. -->
-	<key>NSContactsUsageDescription</key>
-	<string>Conduit can mirror an agent as a contact so its name and photo appear on the call screen, lock screen, and in your car. This stays on your device.</string>
 </dict>
 </plist>

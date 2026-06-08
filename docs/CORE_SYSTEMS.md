@@ -2,15 +2,15 @@
 
 The shared, app-agnostic infrastructure under `Conduit/Core/`. Built so far: the
 foundation (M0), the call state machine (M1), the Daily transport (M2), the
-CallKit + audio-session seam (M3), and the Keychain + Contacts-mirror reals
-(WS-4). What remains is the feature UI (WS-5) and the native LiveKit transport
-(WS-6). Every external boundary already has a protocol seam and an in-app fake,
-so everything above them is testable at sim speed today.
+CallKit + audio-session seam (M3), and the Keychain real + persistence (WS-4).
+What remains is the native LiveKit transport (WS-6). Every external boundary has a
+protocol seam and an in-app fake, so everything above them is testable at sim
+speed today.
 
 ## The testability spine: protocol seams + fakes
 
-Every external boundary is a protocol with a real implementation (some pending)
-and an in-app fake. **No concrete CallKit / Pipecat / Keychain / Contacts type is
+Every stateful external boundary is a protocol with a real implementation (some
+pending) and an in-app fake. **No concrete CallKit / Pipecat / Keychain type is
 referenced outside its own service folder** — ViewModels and the coordinator see
 only protocols. Fakes live in the **app target** (not the test target) so the unit
 suite, SwiftUI previews, and the future CallKit-free debug path all reuse them.
@@ -20,8 +20,11 @@ suite, SwiftUI previews, and the future CallKit-free debug path all reuse them.
 | CallKit | `CallProviding` + `CallProviderDelegate` + `AudioSessionActivating` (`CallKit/`) | `FakeCallProvider` / `FakeAudioSession` | `SystemCallProvider` (built, M3) |
 | Transport | `Transport` (`Transport/`) | `FakeTransport` | `PipecatDailyTransport` (built, M2); `LiveKitTransport` — WS-6 |
 | Keychain | `KeychainStoring` (`Keychain/`) | `InMemoryKeychain` | `KeychainService` (built, WS-4) |
-| Contacts | `ContactsMirroring` (`Contacts/`) | `FakeContactsMirror` | `ContactsService` (built, WS-4) |
 | Persistence | `AgentRepository` (`Persistence/`) | — | `SwiftDataAgentRepository` (built) |
+
+Contacts has **no service seam**: adding an agent to Contacts goes through the
+system `CNContactViewController` (see below), so there is no store round-trip to
+abstract or fake.
 
 The `Transport` event surface is Conduit's own vocabulary (`TransportEvent`:
 `connecting` / `connected` / `reconnecting` / `disconnected(reason:)` /
@@ -44,13 +47,13 @@ owns the SwiftData `ModelContainer`, the protocol-typed services, a
 `transportFactory: (TransportKind) -> Transport`, and the app-wide
 `CallSessionCoordinator`. `inMemory()` wires the fakes + an in-memory store
 (previews, tests). `live()` (what `ConduitApp` runs on) wires the real services —
-`KeychainService`, `ContactsService`, a persistent SwiftData store, and
-`SpeechSpokenStateAnnouncer`. CallKit (`SystemCallProvider`) and the Daily
-transport can't run in the simulator, so `live()` falls back to the call/transport
-fakes there via `#if targetEnvironment(simulator)` while keeping
-Keychain/Contacts/persistence real on both — so a real call is device-only, but
-add-agent / token / mirror / persistence work in the sim. `ConduitApp` injects the
-environment via `.environment(_:)` + `.modelContainer(_:)`.
+`KeychainService`, a persistent SwiftData store, and `SpeechSpokenStateAnnouncer`.
+CallKit (`SystemCallProvider`) and the Daily transport can't run in the simulator,
+so `live()` falls back to the call/transport fakes there via
+`#if targetEnvironment(simulator)` while keeping Keychain/persistence real on both
+— so a real call is device-only, but add-agent / token / persistence work in the
+sim. `ConduitApp` injects the environment via `.environment(_:)` +
+`.modelContainer(_:)`.
 
 ## Models & persistence (SwiftData)
 
@@ -58,9 +61,9 @@ environment via `.environment(_:)` + `.modelContainer(_:)`.
 
 - **`Agent`** — name, `detail` (`description` is reserved on reference types),
   avatar, the synthetic email handle, transport kind, connection URL, optional
-  pairing endpoint, the mirror toggle, an optional `contactIdentifier`, and a
-  `keychainTokenRef`. **The token is never stored here** — only a deterministic
-  ref into the Keychain (`agent.token.<uuid>`).
+  pairing endpoint, an optional `contactIdentifier` (set once the user adds the
+  agent to Contacts), and a `keychainTokenRef`. **The token is never stored here**
+  — only a deterministic ref into the Keychain (`agent.token.<uuid>`).
 - **`CallLogEntry`** — direction, start, duration, outcome (`completed` / `failed`
   / `declined` / `noAnswer` / `canceled`), transport kind.
 
@@ -72,7 +75,7 @@ email-type handle on the reserved `.invalid` TLD, so Siri/CallKit read the displ
 name rather than the raw ID. `AgentRepository` (main-actor) wraps `ModelContext`
 for mutations and non-view fetches; list screens use `@Query` directly.
 
-## Keychain & the contacts mirror (WS-4)
+## Keychain & adding an agent to Contacts
 
 `KeychainService` (`Keychain/`) stores each agent's connection token as a
 generic-password item keyed by `(service, KeychainTokenRef.account)`, with
@@ -83,20 +86,21 @@ duplicate items on re-save); `token` returns `nil` (not an error) when absent;
 SwiftData persists only the `KeychainTokenRef`. The round-trip is unit-tested on
 the simulator under a per-test service namespace.
 
-`ContactsService` (`Contacts/`) is the **optional, per-agent** system-contact
-mirror over `CNContactStore`. When enabled it writes a contact whose email field
-holds the agent's synthetic `.invalid` handle, so iOS matches an outgoing call to
-it and the native call UI shows the agent's **name + photo** instead of the raw
-handle. Lifecycle edges are owned with the caller (WS-5): permission is requested
-only when the toggle is flipped on, `upsertMirror` runs on add/edit,
-`removeMirror` on delete/toggle-off. `removeMirror` gets only the agent id, so it
-locates the contact by the **stable `id8` suffix** of the synthetic email (minted
-once at creation, unchanged on rename) — that suffix-matches-minted-email
-invariant is the key unit test. The `CNContactStore` round-trip needs Contacts
-permission and writes the address book, so it's device/manual-verified; the pure
-mapping (`configure`, `emailSuffix`) is unit-tested. *Known caveat:* an
-app-created contact can linger after the app is uninstalled (iOS gives no
-uninstall hook).
+Adding an agent to Contacts is **optional and permission-free**. From AgentDetail,
+"Add to Contacts" presents the system `CNContactViewController(forNewContact:)`
+(`NewContactView` in `Shared/Components/`), pre-filled by the pure
+`AgentContactBuilder` (`Contacts/`) with the agent's name, photo, and synthetic
+`.invalid` email. The **user** saves it through system UI, so Conduit never holds
+Contacts permission and never reads or writes `CNContactStore` itself (no
+`NSContactsUsageDescription`). Because the contact's email matches the call's
+email-type CXHandle, iOS then shows the agent's **name + photo** on the call
+screen, lock screen, and CarPlay in place of the raw handle. The delegate returns
+the saved contact's identifier, stored on `Agent.contactIdentifier` to flip the
+button to "Added to Contacts". The only logic worth testing is the builder mapping
+(`AgentContactTests`). *Known caveats:* the contact persists after the agent is
+deleted or the app is uninstalled (no permission to remove it programmatically,
+and iOS gives no uninstall hook); a user who deletes the contact in the Contacts
+app leaves a stale `contactIdentifier`.
 
 ## Call state machine — `CallSessionCoordinator`
 
@@ -163,10 +167,10 @@ Dynamic Island pill + lock-screen call screen + clean teardown.
 
 On an outgoing call, `SystemCallProvider` reports a `CXCallUpdate` with
 `localizedCallerName` set to the agent's name, so the call/lock screen shows the
-name rather than the raw synthetic email handle. The **photo** (and
-Contacts/Siri matching) comes from the optional contact mirror above; the name
-shows with or without it. Device-only (CallKit doesn't run in the sim);
-interruption / incoming-PSTN handling is the remaining device-flagged work.
+name rather than the raw synthetic email handle. The **photo** (and Contacts/Siri
+matching) comes from the optional system contact above; the name shows with or
+without it. Device-only (CallKit doesn't run in the sim); interruption /
+incoming-PSTN handling is the remaining device-flagged work.
 
 ## Shared utilities
 

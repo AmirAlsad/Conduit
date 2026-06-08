@@ -3,8 +3,8 @@
 //  Conduit
 //
 //  Form logic for adding or editing a bring-your-own-agent. Holds the editable
-//  fields, validates the connection URL, persists via the repository, syncs the
-//  optional contacts mirror, and runs a one-shot test connection.
+//  fields, validates the connection URL, persists via the repository, and runs a
+//  one-shot test connection.
 //
 //  TOKEN INVARIANT: the connection token lives only in the Keychain. It is never
 //  written to the `Agent`, never persisted in SwiftData, and never logged.
@@ -22,7 +22,6 @@ final class AddEditAgentViewModel {
     var token: String
     var pairingEndpointText: String
     var pairingAgentID = ""
-    var mirrorsToContacts: Bool = false
     var avatarData: Data? = nil
 
     enum TestState: Equatable {
@@ -37,20 +36,17 @@ final class AddEditAgentViewModel {
     private let editingAgent: Agent?
     private let repository: AgentRepository
     private let keychain: KeychainStoring
-    private let contacts: ContactsMirroring
     private let transportFactory: (TransportKind) -> Transport
 
     init(
         editing agent: Agent? = nil,
         repository: AgentRepository,
         keychain: KeychainStoring,
-        contacts: ContactsMirroring,
         transportFactory: @escaping (TransportKind) -> Transport
     ) {
         self.editingAgent = agent
         self.repository = repository
         self.keychain = keychain
-        self.contacts = contacts
         self.transportFactory = transportFactory
 
         if let agent {
@@ -60,7 +56,6 @@ final class AddEditAgentViewModel {
             self.connectionURLText = agent.connectionURL?.absoluteString ?? ""
             self.pairingEndpointText = agent.pairingEndpoint?.absoluteString ?? ""
             self.pairingAgentID = agent.pairingAgentID ?? ""
-            self.mirrorsToContacts = agent.mirrorsToContacts
             self.avatarData = agent.avatarData
             self.token = (try? keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef))).flatMap { $0 } ?? ""
         } else {
@@ -113,7 +108,6 @@ final class AddEditAgentViewModel {
             agent.connectionURL = connectionURL
             agent.pairingEndpoint = pairingEndpoint
             agent.pairingAgentID = agentID
-            agent.mirrorsToContacts = mirrorsToContacts
         } else {
             agent = Agent(
                 name: name.trimmed,
@@ -122,8 +116,7 @@ final class AddEditAgentViewModel {
                 transportKind: transportKind,
                 connectionURL: connectionURL,
                 pairingEndpoint: pairingEndpoint,
-                pairingAgentID: agentID,
-                mirrorsToContacts: mirrorsToContacts
+                pairingAgentID: agentID
             )
             repository.insert(agent)
         }
@@ -136,28 +129,6 @@ final class AddEditAgentViewModel {
         }
 
         try repository.save()
-
-        await syncMirror(for: agent)
-    }
-
-    private func syncMirror(for agent: Agent) async {
-        if mirrorsToContacts {
-            if contacts.authorizationStatus() == .notDetermined {
-                _ = await contacts.requestAccess()
-            }
-            let status = contacts.authorizationStatus()
-            guard status == .authorized || status == .limited else { return }
-            try? await contacts.upsertMirror(
-                for: AgentMirrorInfo(
-                    id: agent.id,
-                    displayName: agent.name,
-                    avatarData: agent.avatarData,
-                    syntheticEmail: agent.syntheticEmail
-                )
-            )
-        } else {
-            try? await contacts.removeMirror(agentID: agent.id)
-        }
     }
 
     // MARK: - Test connection

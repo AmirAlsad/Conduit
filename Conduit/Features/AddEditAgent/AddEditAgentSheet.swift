@@ -19,7 +19,6 @@ struct AddEditAgentSheet: View {
                 editing: editing,
                 repository: environment.agentRepository,
                 keychain: environment.keychain,
-                contacts: environment.contacts,
                 transportFactory: environment.transportFactory
             )
         )
@@ -32,7 +31,6 @@ struct AddEditAgentSheet: View {
                 connectionSection
                 pairingSection
                 testSection
-                mirrorSection
             }
             .accessibilityIdentifier(AccessibilityID.AddAgent.screen)
             .navigationTitle(viewModel.isEditing ? "Edit Agent" : "Add Agent")
@@ -141,14 +139,6 @@ struct AddEditAgentSheet: View {
         }
     }
 
-    private var mirrorSection: some View {
-        Section {
-            Toggle("Mirror to Contacts", isOn: $viewModel.mirrorsToContacts)
-                .accessibilityIdentifier(AccessibilityID.AddAgent.mirrorToggle)
-        } footer: {
-            Text("Adds a contact so this agent's name and photo appear on the call screen, lock screen, and in your car. Stays on your device.")
-        }
-    }
 }
 
 #Preview {

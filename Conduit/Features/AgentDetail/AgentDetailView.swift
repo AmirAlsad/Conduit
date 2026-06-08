@@ -15,6 +15,7 @@ struct AgentDetailView: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.dismiss) private var dismiss
     @State private var showingEdit = false
+    @State private var showingAddContact = false
     @State private var confirmingDelete = false
 
     private var sortedLog: [CallLogEntry] {
@@ -31,6 +32,7 @@ struct AgentDetailView: View {
         List {
             header
             callAction
+            contactSection
             callHistory
             deleteSection
         }
@@ -45,6 +47,13 @@ struct AgentDetailView: View {
         }
         .sheet(isPresented: $showingEdit) {
             AddEditAgentSheet(editing: agent, environment: environment)
+        }
+        .sheet(isPresented: $showingAddContact) {
+            NewContactView(info: mirrorInfo) { savedID in
+                if let savedID { saveContactIdentifier(savedID) }
+                showingAddContact = false
+            }
+            .ignoresSafeArea()
         }
         .confirmationDialog(
             "Delete \(agent.name)?",
@@ -110,6 +119,42 @@ struct AgentDetailView: View {
         }
     }
 
+    // MARK: - Contact
+
+    @ViewBuilder
+    private var contactSection: some View {
+        Section {
+            if agent.contactIdentifier == nil {
+                Button {
+                    showingAddContact = true
+                } label: {
+                    Label("Add to Contacts", systemImage: "person.crop.circle.badge.plus")
+                }
+                .accessibilityIdentifier(AccessibilityID.AgentDetail.addToContactsButton)
+            } else {
+                Label("Added to Contacts", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier(AccessibilityID.AgentDetail.addToContactsButton)
+            }
+        } footer: {
+            Text("Adds a contact so this agent's name and photo appear on the call screen, lock screen, and in your car. Saved through the system — Conduit never reads your contacts.")
+        }
+    }
+
+    private var mirrorInfo: AgentMirrorInfo {
+        AgentMirrorInfo(
+            id: agent.id,
+            displayName: agent.name,
+            avatarData: agent.avatarData,
+            syntheticEmail: agent.syntheticEmail
+        )
+    }
+
+    private func saveContactIdentifier(_ identifier: String) {
+        agent.contactIdentifier = identifier
+        try? environment.agentRepository.save()
+    }
+
     // MARK: - Call history
 
     private var callHistory: some View {
@@ -166,7 +211,6 @@ struct AgentDetailView: View {
         try? environment.keychain.deleteToken(
             for: KeychainTokenRef(account: agent.keychainTokenRef)
         )
-        Task { try? await environment.contacts.removeMirror(agentID: agent.id) }
         environment.agentRepository.delete(agent)
         try? environment.agentRepository.save()
         dismiss()

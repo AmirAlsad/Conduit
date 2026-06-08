@@ -2,9 +2,10 @@
 //  AgentMirrorInfo.swift
 //  Conduit
 //
-//  A flat snapshot of the agent's display identity handed to the contacts mirror,
-//  so the service never imports SwiftData. The synthetic email is written into the
-//  contact's email field so the system call UI matches the contact (name + photo).
+//  A flat snapshot of the agent's display identity used to build the pre-filled
+//  system contact (`AgentContactBuilder`), so the contact layer never imports
+//  SwiftData. The synthetic email is written into the contact's email field so the
+//  system call UI matches the contact (name + photo).
 //
 
 import Foundation

@@ -28,8 +28,8 @@ final class Agent {
     var pairingEndpoint: URL?
     /// Which agent the pairing endpoint should connect (the engine's `agent_id`).
     var pairingAgentID: String?
-    var mirrorsToContacts: Bool
-    /// `CNContact.identifier` of the mirrored system contact, once created.
+    /// `CNContact.identifier` of the system contact, once the user adds the agent
+    /// via the system Add-Contact sheet. `nil` means not added.
     var contactIdentifier: String?
     /// Keychain account string for this agent's token (never the token itself).
     var keychainTokenRef: String
@@ -47,7 +47,6 @@ final class Agent {
         connectionURL: URL? = nil,
         pairingEndpoint: URL? = nil,
         pairingAgentID: String? = nil,
-        mirrorsToContacts: Bool = false,
         createdAt: Date = .now
     ) {
         self.id = id
@@ -59,7 +58,6 @@ final class Agent {
         self.connectionURL = connectionURL
         self.pairingEndpoint = pairingEndpoint
         self.pairingAgentID = pairingAgentID
-        self.mirrorsToContacts = mirrorsToContacts
         self.contactIdentifier = nil
         self.keychainTokenRef = KeychainTokenRef(agentID: id).account
         self.createdAt = createdAt

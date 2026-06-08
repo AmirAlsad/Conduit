@@ -20,7 +20,6 @@ import SwiftData
 final class AppEnvironment {
     let modelContainer: ModelContainer
     let keychain: KeychainStoring
-    let contacts: ContactsMirroring
     let callProvider: CallProviding
     let agentRepository: AgentRepository
     let announcer: SpokenStateAnnouncing
@@ -30,7 +29,6 @@ final class AppEnvironment {
     init(
         modelContainer: ModelContainer,
         keychain: KeychainStoring,
-        contacts: ContactsMirroring,
         callProvider: CallProviding,
         agentRepository: AgentRepository,
         announcer: SpokenStateAnnouncing,
@@ -39,7 +37,6 @@ final class AppEnvironment {
     ) {
         self.modelContainer = modelContainer
         self.keychain = keychain
-        self.contacts = contacts
         self.callProvider = callProvider
         self.agentRepository = agentRepository
         self.announcer = announcer
@@ -91,7 +88,6 @@ final class AppEnvironment {
         return AppEnvironment(
             modelContainer: container,
             keychain: KeychainService(),
-            contacts: ContactsService(),
             callProvider: callProvider,
             agentRepository: SwiftDataAgentRepository(context: container.mainContext),
             announcer: SpeechSpokenStateAnnouncer(),
@@ -114,7 +110,6 @@ final class AppEnvironment {
         return AppEnvironment(
             modelContainer: container,
             keychain: InMemoryKeychain(),
-            contacts: FakeContactsMirror(),
             callProvider: FakeCallProvider(),
             agentRepository: SwiftDataAgentRepository(context: container.mainContext),
             announcer: FakeSpokenStateAnnouncer(),

@@ -3,8 +3,8 @@
 //  ConduitTests
 //
 //  The bring-your-own-agent form logic against fakes: validation, persistence
-//  (token to Keychain, never on the agent), the contacts-mirror lifecycle, edit
-//  identity-stability, and the test-connection state machine.
+//  (token to Keychain, never on the agent), edit identity-stability, and the
+//  test-connection state machine.
 //
 
 import Foundation
@@ -28,14 +28,12 @@ struct AddEditAgentViewModelTests {
         editing agent: Agent? = nil,
         repository: SwiftDataAgentRepository,
         keychain: KeychainStoring = InMemoryKeychain(),
-        contacts: ContactsMirroring = FakeContactsMirror(),
         transportFactory: @escaping (TransportKind) -> Transport = { _ in FakeTransport() }
     ) -> AddEditAgentViewModel {
         AddEditAgentViewModel(
             editing: agent,
             repository: repository,
             keychain: keychain,
-            contacts: contacts,
             transportFactory: transportFactory
         )
     }
@@ -126,42 +124,6 @@ struct AddEditAgentViewModelTests {
         #expect(agent.syntheticEmail == originalEmail)
         #expect(agent.keychainTokenRef == originalRef)
         #expect(try repo.fetchAll().count == 1)
-    }
-
-    // MARK: - Contacts mirror lifecycle
-
-    @Test func savingWithMirrorOnUpsertsContact() async throws {
-        let repo = try makeRepository()
-        let contacts = FakeContactsMirror(grantsAccess: true)
-        let vm = makeViewModel(repository: repo, contacts: contacts)
-        vm.name = "Echo"
-        vm.connectionURLText = "https://x.daily.co/room"
-        vm.token = "t"
-        vm.mirrorsToContacts = true
-
-        try await vm.save()
-
-        let agent = try #require(try repo.fetchAll().first)
-        #expect(contacts.mirror(for: agent.id) != nil)
-    }
-
-    @Test func editingWithMirrorOffRemovesContact() async throws {
-        let repo = try makeRepository()
-        let contacts = FakeContactsMirror(grantsAccess: true)
-
-        let create = makeViewModel(repository: repo, contacts: contacts)
-        create.name = "Echo"
-        create.connectionURLText = "https://x.daily.co/room"
-        create.token = "t"
-        create.mirrorsToContacts = true
-        try await create.save()
-        let agent = try #require(try repo.fetchAll().first)
-        #expect(contacts.mirror(for: agent.id) != nil)
-
-        let edit = makeViewModel(editing: agent, repository: repo, contacts: contacts)
-        edit.mirrorsToContacts = false
-        try await edit.save()
-        #expect(contacts.mirror(for: agent.id) == nil)
     }
 
     // MARK: - Test connection
