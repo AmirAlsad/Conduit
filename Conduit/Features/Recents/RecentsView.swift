@@ -59,20 +59,17 @@ struct RecentsView: View {
     @ViewBuilder
     private func row(for entry: CallLogEntry, index: Int) -> some View {
         if let agent = entry.agent {
-            HStack(spacing: 8) {
+            NavigationLink(value: agent) {
+                RecentRow(entry: entry)
+            }
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
                 Button {
                     Task { await environment.callSession.placeCall(agent) }
                 } label: {
-                    RecentRow(entry: entry)
+                    Label("Call", systemImage: "phone.fill")
                 }
-                .buttonStyle(.plain)
-
-                NavigationLink(value: agent) {
-                    Image(systemName: "info.circle")
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("\(agent.name) details")
-                .accessibilityIdentifier(AccessibilityID.Recents.infoButton(index))
+                .tint(.green)
+                .accessibilityIdentifier(AccessibilityID.Recents.callButton(index))
             }
         } else {
             RecentRow(entry: entry)

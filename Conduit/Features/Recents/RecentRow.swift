@@ -20,17 +20,20 @@ struct RecentRow: View {
                 Text(agentName)
                     .font(.headline)
                     .foregroundStyle(nameTint)
+                    .lineLimit(1)
 
                 HStack(spacing: 4) {
                     Image(systemName: entry.outcome.iconName)
                         .foregroundStyle(entry.outcome.tint)
                     Text("\(entry.outcome.displayLabel) · \(CallFormatting.relativeDate(entry.startedAt))")
+                        .lineLimit(1)
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             if showsDuration {
                 Text(CallFormatting.duration(entry.duration))

@@ -20,6 +20,7 @@ struct ConduitApp: App {
                 .modelContainer(environment.modelContainer)
                 #if DEBUG
                 .task {
+                    DebugSeed.runIfRequested(environment)
                     if ProcessInfo.processInfo.environment["CONDUIT_DEBUG_CALLKIT"] == "1" {
                         await DebugCallKitSpike.runIfRequested()
                     } else {
