@@ -35,17 +35,20 @@ final class AddEditAgentViewModel {
     private let editingAgent: Agent?
     private let repository: AgentRepository
     private let keychain: KeychainStoring
+    private let contactSync: ContactSyncing
     private let transportFactory: (TransportKind) -> Transport
 
     init(
         editing agent: Agent? = nil,
         repository: AgentRepository,
         keychain: KeychainStoring,
+        contactSync: ContactSyncing,
         transportFactory: @escaping (TransportKind) -> Transport
     ) {
         self.editingAgent = agent
         self.repository = repository
         self.keychain = keychain
+        self.contactSync = contactSync
         self.transportFactory = transportFactory
 
         if let agent {
@@ -124,6 +127,20 @@ final class AddEditAgentViewModel {
         }
 
         try repository.save()
+
+        // Keep an already-linked contact in step with the agent (name + photo).
+        // No-op for unlinked agents, so the default stays permission-free.
+        if let identifier = agent.contactIdentifier {
+            _ = await contactSync.sync(
+                AgentMirrorInfo(
+                    id: agent.id,
+                    displayName: agent.name,
+                    avatarData: agent.avatarData,
+                    syntheticEmail: agent.syntheticEmail
+                ),
+                contactIdentifier: identifier
+            )
+        }
     }
 
     // MARK: - Test connection

@@ -20,11 +20,13 @@ suite, SwiftUI previews, and the future CallKit-free debug path all reuse them.
 | CallKit | `CallProviding` + `CallProviderDelegate` + `AudioSessionActivating` (`CallKit/`) | `FakeCallProvider` / `FakeAudioSession` | `SystemCallProvider` (built, M3) |
 | Transport | `Transport` (`Transport/`) | `FakeTransport` | `PipecatDailyTransport` (built, M2); `LiveKitTransport` — WS-6 |
 | Keychain | `KeychainStoring` (`Keychain/`) | `InMemoryKeychain` | `KeychainService` (built, WS-4) |
+| Contacts sync | `ContactSyncing` (`Contacts/`) | `FakeContactSync` | `ContactSyncService` (built) |
 | Persistence | `AgentRepository` (`Persistence/`) | — | `SwiftDataAgentRepository` (built) |
 
-Contacts has **no service seam**: adding an agent to Contacts goes through the
-system `CNContactViewController` (see below), so there is no store round-trip to
-abstract or fake.
+*Adding* an agent to Contacts has no seam — it goes through the system
+`CNContactViewController` (see below), so there is no store round-trip to abstract.
+Only *updating* a linked contact (sync-on-save) touches `CNContactStore`, behind
+the `ContactSyncing` seam above.
 
 The `Transport` event surface is Conduit's own vocabulary (`TransportEvent`:
 `connecting` / `connected` / `reconnecting` / `disconnected(reason:)` /
@@ -90,15 +92,23 @@ Adding an agent to Contacts is **optional and permission-free**. From AgentDetai
 "Add to Contacts" presents the system `CNContactViewController(forNewContact:)`
 (`NewContactView` in `Shared/Components/`), pre-filled by the pure
 `AgentContactBuilder` (`Contacts/`) with the agent's name, photo, and synthetic
-`.invalid` email. The **user** saves it through system UI, so Conduit never holds
-Contacts permission and never reads or writes `CNContactStore` itself (no
-`NSContactsUsageDescription`). Because the contact's email matches the call's
-email-type CXHandle, iOS then shows the agent's **name + photo** on the call
-screen, lock screen, and CarPlay in place of the raw handle. The delegate returns
-the saved contact's identifier, stored on `Agent.contactIdentifier` to flip the
-button to "Added to Contacts". The only logic worth testing is the builder mapping
-(`AgentContactTests`). *Known caveats:* the contact persists after the agent is
-deleted or the app is uninstalled (no permission to remove it programmatically,
+`name@conduit.invalid` email (neutral "other" label). The **user** saves it
+through system UI, so *adding* never holds Contacts permission. Because the
+contact's email matches the call's email-type CXHandle, iOS then shows the agent's
+**name + photo** on the call screen, lock screen, and CarPlay in place of the raw
+handle. The delegate returns the saved contact's identifier, stored on
+`Agent.contactIdentifier` to flip the button to "Added to Contacts".
+
+**Sync on save.** Updating an already-linked contact in place *does* need Contacts
+access (the system sheet only creates), so editing a linked agent syncs its name +
+photo via `ContactSyncing` → `ContactSyncService` (`CNContactStore.update`), with
+`FakeContactSync` for tests. Access is requested **lazily** — only the first time a
+*linked* agent is saved (`AddEditAgentViewModel.save`) — so the default stays
+permission-free; `NSContactsUsageDescription` covers this one path. Decline → it
+stays a snapshot. The tested logic is the builder mapping (`AgentContactTests`) and
+the "sync only when linked" decision (`AddEditAgentViewModelTests`). *Known
+caveats:* the contact persists after the agent is deleted or the app is uninstalled
+(no permission to remove it programmatically,
 and iOS gives no uninstall hook); a user who deletes the contact in the Contacts
 app leaves a stale `contactIdentifier`.
 

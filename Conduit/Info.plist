@@ -40,5 +40,9 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Conduit uses the microphone to carry your voice to your agent during a call.</string>
+	<!-- Requested only when you edit an agent that you've added to Contacts: Conduit keeps that
+	     one contact's name and photo in sync. It never reads or changes your other contacts. -->
+	<key>NSContactsUsageDescription</key>
+	<string>Conduit keeps the contact you added for an agent in sync — updating its name and photo when you edit the agent. It never touches your other contacts.</string>
 </dict>
 </plist>

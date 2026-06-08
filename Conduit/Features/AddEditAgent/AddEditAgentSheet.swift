@@ -21,6 +21,7 @@ struct AddEditAgentSheet: View {
                 editing: editing,
                 repository: environment.agentRepository,
                 keychain: environment.keychain,
+                contactSync: environment.contactSync,
                 transportFactory: environment.transportFactory
             )
         )

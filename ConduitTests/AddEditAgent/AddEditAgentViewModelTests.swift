@@ -28,12 +28,14 @@ struct AddEditAgentViewModelTests {
         editing agent: Agent? = nil,
         repository: SwiftDataAgentRepository,
         keychain: KeychainStoring = InMemoryKeychain(),
+        contactSync: ContactSyncing = FakeContactSync(),
         transportFactory: @escaping (TransportKind) -> Transport = { _ in FakeTransport() }
     ) -> AddEditAgentViewModel {
         AddEditAgentViewModel(
             editing: agent,
             repository: repository,
             keychain: keychain,
+            contactSync: contactSync,
             transportFactory: transportFactory
         )
     }
@@ -122,6 +124,38 @@ struct AddEditAgentViewModelTests {
         #expect(agent.syntheticEmail == originalEmail)
         #expect(agent.keychainTokenRef == originalRef)
         #expect(try repo.fetchAll().count == 1)
+    }
+
+    // MARK: - Contact sync on save
+
+    @Test func editingALinkedAgentSyncsTheContact() async throws {
+        let repo = try makeRepository()
+        let agent = Agent(name: "Old Name", transportKind: .daily, connectionURL: URL(string: "https://a.daily.co/r")!)
+        agent.contactIdentifier = "contact-123"
+        repo.insert(agent)
+        try repo.save()
+
+        let sync = FakeContactSync()
+        let vm = makeViewModel(editing: agent, repository: repo, contactSync: sync)
+        vm.name = "New Name"
+        try await vm.save()
+
+        #expect(sync.syncCount == 1)
+        #expect(sync.lastSync?.contactIdentifier == "contact-123")
+        #expect(sync.lastSync?.info.displayName == "New Name")
+    }
+
+    @Test func savingAnUnlinkedAgentDoesNotSync() async throws {
+        let repo = try makeRepository()
+        let sync = FakeContactSync()
+        let vm = makeViewModel(repository: repo, contactSync: sync)
+        vm.name = "Echo"
+        vm.connectionURLText = "https://x.daily.co/room"
+        vm.token = "t"
+
+        try await vm.save()
+
+        #expect(sync.syncCount == 0) // no contact linked → permission-free
     }
 
     // MARK: - Test connection
