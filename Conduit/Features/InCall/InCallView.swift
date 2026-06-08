@@ -136,7 +136,7 @@ struct InCallView: View {
         VStack(spacing: 40) {
             HStack(spacing: 56) {
                 micControl
-                routePicker
+                routeButton
             }
             endButton
         }
@@ -209,14 +209,37 @@ struct InCallView: View {
 
     // MARK: - Route picker
 
-    private var routePicker: some View {
-        // Sized to match the other control circles; AVRoutePickerView draws its own
-        // glyph, so we frame + background it identically rather than use controlCircle.
-        RoutePickerView(tint: .white)
-            .frame(width: 64, height: 64)
-            .background(.white.opacity(0.15), in: .circle)
-            .accessibilityLabel("Audio Output")
-            .accessibilityIdentifier(AccessibilityID.InCall.routePicker)
+    // A Daily-backed route menu (speaker / earpiece / Bluetooth / AirPods). Routing
+    // goes through the transport because the SDK manages its own audio session and
+    // re-asserts its choice — AVRoutePickerView (AirPlay) just fought it.
+    private var routeButton: some View {
+        Menu {
+            ForEach(coordinator.audioDevices) { device in
+                Button {
+                    Task { await coordinator.selectAudioDevice(device.id) }
+                } label: {
+                    if device.id == coordinator.selectedAudioDeviceID {
+                        Label(device.name, systemImage: "checkmark")
+                    } else {
+                        Text(device.name)
+                    }
+                }
+            }
+        } label: {
+            controlCircle(systemImage: routeIcon, filled: false)
+        }
+        .accessibilityLabel("Audio Output")
+        .accessibilityIdentifier(AccessibilityID.InCall.routePicker)
+    }
+
+    private var routeIcon: String {
+        let selected = coordinator.audioDevices.first { $0.id == coordinator.selectedAudioDeviceID }
+        let name = selected?.name.lowercased() ?? ""
+        if name.contains("speaker") { return "speaker.wave.2.fill" }
+        if name.contains("bluetooth") || name.contains("airpod") || name.contains("headphone") || name.contains("headset") {
+            return "headphones"
+        }
+        return "iphone" // receiver / earpiece / built-in
     }
 
     // MARK: - End button

@@ -27,6 +27,9 @@ final class UnavailableTransport: Transport, @unchecked Sendable {
 
     func disconnect() async { continuation.finish() }
     func setMicEnabled(_ enabled: Bool) async {}
+    func availableAudioDevices() async -> [AudioDeviceInfo] { [] }
+    func selectedAudioDevice() async -> AudioDeviceInfo? { nil }
+    func setAudioDevice(_ id: String) async {}
     func attachAudioSession() async {}
     func detachAudioSession() async {}
 }

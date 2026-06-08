@@ -23,6 +23,13 @@ protocol Transport: AnyObject {
     func disconnect() async
     func setMicEnabled(_ enabled: Bool) async
 
+    /// The audio routes the user can pick from (speaker, earpiece, Bluetooth, …).
+    /// Routing goes through the transport so the SDK — which manages its own audio
+    /// session and would otherwise re-assert its choice — honors the selection.
+    func availableAudioDevices() async -> [AudioDeviceInfo]
+    func selectedAudioDevice() async -> AudioDeviceInfo?
+    func setAudioDevice(_ id: String) async
+
     /// Start media on the CallKit-activated session. Called ONLY from the
     /// coordinator's `providerDidActivate` handling.
     func attachAudioSession() async

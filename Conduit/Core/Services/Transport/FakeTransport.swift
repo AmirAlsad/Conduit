@@ -45,6 +45,18 @@ final class FakeTransport: Transport, @unchecked Sendable {
         setMicEnabledCallCount += 1
     }
 
+    var fakeAudioDevices: [AudioDeviceInfo] = [
+        AudioDeviceInfo(id: "speaker", name: "Speaker"),
+        AudioDeviceInfo(id: "receiver", name: "iPhone"),
+    ]
+    private(set) var selectedAudioDeviceID = "speaker"
+
+    func availableAudioDevices() async -> [AudioDeviceInfo] { fakeAudioDevices }
+    func selectedAudioDevice() async -> AudioDeviceInfo? {
+        fakeAudioDevices.first { $0.id == selectedAudioDeviceID }
+    }
+    func setAudioDevice(_ id: String) async { selectedAudioDeviceID = id }
+
     func attachAudioSession() async {
         isAudioAttached = true
     }

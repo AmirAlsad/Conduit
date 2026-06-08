@@ -28,6 +28,9 @@ final class CallSessionCoordinator: CallProviderDelegate {
     private(set) var remoteAudioLevel: Float = 0
     /// Whether CallKit has activated the audio session for the live call.
     private(set) var isAudioActivated = false
+    /// Available audio routes and the active one, for the in-call route picker.
+    private(set) var audioDevices: [AudioDeviceInfo] = []
+    private(set) var selectedAudioDeviceID: String?
 
     // MARK: - Dependencies
 
@@ -176,6 +179,9 @@ final class CallSessionCoordinator: CallProviderDelegate {
 
         case .remoteAudioLevel(let level):
             remoteAudioLevel = level
+
+        case .audioDevicesChanged:
+            Task { [weak self] in await self?.refreshAudioDevices() }
 
         case .error(let error):
             handleError(error)
@@ -335,6 +341,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
         // CallKit activates BEFORE connect (e.g. a slow pairing fetch delays the
         // join), this is a no-op and the mic is (re)enabled in `handleConnected`.
         await transport?.setMicEnabled(micShouldBeOn)
+        await refreshAudioDevices()
     }
 
     func providerDidDeactivate(_ audioSession: AudioSessionActivating) {
@@ -379,6 +386,18 @@ final class CallSessionCoordinator: CallProviderDelegate {
     func setPushToTalkActive(_ active: Bool) async {
         guard isPushToTalkEnabled() else { return }
         await transport?.setMicEnabled(active)
+    }
+
+    // MARK: - Audio route (driven through the transport so the SDK honors it)
+
+    func selectAudioDevice(_ id: String) async {
+        await transport?.setAudioDevice(id)
+        await refreshAudioDevices()
+    }
+
+    private func refreshAudioDevices() async {
+        audioDevices = await transport?.availableAudioDevices() ?? []
+        selectedAudioDeviceID = await transport?.selectedAudioDevice()?.id
     }
 
     /// Return to idle after a terminal state (called by the UI on dismiss).
@@ -450,6 +469,8 @@ final class CallSessionCoordinator: CallProviderDelegate {
         isBotSpeaking = false
         remoteAudioLevel = 0
         isAudioActivated = false
+        audioDevices = []
+        selectedAudioDeviceID = nil
     }
 
     private func writeLog(outcome: CallOutcome) {

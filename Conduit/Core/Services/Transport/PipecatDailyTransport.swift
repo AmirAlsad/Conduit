@@ -100,6 +100,22 @@ final class PipecatDailyTransport: Conduit.Transport, PipecatClientDelegate {
         catch { Log.error(.transport, "Daily enableMic(\(enabled)) error: \(error)") }
     }
 
+    // Daily models the iOS audio routes (speaker / receiver / Bluetooth / wired) as
+    // its "mic" devices and honors `updateMic` — unlike a manual AVAudioSession
+    // override, which Daily's own session management would re-assert.
+    func availableAudioDevices() async -> [AudioDeviceInfo] {
+        client.getAllMics().map { AudioDeviceInfo(id: $0.id.id, name: $0.name) }
+    }
+
+    func selectedAudioDevice() async -> AudioDeviceInfo? {
+        client.selectedMic.map { AudioDeviceInfo(id: $0.id.id, name: $0.name) }
+    }
+
+    func setAudioDevice(_ id: String) async {
+        do { try await client.updateMic(micId: MediaDeviceId(id: id)) }
+        catch { Log.error(.audio, "Daily setAudioDevice(\(id)) error: \(error)") }
+    }
+
     func attachAudioSession() async {
         // Daily owns the AVAudioSession; nothing to attach here. The CallKit-owned
         // activation handshake for Daily is the M3 on-device spike.
@@ -158,6 +174,18 @@ final class PipecatDailyTransport: Conduit.Transport, PipecatClientDelegate {
 
     nonisolated func onRemoteAudioLevel(level: Float, participant: Participant) {
         continuation.yield(.remoteAudioLevel(level))
+    }
+
+    nonisolated func onAvailableMicsUpdated(mics: [MediaDeviceInfo]) {
+        continuation.yield(.audioDevicesChanged)
+    }
+
+    nonisolated func onMicUpdated(mic: MediaDeviceInfo?) {
+        continuation.yield(.audioDevicesChanged)
+    }
+
+    nonisolated func onSpeakerUpdated(speaker: MediaDeviceInfo?) {
+        continuation.yield(.audioDevicesChanged)
     }
 
     nonisolated func onError(message: RTVIMessageInbound) {

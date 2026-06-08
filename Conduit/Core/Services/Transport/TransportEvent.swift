@@ -24,5 +24,7 @@ enum TransportEvent: Equatable, Sendable {
     case userStoppedSpeaking
     /// Remote (agent) output level, 0...1, for the listening/speaking glow.
     case remoteAudioLevel(Float)
+    /// The set of available audio routes changed (e.g. AirPods connected mid-call).
+    case audioDevicesChanged
     case error(TransportError)
 }
