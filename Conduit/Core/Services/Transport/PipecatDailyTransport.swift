@@ -64,7 +64,6 @@ final class PipecatDailyTransport: Conduit.Transport, PipecatClientDelegate {
                 let creds = try await PairingClient.resolve(
                     endpoint: endpoint,
                     apiKey: config.token,
-                    agentID: config.pairingAgentID ?? "",
                     transport: config.kind
                 )
                 roomURL = creds.roomURL.absoluteString

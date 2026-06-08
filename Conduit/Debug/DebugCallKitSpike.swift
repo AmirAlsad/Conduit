@@ -55,8 +55,7 @@ enum DebugCallKitSpike {
             name: "Conduit Spike",
             detail: agentID,
             transportKind: .daily,
-            pairingEndpoint: pairingEndpoint,
-            pairingAgentID: agentID
+            pairingEndpoint: pairingEndpoint
         )
         repository.insert(agent)
         try? repository.save()

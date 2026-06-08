@@ -21,7 +21,6 @@ final class AddEditAgentViewModel {
     var connectionURLText: String
     var token: String
     var pairingEndpointText: String
-    var pairingAgentID = ""
     var avatarData: Data? = nil
 
     enum TestState: Equatable {
@@ -55,7 +54,6 @@ final class AddEditAgentViewModel {
             self.transportKind = agent.transportKind
             self.connectionURLText = agent.connectionURL?.absoluteString ?? ""
             self.pairingEndpointText = agent.pairingEndpoint?.absoluteString ?? ""
-            self.pairingAgentID = agent.pairingAgentID ?? ""
             self.avatarData = agent.avatarData
             self.token = (try? keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef))).flatMap { $0 } ?? ""
         } else {
@@ -96,7 +94,6 @@ final class AddEditAgentViewModel {
 
     func save() async throws {
         guard connectionURL != nil || pairingEndpoint != nil else { return }
-        let agentID = pairingAgentID.trimmed.isEmpty ? nil : pairingAgentID.trimmed
 
         let agent: Agent
         if let editingAgent {
@@ -107,7 +104,6 @@ final class AddEditAgentViewModel {
             agent.transportKindRaw = transportKind.rawValue
             agent.connectionURL = connectionURL
             agent.pairingEndpoint = pairingEndpoint
-            agent.pairingAgentID = agentID
         } else {
             agent = Agent(
                 name: name.trimmed,
@@ -115,8 +111,7 @@ final class AddEditAgentViewModel {
                 avatarData: avatarData,
                 transportKind: transportKind,
                 connectionURL: connectionURL,
-                pairingEndpoint: pairingEndpoint,
-                pairingAgentID: agentID
+                pairingEndpoint: pairingEndpoint
             )
             repository.insert(agent)
         }
@@ -150,8 +145,7 @@ final class AddEditAgentViewModel {
             kind: transportKind,
             url: connectionURL,
             token: token,
-            pairingEndpoint: pairingEndpoint,
-            pairingAgentID: pairingAgentID.trimmed.isEmpty ? nil : pairingAgentID.trimmed
+            pairingEndpoint: pairingEndpoint
         )
         let transport = transportFactory(transportKind)
 

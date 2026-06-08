@@ -3,10 +3,12 @@
 //  Conduit
 //
 //  Resolves a bring-your-own pairing endpoint into a fresh room + token for one
-//  call: POST the endpoint with the API key as a bearer and `{agent_id, transport}`,
-//  then read the credentials. The reference engine nests them under `connection`
-//  (which is why the SDK's built-in pairing decoder choked); a flat shape is also
-//  accepted. This talks to the USER's own server — there is no backend of ours.
+//  call: POST the endpoint with the API key as a bearer and `{transport}`, then
+//  read the credentials. The endpoint itself identifies the agent (one endpoint
+//  per agent), so no agent id is sent. The reference engine nests credentials
+//  under `connection` (which is why the SDK's built-in pairing decoder choked); a
+//  flat shape is also accepted. This talks to the USER's own server — there is no
+//  backend of ours.
 //
 
 import Foundation
@@ -15,7 +17,6 @@ enum PairingClient {
     static func resolve(
         endpoint: URL,
         apiKey: String,
-        agentID: String,
         transport: TransportKind,
         session: URLSession = .shared
     ) async throws -> PairingCredentials {
@@ -25,8 +26,7 @@ enum PairingClient {
         if !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
-        var body: [String: String] = ["transport": transport.rawValue]
-        if !agentID.isEmpty { body["agent_id"] = agentID }
+        let body: [String: String] = ["transport": transport.rawValue]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: request)

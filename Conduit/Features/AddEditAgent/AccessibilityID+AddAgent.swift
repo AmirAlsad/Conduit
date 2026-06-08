@@ -16,7 +16,6 @@ extension AccessibilityID {
         static let urlField = "AddAgent_URLField"
         static let tokenField = "AddAgent_TokenField"
         static let pairingField = "AddAgent_PairingField"
-        static let pairingAgentIDField = "AddAgent_PairingAgentIDField"
         static let testConnectionButton = "AddAgent_TestConnectionButton"
         static let testResult = "AddAgent_TestResult"
         static let saveButton = "AddAgent_SaveButton"

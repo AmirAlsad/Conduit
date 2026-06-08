@@ -91,12 +91,11 @@ struct AddEditAgentViewModelTests {
         #expect(try keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef)) == "secret-token")
     }
 
-    @Test func savingPairingAgentPersistsEndpointAndAgentID() async throws {
+    @Test func savingPairingAgentPersistsEndpoint() async throws {
         let repo = try makeRepository()
         let vm = makeViewModel(repository: repo)
         vm.name = "Engine Agent"
         vm.pairingEndpointText = "https://engine.example.com/connect"
-        vm.pairingAgentID = "live"
         vm.token = "api-key"
 
         try await vm.save()
@@ -104,7 +103,6 @@ struct AddEditAgentViewModelTests {
         let agent = try #require(try repo.fetchAll().first)
         #expect(agent.connectionURL == nil)
         #expect(agent.pairingEndpoint?.absoluteString == "https://engine.example.com/connect")
-        #expect(agent.pairingAgentID == "live")
     }
 
     @Test func editingKeepsSyntheticIdentityStableAndDoesNotDuplicate() async throws {

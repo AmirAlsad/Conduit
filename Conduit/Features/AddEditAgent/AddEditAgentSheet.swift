@@ -28,8 +28,8 @@ struct AddEditAgentSheet: View {
         NavigationStack {
             Form {
                 identitySection
-                connectionSection
                 pairingSection
+                directSection
                 testSection
             }
             .accessibilityIdentifier(AccessibilityID.AddAgent.screen)
@@ -63,7 +63,7 @@ struct AddEditAgentSheet: View {
         }
     }
 
-    private var connectionSection: some View {
+    private var pairingSection: some View {
         Section {
             Picker("Transport", selection: $viewModel.transportKind) {
                 ForEach(TransportKind.allCases) { kind in
@@ -72,37 +72,32 @@ struct AddEditAgentSheet: View {
             }
             .accessibilityIdentifier(AccessibilityID.AddAgent.transportPicker)
 
-            TextField("Room URL", text: $viewModel.connectionURLText)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.URL)
-                .accessibilityIdentifier(AccessibilityID.AddAgent.urlField)
-
-            SecureField("Token / API key", text: $viewModel.token)
-                .accessibilityIdentifier(AccessibilityID.AddAgent.tokenField)
-        } header: {
-            Text("Connection")
-        } footer: {
-            Text("Two ways to connect, your choice: a direct room URL + token, or a pairing endpoint below. The token / API key is stored only in your device Keychain.")
-        }
-    }
-
-    private var pairingSection: some View {
-        Section {
             TextField("Pairing endpoint", text: $viewModel.pairingEndpointText)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
                 .accessibilityIdentifier(AccessibilityID.AddAgent.pairingField)
 
-            TextField("Agent ID", text: $viewModel.pairingAgentID)
+            SecureField("API key", text: $viewModel.token)
+                .accessibilityIdentifier(AccessibilityID.AddAgent.tokenField)
+        } header: {
+            Text("Connection")
+        } footer: {
+            Text("Conduit POSTs this endpoint with your API key as a bearer token to get a fresh room and token for each call — the usual setup for a Pipecat or LiveKit server. The endpoint identifies the agent, so for multiple agents use one endpoint each. The key is stored only in your device Keychain.")
+        }
+    }
+
+    private var directSection: some View {
+        Section {
+            TextField("Room URL", text: $viewModel.connectionURLText)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .accessibilityIdentifier(AccessibilityID.AddAgent.pairingAgentIDField)
+                .keyboardType(.URL)
+                .accessibilityIdentifier(AccessibilityID.AddAgent.urlField)
         } header: {
-            Text("Pairing (optional)")
+            Text("Direct room (advanced)")
         } footer: {
-            Text("If set, the app POSTs this endpoint (bearer = the API key above) for a fresh room + token each call. Agent ID tells your server which agent to connect.")
+            Text("Optional. Skip pairing and connect straight to a room URL, using the key above as the room token.")
         }
     }
 

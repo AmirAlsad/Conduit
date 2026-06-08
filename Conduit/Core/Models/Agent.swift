@@ -24,10 +24,9 @@ final class Agent {
     var transportKindRaw: String
     /// Direct-mode room URL. `nil` for a pairing-only agent (see `pairingEndpoint`).
     var connectionURL: URL?
-    /// Pairing flow: a URL the app POSTs for a fresh room+token per call.
+    /// Pairing flow: a URL the app POSTs for a fresh room+token per call. The
+    /// endpoint identifies the agent (one endpoint per agent).
     var pairingEndpoint: URL?
-    /// Which agent the pairing endpoint should connect (the engine's `agent_id`).
-    var pairingAgentID: String?
     /// `CNContact.identifier` of the system contact, once the user adds the agent
     /// via the system Add-Contact sheet. `nil` means not added.
     var contactIdentifier: String?
@@ -46,7 +45,6 @@ final class Agent {
         transportKind: TransportKind,
         connectionURL: URL? = nil,
         pairingEndpoint: URL? = nil,
-        pairingAgentID: String? = nil,
         createdAt: Date = .now
     ) {
         self.id = id
@@ -57,7 +55,6 @@ final class Agent {
         self.transportKindRaw = transportKind.rawValue
         self.connectionURL = connectionURL
         self.pairingEndpoint = pairingEndpoint
-        self.pairingAgentID = pairingAgentID
         self.contactIdentifier = nil
         self.keychainTokenRef = KeychainTokenRef(agentID: id).account
         self.createdAt = createdAt

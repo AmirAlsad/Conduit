@@ -118,8 +118,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
             kind: agent.transportKind,
             url: agent.connectionURL,
             token: token,
-            pairingEndpoint: agent.pairingEndpoint,
-            pairingAgentID: agent.pairingAgentID
+            pairingEndpoint: agent.pairingEndpoint
         )
         currentConfig = config
 
