@@ -56,6 +56,50 @@ final class AppEnvironment {
         )
     }
 
+    /// The real app environment: a persistent SwiftData store and the real
+    /// Keychain / Contacts / persistence / spoken-state services. CallKit and
+    /// Daily's WebRTC audio can't run in the simulator, so calls there fall back
+    /// to fakes — everything else (add-agent, Keychain, the contact mirror,
+    /// persistence) is real on both. A real call is device-only.
+    static func live() -> AppEnvironment {
+        let container: ModelContainer
+        do {
+            container = try ModelContainer(for: Agent.self, CallLogEntry.self)
+        } catch {
+            Log.error(.app, "Persistent store unavailable, falling back to in-memory: \(error)")
+            container = try! ModelContainer(
+                for: Agent.self, CallLogEntry.self,
+                configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+            )
+        }
+
+        let callProvider: CallProviding
+        let transportFactory: (TransportKind) -> Transport
+        #if targetEnvironment(simulator)
+        callProvider = FakeCallProvider()
+        transportFactory = { _ in FakeTransport() }
+        #else
+        callProvider = SystemCallProvider()
+        transportFactory = { kind in
+            switch kind {
+            case .daily: PipecatDailyTransport()
+            case .livekit: UnavailableTransport(kind: .livekit) // M6
+            }
+        }
+        #endif
+
+        return AppEnvironment(
+            modelContainer: container,
+            keychain: KeychainService(),
+            contacts: ContactsService(),
+            callProvider: callProvider,
+            agentRepository: SwiftDataAgentRepository(context: container.mainContext),
+            announcer: SpeechSpokenStateAnnouncer(),
+            transportFactory: transportFactory,
+            isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) }
+        )
+    }
+
     /// All-fakes environment over an in-memory SwiftData store.
     static func inMemory() -> AppEnvironment {
         let container: ModelContainer

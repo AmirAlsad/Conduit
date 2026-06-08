@@ -43,9 +43,14 @@ verifies pairing/negotiation only; real connect + downlink is verified on device
 owns the SwiftData `ModelContainer`, the protocol-typed services, a
 `transportFactory: (TransportKind) -> Transport`, and the app-wide
 `CallSessionCoordinator`. `inMemory()` wires the fakes + an in-memory store
-(previews, tests, and today's running shell). A `live()` factory is introduced as
-the real services land. `ConduitApp` injects it via `.environment(_:)` +
-`.modelContainer(_:)`.
+(previews, tests). `live()` (what `ConduitApp` runs on) wires the real services —
+`KeychainService`, `ContactsService`, a persistent SwiftData store, and
+`SpeechSpokenStateAnnouncer`. CallKit (`SystemCallProvider`) and the Daily
+transport can't run in the simulator, so `live()` falls back to the call/transport
+fakes there via `#if targetEnvironment(simulator)` while keeping
+Keychain/Contacts/persistence real on both — so a real call is device-only, but
+add-agent / token / mirror / persistence work in the sim. `ConduitApp` injects the
+environment via `.environment(_:)` + `.modelContainer(_:)`.
 
 ## Models & persistence (SwiftData)
 

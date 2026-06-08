@@ -71,7 +71,7 @@ ConduitTests/             # Unit tests (logic, state machines, parsing — run i
 ConduitUITests/           # UI tests (iPhone 16 / iOS 18.6)
 ```
 
-> **Current state.** `App/` (entry point, `RootTabView`), `Core/Utilities/` (`Log`, `AccessibilityID`), `Core/Models/`, and `Core/Services/` are populated — the M0 foundation (protocol seams + fakes, SwiftData models, `AppEnvironment`) and M1 call state machine (`CallSessionCoordinator`, reconnection, spoken state). The **real** CallKit/transport/Keychain/Contacts implementations and the `Features/` modules and `Shared/` components are the planned shape from `voice-agent-callkit-plan.md`; create them as features land rather than assuming they exist. See [`docs/CORE_SYSTEMS.md`](./docs/CORE_SYSTEMS.md).
+> **Current state.** The app is built through **M4**: the M0 foundation (protocol seams + fakes, SwiftData models, `AppEnvironment`), the M1 call state machine (`CallSessionCoordinator`, reconnection, spoken state), the real Daily transport (M2), the CallKit + audio-session seam (M3), the Keychain + Contacts-mirror reals (WS-4), and all six `Features/` modules + `Shared/` components (WS-5) — wired through `AppEnvironment.live()` (persistent store + real services; CallKit/Daily fall back to fakes in the simulator). Remaining: a real end-to-end **device** pass (M5) and the native **LiveKit** transport (M6; `UnavailableTransport` is the placeholder). See [`docs/CORE_SYSTEMS.md`](./docs/CORE_SYSTEMS.md).
 
 ## Conventions
 
