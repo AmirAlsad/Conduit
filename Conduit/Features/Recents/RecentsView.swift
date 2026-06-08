@@ -21,6 +21,7 @@ struct RecentsView: View {
         content
             .accessibilityIdentifier(AccessibilityID.Recents.screen)
             .navigationTitle("Recents")
+            .brandMarkToolbar()
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Add Agent", systemImage: "plus") {

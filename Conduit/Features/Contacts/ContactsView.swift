@@ -20,6 +20,7 @@ struct ContactsView: View {
         content
             .accessibilityIdentifier(AccessibilityID.Contacts.screen)
             .navigationTitle("Contacts")
+            .brandMarkToolbar()
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Add Agent", systemImage: "plus") {

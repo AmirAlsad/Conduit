@@ -43,6 +43,7 @@ struct SettingsView: View {
             #endif
         }
         .navigationTitle("Settings")
+        .brandMarkToolbar()
         .accessibilityIdentifier(AccessibilityID.Settings.screen)
     }
 
