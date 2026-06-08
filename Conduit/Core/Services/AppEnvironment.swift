@@ -74,7 +74,8 @@ final class AppEnvironment {
             callProvider: FakeCallProvider(),
             agentRepository: SwiftDataAgentRepository(context: container.mainContext),
             announcer: FakeSpokenStateAnnouncer(),
-            transportFactory: { _ in FakeTransport() }
+            transportFactory: { _ in FakeTransport() },
+            isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) }
         )
     }
 }

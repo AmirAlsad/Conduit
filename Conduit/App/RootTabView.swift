@@ -2,62 +2,45 @@
 //  RootTabView.swift
 //  Conduit
 //
-//  The app's three-tab shell, modeled on the Phone app: Recents (home),
-//  Contacts, Settings. Tab contents are placeholders until their feature modules
-//  land (WS-5); the in-call surface will present over this as a full-screen cover.
+//  The app's three-tab shell, modeled on the Phone app: Recents (home), Contacts,
+//  Settings. The in-call surface presents over the whole shell as a full-screen
+//  cover whenever a call is active (`callSession.state.isActive`).
 //
 
 import SwiftUI
 
 struct RootTabView: View {
+    @Environment(AppEnvironment.self) private var environment
+
     var body: some View {
         TabView {
             Tab("Recents", systemImage: "clock") {
-                NavigationStack {
-                    ContentUnavailableView(
-                        "No Recent Calls",
-                        systemImage: "clock",
-                        description: Text("Calls to your agents will appear here.")
-                    )
-                    .navigationTitle("Recents")
-                    .accessibilityIdentifier(AccessibilityID.Root.tab(0))
-                }
+                NavigationStack { RecentsView() }
             }
 
             Tab("Contacts", systemImage: "person.crop.circle") {
-                NavigationStack {
-                    ContactsView()
-                }
+                NavigationStack { ContactsView() }
             }
 
             Tab("Settings", systemImage: "gearshape") {
-                NavigationStack {
-                    Group {
-                        #if DEBUG
-                        List {
-                            Section("Developer") {
-                                NavigationLink {
-                                    DebugDailyConnectView()
-                                } label: {
-                                    Label("Daily connect (debug)", systemImage: "ladybug")
-                                }
-                                .accessibilityIdentifier(AccessibilityID.Debug.dailyConnectLink)
-                            }
-                        }
-                        #else
-                        ContentUnavailableView(
-                            "Settings",
-                            systemImage: "gearshape",
-                            description: Text("Always-listening, push-to-talk, and About.")
-                        )
-                        #endif
-                    }
-                    .navigationTitle("Settings")
-                    .accessibilityIdentifier(AccessibilityID.Root.tab(2))
-                }
+                NavigationStack { SettingsView() }
             }
         }
         .accessibilityIdentifier(AccessibilityID.Root.screen)
+        .fullScreenCover(isPresented: callActive) {
+            InCallView()
+                .environment(environment)
+        }
+    }
+
+    /// Drives the in-call cover from the coordinator. Programmatic dismissal calls
+    /// `reset()`, which only takes effect once the call is terminal — so an active
+    /// call can never be swiped/dismissed away.
+    private var callActive: Binding<Bool> {
+        Binding(
+            get: { environment.callSession.state.isActive },
+            set: { active in if !active { environment.callSession.reset() } }
+        )
     }
 }
 
