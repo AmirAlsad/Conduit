@@ -19,11 +19,12 @@ Both call directions exist in code. See [ARCHITECTURE](./ARCHITECTURE.md) and
 
 **The one fact that shapes this roadmap:** a large share of what's "built" is verified
 only in the **simulator against fakes**. The real CallKit + **Daily** two-way audio was
-device-verified (M3/M5). Not yet proven on hardware: the **LiveKit** call path, the
-**inbound VoIP-push** round-trip, **interruption/ducking** audio, the native route
-button on LiveKit, `setOnHold` for a real incoming phone call, and finalized
-spoken-state ducking. You cannot responsibly build on a foundation that hasn't rung a
-real phone — so the roadmap leads with closing that debt.
+device-verified (M3/M5), and the **LiveKit** call path (pairing connect + two-way
+audio, against the deployed reference engine) in June 2026. Not yet proven on
+hardware: the **inbound VoIP-push** round-trip, **interruption/ducking** audio, the
+native route button on LiveKit, LiveKit reconnection, `setOnHold` for a real incoming
+phone call, and finalized spoken-state ducking. You cannot responsibly build on a
+foundation that hasn't rung a real phone — so the roadmap leads with closing that debt.
 
 ## Guiding principles (the constraints that pick priorities)
 
@@ -49,9 +50,10 @@ device, not just in the sim against fakes. This milestone is mostly hardware tes
 bug-fix, not new surface.
 
 **Scope:**
-- **LiveKit path end-to-end on device** — connect, two-way audio, the native
-  call-screen route button actually moving audio (LiveKit's manual-audio advantage over
-  Daily), the in-app picker, reconnection. *(CORE_SYSTEMS lists this as remaining.)*
+- **LiveKit path end-to-end on device** — connect + two-way audio ✅ (device-verified
+  June 2026 against the deployed reference engine over pairing). Still to check: the
+  native call-screen route button actually moving audio (LiveKit's manual-audio
+  advantage over Daily), the in-app picker, reconnection.
 - **Inbound VoIP-push round-trip on device** — needs a **paid Apple Developer account**,
   the Push Notifications capability, and a server sending a real VoIP push. Verify
   cold-wake ring → answer → connect → two-way audio **on both transports**; the decline

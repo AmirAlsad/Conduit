@@ -9,8 +9,10 @@
 > Contacts is permission-free (system Add-Contact sheet). Since M6: Recents
 > swipe-to-delete, an audio-interruption seam (`AudioInterruptionObserving`), and
 > agent-initiated inbound calls (VoIP push, `Core/Services/Push/`; see
-> [INBOUND_CALLS](./INBOUND_CALLS.md)). Remaining: device verification of the LiveKit
-> call path and the inbound-call path. See [CORE_SYSTEMS](./CORE_SYSTEMS.md).
+> [INBOUND_CALLS](./INBOUND_CALLS.md)). The LiveKit call path is device-verified
+> (pairing connect + two-way audio against the deployed reference engine, June 2026).
+> Remaining: the LiveKit route-button/reconnection spot-checks and device verification
+> of the inbound-call path. See [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 ## Overview
 
