@@ -273,7 +273,6 @@ Full deploy + webhook details: **[docs/direct-mode.md](./docs/direct-mode.md)**.
 
 ## Design & scope
 
-Design rationale: [`voice-agent-bot-engine-plan.md`](./voice-agent-bot-engine-plan.md).
 **Out of scope (fast-follows):** SmallWebRTC/TURN, native `livekit-agents`
 token-encoded dispatch, freezing the public connection spec, a persistent registry
 store (interface is in place).
