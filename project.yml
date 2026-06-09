@@ -106,6 +106,14 @@ targets:
           - "**/*.md"
           - "**/.claude/**"
           - "**/.gitkeep"
+          - "**/*.entitlements"
+    entitlements:
+      path: Conduit/Conduit.entitlements
+      properties:
+        # VoIP push for inbound, agent-initiated calls. Device builds need the Push
+        # Notifications capability enabled on the App ID (a paid Apple Developer
+        # account); the simulator ignores it. See docs/INBOUND_CALLS.md.
+        aps-environment: development
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

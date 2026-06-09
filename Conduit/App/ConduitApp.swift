@@ -11,7 +11,8 @@ import SwiftUI
 
 @main
 struct ConduitApp: App {
-    @State private var environment = AppEnvironment.live()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var environment = AppEnvironment.shared
 
     var body: some Scene {
         WindowGroup {

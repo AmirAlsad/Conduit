@@ -20,6 +20,8 @@ extension AccessibilityID {
         static let directTokenField = "AddAgent_DirectTokenField"
         static let directDisclosure = "AddAgent_DirectDisclosure"
         static let pairingField = "AddAgent_PairingField"
+        static let inboundToggle = "AddAgent_InboundToggle"
+        static let inboundURLField = "AddAgent_InboundURLField"
         static let testConnectionButton = "AddAgent_TestConnectionButton"
         static let testResult = "AddAgent_TestResult"
         static let saveButton = "AddAgent_SaveButton"

@@ -56,6 +56,22 @@ final class SystemCallProvider: NSObject, CallProviding, CXProviderDelegate {
         return uuid
     }
 
+    func reportIncomingCall(id: UUID, handle: CallHandle, displayName: String) async throws {
+        // Pre-configure the session (no activation); CallKit activates on answer.
+        try? audioSession.prepareForVoIPCall()
+
+        let update = CXCallUpdate()
+        update.localizedCallerName = displayName
+        update.remoteHandle = CXHandle(type: .emailAddress, value: handle.value)
+        update.hasVideo = false
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            provider.reportNewIncomingCall(with: id, update: update) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+    }
+
     func reportOutgoingCallConnecting(_ id: UUID) {
         provider.reportOutgoingCall(with: id, startedConnectingAt: nil)
     }
@@ -96,6 +112,13 @@ final class SystemCallProvider: NSObject, CallProviding, CXProviderDelegate {
 
     nonisolated func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
         // The connection is kicked off by the coordinator; do NOT start audio here.
+        action.fulfill()
+    }
+
+    nonisolated func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+        // Fulfilling marks the incoming call connected to CallKit (its timer starts);
+        // media attaches on the subsequent didActivate, like an outgoing call.
+        MainActor.assumeIsolated { delegate?.providerPerformAnswerCall(action.callUUID) }
         action.fulfill()
     }
 

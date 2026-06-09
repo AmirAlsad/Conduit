@@ -14,5 +14,6 @@ extension AccessibilityID {
         static let addButton = "Recents_AddButton"
         static func row(_ index: Int) -> String { "Recents_Row_\(index)" }
         static func callButton(_ index: Int) -> String { "Recents_CallButton_\(index)" }
+        static func deleteButton(_ index: Int) -> String { "Recents_DeleteButton_\(index)" }
     }
 }

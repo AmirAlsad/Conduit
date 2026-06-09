@@ -16,6 +16,8 @@ enum InCallStatus {
         switch state {
         case .idle:
             return nil
+        case .incomingRinging:
+            return "Incoming…"
         case .dialing:
             return "Calling…"
         case .connecting:

@@ -25,6 +25,8 @@ final class AddEditAgentViewModel {
     var apiKey: String
     var directToken: String
     var pairingEndpointText: String
+    var inboundEnabled: Bool
+    var inboundRegistrationURLText: String
     var avatarData: Data? = nil
 
     enum TestState: Equatable {
@@ -61,6 +63,8 @@ final class AddEditAgentViewModel {
             self.transportKind = agent.transportKind
             self.connectionURLText = agent.connectionURL?.absoluteString ?? ""
             self.pairingEndpointText = agent.pairingEndpoint?.absoluteString ?? ""
+            self.inboundEnabled = agent.inboundRegistrationURL != nil
+            self.inboundRegistrationURLText = agent.inboundRegistrationURL?.absoluteString ?? ""
             self.avatarData = agent.avatarData
             self.apiKey = (try? keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef))).flatMap { $0 } ?? ""
             self.directToken = (try? keychain.token(for: KeychainTokenRef(directTokenForAgentID: agent.id))).flatMap { $0 } ?? ""
@@ -69,6 +73,8 @@ final class AddEditAgentViewModel {
             self.detail = ""
             self.connectionURLText = ""
             self.pairingEndpointText = ""
+            self.inboundEnabled = false
+            self.inboundRegistrationURLText = ""
             self.apiKey = ""
             self.directToken = ""
         }
@@ -95,6 +101,22 @@ final class AddEditAgentViewModel {
         return URL(string: trimmed)
     }
 
+    /// The endpoint the device's VoIP token is registered with, when inbound calls
+    /// are enabled. `nil` disables inbound for this agent.
+    var inboundRegistrationURL: URL? {
+        guard inboundEnabled else { return nil }
+        let trimmed = inboundRegistrationURLText.trimmed
+        guard !trimmed.isEmpty else { return nil }
+        return URL(string: trimmed)
+    }
+
+    /// Default the registration URL from the pairing endpoint the first time inbound
+    /// is enabled (both usually point at the same server), leaving it editable.
+    func prefillInboundURLIfNeeded() {
+        guard inboundRegistrationURLText.trimmed.isEmpty else { return }
+        inboundRegistrationURLText = pairingEndpointText
+    }
+
     var canSave: Bool {
         !name.trimmed.isEmpty && (connectionURL != nil || pairingEndpoint != nil)
     }
@@ -113,6 +135,7 @@ final class AddEditAgentViewModel {
             agent.transportKindRaw = transportKind.rawValue
             agent.connectionURL = connectionURL
             agent.pairingEndpoint = pairingEndpoint
+            agent.inboundRegistrationURL = inboundRegistrationURL
         } else {
             agent = Agent(
                 name: name.trimmed,
@@ -120,7 +143,8 @@ final class AddEditAgentViewModel {
                 avatarData: avatarData,
                 transportKind: transportKind,
                 connectionURL: connectionURL,
-                pairingEndpoint: pairingEndpoint
+                pairingEndpoint: pairingEndpoint,
+                inboundRegistrationURL: inboundRegistrationURL
             )
             repository.insert(agent)
         }

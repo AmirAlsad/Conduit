@@ -1,13 +1,16 @@
 # Architecture
 
-> Status: built through **M6**. `Core/Models/` and `Core/Services/` are populated
-> (protocol seams + fakes, SwiftData models, `AppEnvironment`,
+> Status: built through **M6**, plus follow-ons. `Core/Models/` and `Core/Services/`
+> are populated (protocol seams + fakes, SwiftData models, `AppEnvironment`,
 > `CallSessionCoordinator`, reconnection, spoken state); all `Features/` modules and
 > `Shared/` components are built; the **real** implementations are in —
 > CallKit (`SystemCallProvider`, M3), both transports (`PipecatDailyTransport` M2,
 > `LiveKitTransport` M6), and Keychain (`KeychainService`). Adding an agent to
-> Contacts is permission-free (system Add-Contact sheet). Remaining: device
-> verification of the LiveKit call path. See [CORE_SYSTEMS](./CORE_SYSTEMS.md).
+> Contacts is permission-free (system Add-Contact sheet). Since M6: Recents
+> swipe-to-delete, an audio-interruption seam (`AudioInterruptionObserving`), and
+> agent-initiated inbound calls (VoIP push, `Core/Services/Push/`; see
+> [INBOUND_CALLS](./INBOUND_CALLS.md)). Remaining: device verification of the LiveKit
+> call path and the inbound-call path. See [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 ## Overview
 
@@ -103,11 +106,12 @@ Conduit/
 │   │               #   CallState, TransportKind, ReconnectionPolicy, …)
 │   ├── Services/   # AppEnvironment (composition root) + the protocol seams:
 │   │               #   Call/, CallKit/, Transport/, Keychain/, Contacts/,
-│   │               #   Persistence/, Audio/  (each: protocol + fake [+ real])
+│   │               #   Persistence/, Audio/, Push/, Pairing/  (each: protocol
+│   │               #   + fake [+ real])
 │   └── Utilities/  # Log (os.log), AccessibilityID base namespace, helpers
 ├── Features/       # Self-contained feature modules (Recents, Contacts,
-│                   #   Settings, AgentDetail, AddEditAgent, InCall) — NOT YET BUILT
-├── Shared/         # Reusable UI components, navigation — NOT YET BUILT
+│                   #   Settings, AgentDetail, AddEditAgent, InCall)
+├── Shared/         # Reusable UI components, navigation
 └── Resources/      # Assets, audio, data files
 ```
 

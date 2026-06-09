@@ -19,6 +19,9 @@ protocol CallProviding: AnyObject {
 
     /// Report an outgoing call to the system. Returns the call's UUID.
     func startOutgoingCall(handle: CallHandle, displayName: String) async throws -> UUID
+    /// Report an agent-initiated incoming call to the system (from a VoIP push). The
+    /// `id` is the call's UUID (the push's call_id); the system then rings.
+    func reportIncomingCall(id: UUID, handle: CallHandle, displayName: String) async throws
     func reportOutgoingCallConnecting(_ id: UUID)
     func reportOutgoingCallConnected(_ id: UUID)
     /// Request the system end the call (app-initiated End).

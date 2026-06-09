@@ -17,6 +17,7 @@ suite, SwiftUI previews, and the future CallKit-free debug path all reuse them.
 | Seam | Protocol (`Core/Services/…`) | Fake (present) | Real (status) |
 |---|---|---|---|
 | CallKit | `CallProviding` + `CallProviderDelegate` + `AudioSessionActivating` (`CallKit/`) | `FakeCallProvider` / `FakeAudioSession` | `SystemCallProvider` (built, M3) |
+| Audio interruptions | `AudioInterruptionObserving` + `…Delegate` (`CallKit/`) | `FakeAudioInterruptionObserver` | `SystemAudioInterruptionObserver` (built; audio device-only) |
 | Transport | `Transport` (`Transport/`) | `FakeTransport` | `PipecatDailyTransport` (built, M2); `LiveKitTransport` (built, M6) |
 | Keychain | `KeychainStoring` (`Keychain/`) | `InMemoryKeychain` | `KeychainService` (built, WS-4) |
 | Contacts sync | `ContactSyncing` (`Contacts/`) | `FakeContactSync` | `ContactSyncService` (built) |
@@ -139,14 +140,19 @@ type that is the single source of truth for a call and the orchestration point
 between the CallKit and transport seams. It lives in `Core/Services/Call/` (not in
 `Features/InCall/`) because it is an app-wide service owned by `AppEnvironment` and
 consumed by multiple features (Recents redial, Contacts/AgentDetail call, the
-InCall projection). It conforms to `CallProviderDelegate`.
+InCall projection). It conforms to `CallProviderDelegate` and
+`AudioInterruptionObserverDelegate`.
 
 `CallState` (`Core/Models/CallState.swift`, pure/`Equatable`):
 
 ```
 idle → dialing → connecting → connected(since:) → reconnecting(attempt:) ⇄ connected
                                                  ↘ ended(CallOutcome) | failed(CallFailureReason)
+incomingRinging → connecting → …   (agent-initiated inbound, after the user answers)
 ```
+
+`incomingRinging` is the one non-idle state with `isActive == false`: while it
+rings, CallKit's system UI is primary, so the app shows no surface until answer.
 
 Key behaviors:
 
@@ -163,6 +169,23 @@ Key behaviors:
   (`endCall` → `providerPerformEndCall`) cannot double-write the call log.
 - **Failure distinctions.** `authFailed` → `failed(.badToken)` (red in Recents);
   a never-connected drop → `failed(.transportError)`; a mid-call drop → reconnect.
+- **Audio interruptions.** `AudioInterruptionObserving` (real:
+  `SystemAudioInterruptionObserver` over `AVAudioSession.interruptionNotification`)
+  drives `isInterrupted`: on `.began` the mic pauses (`setMicEnabled(false)`); on
+  `.ended(shouldResume:)` it re-applies the correct mic state via `applyMicIfActivated`
+  (respecting mute / push-to-talk). The session is never touched — CallKit owns it and
+  re-fires `providerDidActivate` after an interruption, so the two are unordered edges
+  that both re-apply mic state idempotently. Transient GPS/nav ducking is system-managed
+  by `.duckOthers`; this observer covers full takeovers (Siri, a phone call). The live
+  audio behavior is device-only; the begin/resume logic is unit-tested via the fake.
+- **Inbound (agent-initiated) calls.** A VoIP push (PushKit) → `receiveCall(_:)` resolves
+  the agent, reports an incoming call to CallKit (`reportIncomingCall`), and rings in
+  `incomingRinging`. On `providerPerformAnswerCall` → `answer()` reuses the shared
+  `connectTransport(for:inlineCreds:)` — hybrid credentials: inline push room/token if
+  present, else `PairingClient.resolve`. Decline while ringing logs `.declined`; the call
+  log records `direction` (`.incoming`/`.outgoing`). Push/CallKit-incoming/entitlement are
+  device-only; the coordinator path + payload parsing are unit-tested. See
+  [INBOUND_CALLS](./INBOUND_CALLS.md).
 
 ## Reconnection + spoken state
 
@@ -199,8 +222,9 @@ On an outgoing call, `SystemCallProvider` reports a `CXCallUpdate` with
 `localizedCallerName` set to the agent's name, so the call/lock screen shows the
 name rather than the raw synthetic email handle. The **photo** (and Contacts/Siri
 matching) comes from the optional system contact above; the name shows with or
-without it. Device-only (CallKit doesn't run in the sim); interruption /
-incoming-PSTN handling is the remaining device-flagged work.
+without it. Device-only (CallKit doesn't run in the sim). Audio-interruption
+handling now has a seam (see the call state machine above); yielding the route to a
+real incoming PSTN call (`setOnHold`) remains the device-flagged follow-up.
 
 ## Shared utilities
 

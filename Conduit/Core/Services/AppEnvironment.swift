@@ -24,6 +24,7 @@ final class AppEnvironment {
     let callProvider: CallProviding
     let agentRepository: AgentRepository
     let announcer: SpokenStateAnnouncing
+    let interruptionObserver: AudioInterruptionObserving
     let transportFactory: (TransportKind) -> Transport
     let callSession: CallSessionCoordinator
 
@@ -34,6 +35,7 @@ final class AppEnvironment {
         callProvider: CallProviding,
         agentRepository: AgentRepository,
         announcer: SpokenStateAnnouncing,
+        interruptionObserver: AudioInterruptionObserving,
         transportFactory: @escaping (TransportKind) -> Transport,
         isPushToTalkEnabled: @escaping () -> Bool = { false }
     ) {
@@ -43,6 +45,7 @@ final class AppEnvironment {
         self.callProvider = callProvider
         self.agentRepository = agentRepository
         self.announcer = announcer
+        self.interruptionObserver = interruptionObserver
         self.transportFactory = transportFactory
         self.callSession = CallSessionCoordinator(
             callProvider: callProvider,
@@ -50,6 +53,7 @@ final class AppEnvironment {
             keychain: keychain,
             repository: agentRepository,
             announcer: announcer,
+            interruptionObserver: interruptionObserver,
             now: { .now },
             sleep: { try await Task.sleep(for: $0) },
             isPushToTalkEnabled: isPushToTalkEnabled
@@ -63,8 +67,20 @@ final class AppEnvironment {
     /// persistence) is real on both. A real call is device-only.
     static func live() -> AppEnvironment {
         let container: ModelContainer
+        // UI tests launch with `--uitest` to get a fresh in-memory store each run, so
+        // seeded fixtures are deterministic and don't depend on leftover device state.
+        #if DEBUG
+        let ephemeral = ProcessInfo.processInfo.arguments.contains("--uitest")
+        #else
+        let ephemeral = false
+        #endif
         do {
-            container = try ModelContainer(for: Agent.self, CallLogEntry.self)
+            container = ephemeral
+                ? try ModelContainer(
+                    for: Agent.self, CallLogEntry.self,
+                    configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+                )
+                : try ModelContainer(for: Agent.self, CallLogEntry.self)
         } catch {
             Log.error(.app, "Persistent store unavailable, falling back to in-memory: \(error)")
             container = try! ModelContainer(
@@ -95,10 +111,16 @@ final class AppEnvironment {
             callProvider: callProvider,
             agentRepository: SwiftDataAgentRepository(context: container.mainContext),
             announcer: SpeechSpokenStateAnnouncer(),
+            interruptionObserver: SystemAudioInterruptionObserver(),
             transportFactory: transportFactory,
             isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) }
         )
     }
+
+    /// The process-wide live environment. The SwiftUI `App` and the UIKit
+    /// `AppDelegate` (PushKit) reach the same instance, so an inbound VoIP push
+    /// routes into the same coordinator the UI observes.
+    static let shared = live()
 
     /// All-fakes environment over an in-memory SwiftData store.
     static func inMemory() -> AppEnvironment {
@@ -118,6 +140,7 @@ final class AppEnvironment {
             callProvider: FakeCallProvider(),
             agentRepository: SwiftDataAgentRepository(context: container.mainContext),
             announcer: FakeSpokenStateAnnouncer(),
+            interruptionObserver: FakeAudioInterruptionObserver(),
             transportFactory: { _ in FakeTransport() },
             isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) }
         )

@@ -36,6 +36,7 @@ struct AddEditAgentSheet: View {
                 identitySection
                 pairingSection
                 directSection
+                inboundSection
                 testSection
             }
             .accessibilityIdentifier(AccessibilityID.AddAgent.screen)
@@ -155,6 +156,28 @@ struct AddEditAgentSheet: View {
             .accessibilityIdentifier(AccessibilityID.AddAgent.directDisclosure)
         } footer: {
             Text("Optional. Connect straight to a room URL with its own token instead of pairing. If you set both, pairing is used.")
+        }
+    }
+
+    private var inboundSection: some View {
+        Section {
+            Toggle("Let this agent call me", isOn: $viewModel.inboundEnabled)
+                .accessibilityIdentifier(AccessibilityID.AddAgent.inboundToggle)
+                .onChange(of: viewModel.inboundEnabled) { _, enabled in
+                    if enabled { viewModel.prefillInboundURLIfNeeded() }
+                }
+
+            if viewModel.inboundEnabled {
+                TextField("Registration endpoint", text: $viewModel.inboundRegistrationURLText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .accessibilityIdentifier(AccessibilityID.AddAgent.inboundURLField)
+            }
+        } header: {
+            Text("Inbound Calls")
+        } footer: {
+            Text("Conduit POSTs this device's push token here (with your API key as a bearer) so this agent's own server can ring you — on the lock screen and in CarPlay. Requires a VoIP push from your server; see the inbound-calls docs. The token only ever goes to your own server.")
         }
     }
 

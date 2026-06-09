@@ -10,6 +10,9 @@ talks only to the endpoint you give it.
 You connect an agent one of two ways. **Pairing** is the recommended path; **Direct
 room** is the advanced fallback.
 
+> For the reverse direction — your server **ringing the user** (agent-initiated
+> inbound calls over a VoIP push) — see [INBOUND_CALLS](./INBOUND_CALLS.md).
+
 ---
 
 ## 1. Pairing endpoint (recommended)

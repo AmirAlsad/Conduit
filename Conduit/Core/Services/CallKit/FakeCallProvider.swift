@@ -15,6 +15,7 @@ final class FakeCallProvider: CallProviding {
 
     private(set) var startedCalls: [UUID] = []
     private(set) var startedHandles: [CallHandle] = []
+    private(set) var reportedIncoming: [(id: UUID, handle: CallHandle)] = []
     private(set) var reportedConnecting: [UUID] = []
     private(set) var reportedConnected: [UUID] = []
     private(set) var endRequests: [UUID] = []
@@ -24,6 +25,8 @@ final class FakeCallProvider: CallProviding {
 
     /// When set, the next `startOutgoingCall` throws this.
     var startError: Error?
+    /// When set, the next `reportIncomingCall` throws this.
+    var reportIncomingError: Error?
     /// The UUID handed back from the next `startOutgoingCall`.
     var nextCallID = UUID()
 
@@ -33,6 +36,11 @@ final class FakeCallProvider: CallProviding {
         startedCalls.append(id)
         startedHandles.append(handle)
         return id
+    }
+
+    func reportIncomingCall(id: UUID, handle: CallHandle, displayName: String) async throws {
+        if let reportIncomingError { throw reportIncomingError }
+        reportedIncoming.append((id, handle))
     }
 
     func reportOutgoingCallConnecting(_ id: UUID) { reportedConnecting.append(id) }
@@ -52,6 +60,7 @@ final class FakeCallProvider: CallProviding {
         delegate?.providerDidDeactivate(session)
     }
 
+    func simulateAnswerCall(_ id: UUID) { delegate?.providerPerformAnswerCall(id) }
     func simulateEndCall(_ id: UUID) { delegate?.providerPerformEndCall(id) }
     func simulateSetMuted(_ id: UUID, muted: Bool) { delegate?.providerPerformSetMuted(id, muted: muted) }
     func simulateReset() { delegate?.providerWasReset() }

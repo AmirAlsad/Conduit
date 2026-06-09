@@ -27,6 +27,10 @@ final class Agent {
     /// Pairing flow: a URL the app POSTs for a fresh room+token per call. The
     /// endpoint identifies the agent (one endpoint per agent).
     var pairingEndpoint: URL?
+    /// Inbound calls: a URL the app POSTs its VoIP push token to (bearer = the
+    /// agent's API key), so this agent's own server can ring the user. `nil` means
+    /// the agent can't call in. See `VoIPPushService` and `docs/INBOUND_CALLS.md`.
+    var inboundRegistrationURL: URL?
     /// `CNContact.identifier` of the system contact, once the user adds the agent
     /// via the system Add-Contact sheet. `nil` means not added.
     var contactIdentifier: String?
@@ -45,6 +49,7 @@ final class Agent {
         transportKind: TransportKind,
         connectionURL: URL? = nil,
         pairingEndpoint: URL? = nil,
+        inboundRegistrationURL: URL? = nil,
         createdAt: Date = .now
     ) {
         self.id = id
@@ -55,6 +60,7 @@ final class Agent {
         self.transportKindRaw = transportKind.rawValue
         self.connectionURL = connectionURL
         self.pairingEndpoint = pairingEndpoint
+        self.inboundRegistrationURL = inboundRegistrationURL
         self.contactIdentifier = nil
         self.keychainTokenRef = KeychainTokenRef(agentID: id).account
         self.createdAt = createdAt

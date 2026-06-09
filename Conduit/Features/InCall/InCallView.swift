@@ -108,7 +108,9 @@ struct InCallView: View {
     @ViewBuilder
     private func statusLine(state: CallState) -> some View {
         Group {
-            if case .connected(let since) = state {
+            if coordinator.isInterrupted {
+                Text("Paused")
+            } else if case .connected(let since) = state {
                 Text(since, style: .timer)
                     .monospacedDigit()
             } else if let text = InCallStatus.text(for: state) {

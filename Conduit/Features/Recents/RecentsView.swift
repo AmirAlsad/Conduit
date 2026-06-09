@@ -59,22 +59,36 @@ struct RecentsView: View {
 
     @ViewBuilder
     private func row(for entry: CallLogEntry, index: Int) -> some View {
-        if let agent = entry.agent {
-            NavigationLink(value: agent) {
+        Group {
+            if let agent = entry.agent {
+                NavigationLink(value: agent) {
+                    RecentRow(entry: entry)
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    Button {
+                        Task { await environment.callSession.placeCall(agent) }
+                    } label: {
+                        Label("Call", systemImage: "phone.fill")
+                    }
+                    .tint(.green)
+                    .accessibilityIdentifier(AccessibilityID.Recents.callButton(index))
+                }
+            } else {
                 RecentRow(entry: entry)
             }
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                Button {
-                    Task { await environment.callSession.placeCall(agent) }
-                } label: {
-                    Label("Call", systemImage: "phone.fill")
-                }
-                .tint(.green)
-                .accessibilityIdentifier(AccessibilityID.Recents.callButton(index))
-            }
-        } else {
-            RecentRow(entry: entry)
         }
+        .swipeActions(edge: .trailing) {
+            Button("Delete", role: .destructive) {
+                delete(entry)
+            }
+            .accessibilityIdentifier(AccessibilityID.Recents.deleteButton(index))
+        }
+    }
+
+    private func delete(_ entry: CallLogEntry) {
+        Log.info(.ui, "Deleting call log entry")
+        environment.agentRepository.deleteCallLogEntry(entry)
+        try? environment.agentRepository.save()
     }
 }
 

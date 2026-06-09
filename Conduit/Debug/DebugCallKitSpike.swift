@@ -70,6 +70,7 @@ enum DebugCallKitSpike {
             keychain: keychain,
             repository: repository,
             announcer: SpeechSpokenStateAnnouncer(),
+            interruptionObserver: SystemAudioInterruptionObserver(),
             now: { .now },
             sleep: { try await Task.sleep(for: $0) },
             isPushToTalkEnabled: { false }

@@ -17,7 +17,7 @@ import Foundation
 
 @MainActor
 @Observable
-final class CallSessionCoordinator: CallProviderDelegate {
+final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObserverDelegate {
 
     // MARK: - Observed state (the InCall screen is a pure projection of these)
 
@@ -28,6 +28,9 @@ final class CallSessionCoordinator: CallProviderDelegate {
     private(set) var remoteAudioLevel: Float = 0
     /// Whether CallKit has activated the audio session for the live call.
     private(set) var isAudioActivated = false
+    /// Whether another audio session (Siri, a phone call, navigation) is currently
+    /// interrupting the call. Transient — the mic pauses while true.
+    private(set) var isInterrupted = false
     /// Available audio routes and the active one, for the in-call route picker.
     private(set) var audioDevices: [AudioDeviceInfo] = []
     private(set) var selectedAudioDeviceID: String?
@@ -39,6 +42,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
     private let keychain: KeychainStoring
     private let repository: AgentRepository
     private let announcer: SpokenStateAnnouncing
+    private let interruptionObserver: AudioInterruptionObserving
     private let policy: ReconnectionPolicy
     private let now: () -> Date
     private let sleep: (Duration) async throws -> Void
@@ -49,6 +53,9 @@ final class CallSessionCoordinator: CallProviderDelegate {
     private var transport: Transport?
     private var currentConfig: TransportConfig?
     private var activeCallID: UUID?
+    private var callDirection: CallDirection = .outgoing
+    /// Inline room credentials from an incoming push, consumed when the user answers.
+    private var pendingInlineCreds: PairingCredentials?
     private var callStartedAt: Date?
     private var firstConnectedAt: Date?
     private var reconnectAttempt = 0
@@ -63,6 +70,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
         keychain: KeychainStoring,
         repository: AgentRepository,
         announcer: SpokenStateAnnouncing,
+        interruptionObserver: AudioInterruptionObserving,
         policy: ReconnectionPolicy = .default,
         now: @escaping () -> Date,
         sleep: @escaping (Duration) async throws -> Void,
@@ -73,11 +81,13 @@ final class CallSessionCoordinator: CallProviderDelegate {
         self.keychain = keychain
         self.repository = repository
         self.announcer = announcer
+        self.interruptionObserver = interruptionObserver
         self.policy = policy
         self.now = now
         self.sleep = sleep
         self.isPushToTalkEnabled = isPushToTalkEnabled
         callProvider.delegate = self
+        interruptionObserver.delegate = self
     }
 
     // MARK: - Placing a call
@@ -89,8 +99,10 @@ final class CallSessionCoordinator: CallProviderDelegate {
         }
 
         activeAgent = agent
+        callDirection = .outgoing
         callStartedAt = now()
         state = .dialing
+        interruptionObserver.startObserving()
 
         let id: UUID
         do {
@@ -105,21 +117,87 @@ final class CallSessionCoordinator: CallProviderDelegate {
         state = .connecting
         announcer.startRepeating(.connecting)
 
-        let token = loadToken(for: agent) ?? ""
-        // Direct mode needs its room token; pairing mode authenticates with its API
-        // key, but an endpoint may be open, so don't hard-require it.
-        if token.isEmpty, agent.pairingEndpoint == nil {
-            Log.error(.call, "No token for agent \(Log.redactEmail(agent.syntheticEmail))")
-            fail(.badToken)
+        await connectTransport(for: agent)
+    }
+
+    // MARK: - Receiving a call (agent-initiated, via VoIP push)
+
+    /// Report an incoming call to CallKit and ring. The transport doesn't connect
+    /// until the user answers (`answer()`), so this only resolves the agent and
+    /// reports — credentials (inline or via pairing) are used on answer.
+    func receiveCall(_ payload: IncomingCallPayload) async {
+        guard case .idle = state else {
+            Log.warning(.call, "receiveCall ignored; state is \(String(describing: state))")
             return
         }
 
-        let config = TransportConfig(
-            kind: agent.transportKind,
-            url: agent.connectionURL,
-            token: token,
-            pairingEndpoint: agent.pairingEndpoint
-        )
+        let agent = (try? repository.fetch(id: payload.agentID)) ?? nil
+        activeCallID = payload.callID
+        activeAgent = agent
+        callDirection = .incoming
+        callStartedAt = now()
+        pendingInlineCreds = payload.inlineCredentials
+        state = .incomingRinging
+        interruptionObserver.startObserving()
+
+        // PushKit requires reporting the call this run loop even if the agent is
+        // unknown — report under a generic handle, then fail gracefully.
+        do {
+            try await callProvider.reportIncomingCall(
+                id: payload.callID,
+                handle: agent?.callHandle ?? CallHandle(value: "agent"),
+                displayName: agent?.name ?? "Agent"
+            )
+        } catch {
+            Log.error(.callkit, "reportIncomingCall failed: \(error)")
+            fail(.unknown)
+            return
+        }
+
+        if agent == nil {
+            Log.error(.call, "Incoming call for unknown agent \(payload.agentID)")
+            fail(.unknown)
+        }
+    }
+
+    /// The user answered (from the system UI). Connect the transport, preferring the
+    /// push's inline credentials and falling back to the agent's pairing endpoint.
+    func answer() async {
+        guard case .incomingRinging = state, let agent = activeAgent else { return }
+        state = .connecting
+        announcer.startRepeating(.connecting)
+        let creds = pendingInlineCreds
+        pendingInlineCreds = nil
+        await connectTransport(for: agent, inlineCreds: creds)
+    }
+
+    /// Build the transport config (inline push credentials win; otherwise the agent's
+    /// own direct/pairing config) and connect. Shared by `placeCall` and `answer`.
+    private func connectTransport(for agent: Agent, inlineCreds: PairingCredentials? = nil) async {
+        let config: TransportConfig
+        if let inlineCreds {
+            // Credentials delivered in the push: join the room directly, no pairing.
+            config = TransportConfig(
+                kind: agent.transportKind,
+                url: inlineCreds.roomURL,
+                token: inlineCreds.token
+            )
+        } else {
+            let token = loadToken(for: agent) ?? ""
+            // Direct mode needs its room token; pairing mode authenticates with its API
+            // key, but an endpoint may be open, so don't hard-require it.
+            if token.isEmpty, agent.pairingEndpoint == nil {
+                Log.error(.call, "No token for agent \(Log.redactEmail(agent.syntheticEmail))")
+                fail(.badToken)
+                return
+            }
+            config = TransportConfig(
+                kind: agent.transportKind,
+                url: agent.connectionURL,
+                token: token,
+                pairingEndpoint: agent.pairingEndpoint
+            )
+        }
         currentConfig = config
 
         let transport = transportFactory(agent.transportKind)
@@ -199,7 +277,11 @@ final class CallSessionCoordinator: CallProviderDelegate {
             let start = now()
             firstConnectedAt = start
             state = .connected(since: start)
-            if let id = activeCallID { callProvider.reportOutgoingCallConnected(id) }
+            // Incoming calls are marked connected to CallKit by fulfilling the answer
+            // action; only outgoing calls report connected here.
+            if callDirection == .outgoing, let id = activeCallID {
+                callProvider.reportOutgoingCallConnected(id)
+            }
             announcer.stopRepeating()
             announcer.announce(.connected)
             applyMicIfActivated()
@@ -369,6 +451,11 @@ final class CallSessionCoordinator: CallProviderDelegate {
         Task { [weak self] in await self?.transport?.detachAudioSession() }
     }
 
+    func providerPerformAnswerCall(_ id: UUID) {
+        Log.info(.callkit, "System requested answer")
+        Task { [weak self] in await self?.answer() }
+    }
+
     func providerPerformEndCall(_ id: UUID) {
         Log.info(.callkit, "System requested end call")
         finishEnded()
@@ -383,6 +470,29 @@ final class CallSessionCoordinator: CallProviderDelegate {
         Log.warning(.callkit, "Provider reset; tearing down call")
         teardownTransport()
         resetState()
+    }
+
+    // MARK: - Audio interruptions (AudioInterruptionObserverDelegate)
+    //
+    // A transient takeover (Siri, a navigation prompt that can't mix, a real phone
+    // call): pause the mic while interrupted and re-apply it on resume. We never
+    // touch the audio session — CallKit owns it and re-fires `providerDidActivate`
+    // when the interruption ends, so this and that activation are two unordered
+    // edges; both re-apply mic state idempotently (see potential_skills/callkit.md).
+
+    func audioInterruptionBegan() {
+        guard state.isActive, !state.isTerminal else { return }
+        Log.info(.call, "Call interrupted; pausing mic")
+        isInterrupted = true
+        Task { [weak self] in await self?.transport?.setMicEnabled(false) }
+    }
+
+    func audioInterruptionEnded(shouldResume: Bool) {
+        guard isInterrupted else { return }
+        Log.info(.call, "Interruption ended; resume=\(shouldResume)")
+        isInterrupted = false
+        guard shouldResume else { return }
+        applyMicIfActivated()
     }
 
     // MARK: - User-initiated controls
@@ -463,13 +573,19 @@ final class CallSessionCoordinator: CallProviderDelegate {
     private func finishEnded() {
         guard !state.isTerminal else { return }
         let connected = firstConnectedAt != nil
-        state = .ended(connected ? .completed : .canceled)
+        // An incoming call ended before it ever connected was declined; an outgoing
+        // one was canceled.
+        let outcome: CallOutcome = connected ? .completed
+            : (callDirection == .incoming ? .declined : .canceled)
+        state = .ended(outcome)
         announcer.stopRepeating()
-        writeLog(outcome: connected ? .completed : .canceled)
+        writeLog(outcome: outcome)
         teardownTransport()
     }
 
     private func teardownTransport() {
+        interruptionObserver.stopObserving()
+        isInterrupted = false
         reconnectTask?.cancel()
         reconnectTask = nil
         eventTask?.cancel()
@@ -487,6 +603,8 @@ final class CallSessionCoordinator: CallProviderDelegate {
         state = .idle
         activeAgent = nil
         activeCallID = nil
+        callDirection = .outgoing
+        pendingInlineCreds = nil
         currentConfig = nil
         callStartedAt = nil
         firstConnectedAt = nil
@@ -495,6 +613,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
         isBotSpeaking = false
         remoteAudioLevel = 0
         isAudioActivated = false
+        isInterrupted = false
         audioDevices = []
         selectedAudioDeviceID = nil
         didApplyHandsFreeDefault = false
@@ -506,7 +625,7 @@ final class CallSessionCoordinator: CallProviderDelegate {
         let duration = firstConnectedAt.map { max(0, now().timeIntervalSince($0)) } ?? 0
         let entry = CallLogEntry(
             agent: agent,
-            direction: .outgoing,
+            direction: callDirection,
             startedAt: started,
             duration: duration,
             outcome: outcome,

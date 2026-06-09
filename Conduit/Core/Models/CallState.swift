@@ -8,6 +8,7 @@
 //
 //  idle → dialing → connecting → connected → (reconnecting ⇄ connected) → ended
 //                                          ↘ failed
+//  incomingRinging → connecting → …  (agent-initiated inbound, after the user answers)
 //
 
 import Foundation
@@ -15,6 +16,9 @@ import Foundation
 enum CallState: Equatable, Sendable {
     /// No call in progress.
     case idle
+    /// An agent-initiated call is ringing. The CallKit system UI is primary here, so
+    /// the app shows no surface (isActive == false) until the user answers.
+    case incomingRinging
     /// User asked to call; the call is being reported to CallKit.
     case dialing
     /// CallKit has the call; the transport is connecting (token loaded, joining).
@@ -30,10 +34,13 @@ enum CallState: Equatable, Sendable {
 }
 
 extension CallState {
-    /// Whether a call surface should be shown (anything other than idle).
+    /// Whether the app should show its in-call surface. False for `idle` and for
+    /// `incomingRinging` (where CallKit's system ring UI is primary).
     var isActive: Bool {
-        if case .idle = self { return false }
-        return true
+        switch self {
+        case .idle, .incomingRinging: return false
+        default: return true
+        }
     }
 
     /// Whether the call has reached a terminal state.

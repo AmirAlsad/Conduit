@@ -27,6 +27,7 @@ final class CoordinatorHarness {
     let provider = FakeCallProvider()
     let keychain = InMemoryKeychain()
     let announcer = FakeSpokenStateAnnouncer()
+    let interruption = FakeAudioInterruptionObserver()
     let transport = FakeTransport()
     let container: ModelContainer
     let repository: SwiftDataAgentRepository
@@ -71,6 +72,7 @@ final class CoordinatorHarness {
             keychain: keychain,
             repository: repository,
             announcer: announcer,
+            interruptionObserver: interruption,
             policy: policy,
             now: now,
             sleep: { _ in },
