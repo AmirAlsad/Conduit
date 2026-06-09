@@ -88,6 +88,7 @@ iOSInjectionProject/
 *.pem
 *.p12
 *.key
+*.p8
 
 # Local xcconfig (per-developer settings)
 Config/local.xcconfig

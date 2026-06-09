@@ -48,6 +48,7 @@ Conduit/
   Resources/  Fonts, JSON, assets
 Config/       Base.xcconfig (committed) + local.xcconfig (gitignored, per-developer)
 docs/         Architecture, conventions, core-systems guides (start at docs/README.md)
+example-backend/  Self-hosted reference backend (Pipecat / FastAPI) — its own README + CLAUDE.md
 project.yml   XcodeGen project definition (the .xcodeproj is generated from this)
 ```
 
@@ -55,3 +56,4 @@ project.yml   XcodeGen project definition (the .xcodeproj is generated from this
 
 - **Working in this repo (humans & agents):** [`CLAUDE.md`](./CLAUDE.md) and [`AGENTS.md`](./AGENTS.md)
 - **Architecture & conventions:** [`docs/README.md`](./docs/README.md)
+- **Self-hosted reference backend:** [`example-backend/`](./example-backend) — the Pipecat/FastAPI dispatcher + bot engine your agent runs in. You host it; Conduit operates no backend.

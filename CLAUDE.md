@@ -8,6 +8,8 @@ Conduit is a **bring-your-own-agent voice calling app** for iOS: a thin, faithfu
 
 There is **no backend of ours, no Firebase, and no analytics.** Connection credentials are bring-your-own and live in the Keychain. Full vision, scope, and the CallKit↔WebRTC seam: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and [`docs/CORE_SYSTEMS.md`](./docs/CORE_SYSTEMS.md) — read them before touching call/transport code.
 
+A **self-hosted reference backend** — the agent side a developer runs under their own keys, *not* operated by us — lives in [`example-backend/`](./example-backend) (a self-contained Pipecat/FastAPI project with its own `CLAUDE.md`). It's reference code, not part of the iOS build.
+
 ## Build, Run & Test
 
 Uses **XcodeBuildMCP** (configured at project scope in `.mcp.json`). **Load the `xcodebuildmcp` skill before your first build/test/run/UI-automation call** — it encodes pitfalls this section only summarizes. Defaults — `Conduit` scheme, `iPhone 16` / iOS 18.6 simulator, `Debug` — are inferred, so most calls take no parameters; run `session_show_defaults` once per session to confirm.

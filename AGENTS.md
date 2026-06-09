@@ -11,6 +11,7 @@
 - `ConduitTests/` and `ConduitUITests/`: test targets.
 - `docs/`: architecture, conventions, and feature guides (see `docs/README.md` for load order).
 - `project.yml`: XcodeGen project definition; `Conduit.xcodeproj` is generated from it and gitignored.
+- `example-backend/`: self-hosted reference backend (Pipecat/FastAPI dispatcher + bot) a developer runs under their own keys — an independent Python project with its own `CLAUDE.md`, not part of the iOS build.
 
 ## Build, Test, and Development Commands
 - After cloning, generate the project before opening or building:

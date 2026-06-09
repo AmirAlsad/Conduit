@@ -3,8 +3,12 @@ name: Tests
 on:
   push:
     branches: [main]
+    # example-backend/ is a self-contained Python project; its changes don't
+    # affect the iOS build, so skip the (macOS, ~30 min) iOS suite for them.
+    paths-ignore: ['example-backend/**']
   pull_request:
     branches: [main]
+    paths-ignore: ['example-backend/**']
 
 concurrency:
   group: tests-${{ github.ref }}
