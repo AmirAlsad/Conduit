@@ -3,7 +3,7 @@
 A native iOS *bring-your-own-agent voice client*: point it at a voice agent you already run
 (Pipecat / Daily / LiveKit over WebRTC) and talking to it becomes a hands-free phone call,
 routed through your car over Bluetooth via CallKit. No backend of ours, no accounts, no
-per-minute cost. See [`voice-agent-callkit-plan.md`](./voice-agent-callkit-plan.md) for the full vision.
+per-minute cost. See [the docs](./docs/README.md) for the architecture and full vision.
 
 ## Getting started
 

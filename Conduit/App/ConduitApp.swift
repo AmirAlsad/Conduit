@@ -3,7 +3,7 @@
 //  Conduit
 //
 //  App entry point. Conduit is a bring-your-own-agent voice client
-//  (CallKit + WebRTC); see voice-agent-callkit-plan.md.
+//  (CallKit + WebRTC); see docs/ARCHITECTURE.md.
 //
 
 import SwiftData

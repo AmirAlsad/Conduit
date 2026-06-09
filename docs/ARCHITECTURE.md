@@ -88,7 +88,7 @@ The one genuinely fiddly boundary, and where most of the real work lives. The
 system call lifecycle must own **activation** of the audio session; the WebRTC
 media attaches to it **on activation**, rather than seizing the microphone
 independently. Getting this handshake right is the crux; the rest is wiring.
-Related hazards to design for (detailed in `voice-agent-callkit-plan.md`):
+Related hazards to design for (detailed in [CORE_SYSTEMS](./CORE_SYSTEMS.md)):
 
 - **Reconnection.** A dropped WebRTC connection leaves CallKit thinking the call
   is still up. Reconnect with backoff; speak state in a built-in synthesis voice
@@ -140,7 +140,7 @@ Modeled on the iOS Phone app — three tabs plus two detail/modal surfaces:
 
 ## Testing Posture (summary)
 
-Three layers (full detail in `voice-agent-callkit-plan.md` and the CI workflow):
+Three layers (full detail in [CORE_SYSTEMS](./CORE_SYSTEMS.md) and the CI workflow):
 
 - **Layer 1 — logic, simulator, automated.** State machine, connection parsing,
   transport selection, error handling against fakes. Most bugs live here. Runs in

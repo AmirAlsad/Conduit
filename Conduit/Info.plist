@@ -32,7 +32,7 @@
 	</array>
 	<!-- Conduit places VoIP calls (CallKit + WebRTC). The voip background mode lets a
 	     call keep running when the app is backgrounded / the screen is locked, and the
-	     audio mode keeps the call audio session alive. See voice-agent-callkit-plan.md. -->
+	     audio mode keeps the call audio session alive. See docs/CORE_SYSTEMS.md. -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>voip</string>

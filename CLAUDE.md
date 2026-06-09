@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Conduit is a **bring-your-own-agent voice calling app** for iOS: a thin, faithful audio pipe that turns any voice agent you already run into a hands-free phone call you can take in the car. It rides **CallKit** (calls route through Bluetooth/CarPlay with no gatekept entitlement) and carries real-time audio over **WebRTC via the Pipecat iOS client** (Daily / LiveKit transports). The agent — model, voice, persona, memory — is the user's own; Conduit never sits in the middle.
 
-There is **no backend of ours, no Firebase, and no analytics.** Connection credentials are bring-your-own and live in the Keychain. Full vision, scope, and the CallKit↔WebRTC seam: [`voice-agent-callkit-plan.md`](./voice-agent-callkit-plan.md) — read it before touching call/transport code.
+There is **no backend of ours, no Firebase, and no analytics.** Connection credentials are bring-your-own and live in the Keychain. Full vision, scope, and the CallKit↔WebRTC seam: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and [`docs/CORE_SYSTEMS.md`](./docs/CORE_SYSTEMS.md) — read them before touching call/transport code.
 
 ## Build, Run & Test
 
