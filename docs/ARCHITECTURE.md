@@ -156,4 +156,5 @@ Three layers (full detail in [CORE_SYSTEMS](./CORE_SYSTEMS.md) and the CI workfl
 The CarPlay dashboard app and its entitlement; QR / pairing-endpoint onboarding;
 SmallWebRTC as a transport; reliable lock-screen "Hey Siri, call my agent"
 dialing; a Favorites tab; cross-drive persistent memory (lives in the agent).
-Each is a known next step, not a gap.
+Each is a known next step, not a gap — sequenced (with rationale) in
+[ROADMAP](./ROADMAP.md).

@@ -10,6 +10,7 @@ backend of ours, no accounts, no per-minute cost.
 
 | Document | Purpose |
 |----------|---------|
+| [ROADMAP](./ROADMAP.md) | Where Conduit goes next and why in that order — the verification-debt-first sequence (M7+) toward calling and being called by your own agent. |
 | [ARCHITECTURE](./ARCHITECTURE.md) | The three-layer model (CallKit / WebRTC transport / the user's agent), folder structure, the key seams. |
 | [CONVENTIONS](./CONVENTIONS.md) | Code style, naming, AccessibilityID convention, the per-developer build override model, logging standards. |
 | [CORE_SYSTEMS](./CORE_SYSTEMS.md) | Shared infrastructure: the protocol seams + fakes, SwiftData models, AppEnvironment, the call state machine, reconnection/spoken state, the audio-session/CallKit wiring, audio-interruption handling, and the inbound-call path. |
