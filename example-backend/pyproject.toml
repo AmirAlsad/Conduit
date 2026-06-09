@@ -1,0 +1,46 @@
+[project]
+name = "conduit-backend"
+version = "0.1.0"
+description = "Voice Agent Bot Engine — always-on FastAPI dispatcher + on-demand Pipecat bots (Daily/LiveKit Cloud)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Pipecat + the transports/services this engine wires up.
+    # Daily + LiveKit are the two cloud transports; deepgram/groq/cartesia back the `live` bot.
+    # `runner` provides the dev runner (pipecat.runner.run.main) for local single-bot iteration.
+    "pipecat-ai[daily,livekit,deepgram,groq,cartesia,runner,silero,webrtc]",
+    # Dispatcher web stack.
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "aiohttp>=3.10",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    "python-dotenv>=1.0",
+    "loguru>=0.7",
+    # Portable CA bundle: the dispatcher's aiohttp session and scripts/daily_webhook.py
+    # verify TLS against this rather than the OS trust store (the python.org/uv Python
+    # on macOS doesn't read the system store).
+    "certifi>=2024.0.0",
+    # LiveKit server SDK: token minting + WebhookReceiver/TokenVerifier.
+    # Usually pulled in by pipecat's [livekit] extra, pinned here so the webhook
+    # path doesn't silently depend on a transitive.
+    "livekit-api>=0.8",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.uv]
+# This repo is run, not built/installed: the dispatcher spawns `python -m bot.bot`
+# from the project root, so `app/` and `bot/` just need to be importable from cwd.
+package = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# The project is run, not installed (package = false), so put the root on sys.path
+# for tests to import `app` and `bot`.
+pythonpath = ["."]

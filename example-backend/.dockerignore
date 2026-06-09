@@ -1,0 +1,23 @@
+# Keep the image small and secret-free. Secrets are injected via env at runtime.
+
+# Local virtualenv / caches / VCS
+.venv/
+.git/
+.gitignore
+__pycache__/
+*.pyc
+.pytest_cache/
+.cache/
+.DS_Store
+
+# Secrets — never bake into an image
+.env
+.env.*
+!.env.example
+
+# Web test client is a separate app, not part of the server image
+clients/web/node_modules/
+clients/web/dist/
+
+# Plans / scratch not needed at runtime (README is kept — pyproject references it)
+.claude/

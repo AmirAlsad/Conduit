@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# uv
+# (uv.lock is committed)
+
+# Node / web client
+clients/web/node_modules/
+clients/web/dist/
+clients/web/.env
+clients/web/.env.local
+
+# Pipecat model caches downloaded at first run
+.cache/
+
+# OS
+.DS_Store
