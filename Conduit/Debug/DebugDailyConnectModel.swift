@@ -16,7 +16,7 @@ import Foundation
 @MainActor
 @Observable
 final class DebugDailyConnectModel {
-    var baseURL = "https://conduit-backend.up.railway.app"
+    var baseURL = ""
     var apiKey = ""
     var agentID = "live"
     private(set) var stateText = "idle"
