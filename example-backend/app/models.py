@@ -16,9 +16,11 @@ Transport = Literal["daily", "livekit"]
 
 class ConnectRequest(BaseModel):
     """POST /connect (pairing) and POST /credentials (direct) share this body.
-    ``transport`` omitted → fall back to the agent's default, then the engine default."""
+    ``transport`` omitted → fall back to the agent's default, then the engine default.
+    The default agent is ``loopback`` so a bare deploy works with zero AI-provider
+    keys; the path routes (/connect/{agent_id}) override ``agent_id`` entirely."""
 
-    agent_id: str = "live"
+    agent_id: str = "loopback"
     transport: Transport | None = None
 
 
@@ -33,7 +35,10 @@ class ConnectionPayload(BaseModel):
 
     ``connection`` is transport-specific:
       daily:   {"room_url": "...", "token": "..."}
-      livekit: {"url": "wss://...", "token": "...", "room_name": "..."}
+      livekit: {"room_url": "wss://...", "url": "wss://...", "token": "...", "room_name": "..."}
+
+    ``room_url`` is the canonical key for both transports (docs/CONNECTION_CONTRACT.md);
+    LiveKit also carries ``url`` as a deprecated alias for older consumers.
     """
 
     transport: Transport

@@ -1,0 +1,61 @@
+site_name: Conduit
+site_description: Bring-your-own-agent voice calling for iOS — your agent, as a phone call.
+site_url: https://amiralsad.github.io/Conduit/
+repo_url: https://github.com/AmirAlsad/Conduit
+repo_name: AmirAlsad/Conduit
+docs_dir: docs
+strict: true
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.footer
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+
+# Internal development docs stay in docs/ but off the published site.
+exclude_docs: |
+  README.md
+  AGENT_WORKFLOW.md
+  ARCHITECTURE.md
+  CONVENTIONS.md
+  CORE_SYSTEMS.md
+  ROADMAP.md
+
+nav:
+  - Home: index.md
+  - Connect your agent:
+      - Overview: connect-your-agent.md
+      - Connection contract: CONNECTION_CONTRACT.md
+      - Inbound calls: INBOUND_CALLS.md
+  - Example backend:
+      - Quickstart: backend/quickstart.md
+      - Bring your own pipeline: backend/bring-your-own-pipeline.md
+      - Direct mode & webhooks: backend/direct-mode.md
+      - Deploy: backend/deploy.md

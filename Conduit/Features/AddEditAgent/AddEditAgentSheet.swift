@@ -129,6 +129,9 @@ struct AddEditAgentSheet: View {
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Conduit POSTs this endpoint with your API key as a bearer token to get a fresh room and token for each call — the usual setup for a Pipecat or LiveKit server. The endpoint identifies the agent, so for multiple agents use one endpoint each. The key is stored only in your device Keychain.")
+                Link("How to set up a pairing endpoint", destination: ExternalLinks.connectYourAgent)
+                    .font(.footnote)
+                    .accessibilityIdentifier(AccessibilityID.AddAgent.pairingDocsLink)
                 if viewModel.transportKind == .daily {
                     Label {
                         Text("On Daily, switch the speaker/Bluetooth output from Conduit's in-call controls — Daily doesn't follow the system call screen's audio button, so only the in-app picker moves the sound. LiveKit doesn't have this limit.")
@@ -177,7 +180,12 @@ struct AddEditAgentSheet: View {
         } header: {
             Text("Inbound Calls")
         } footer: {
-            Text("Conduit POSTs this device's push token here (with your API key as a bearer) so this agent's own server can ring you — on the lock screen and in CarPlay. Requires a VoIP push from your server; see the inbound-calls docs. The token only ever goes to your own server.")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Conduit POSTs this device's push token here (with your API key as a bearer) so this agent's own server can ring you — on the lock screen and in CarPlay. Requires a VoIP push from your server; see the inbound-calls docs. The token only ever goes to your own server.")
+                Link("How inbound calls work", destination: ExternalLinks.inboundCalls)
+                    .font(.footnote)
+                    .accessibilityIdentifier(AccessibilityID.AddAgent.inboundDocsLink)
+            }
         }
     }
 

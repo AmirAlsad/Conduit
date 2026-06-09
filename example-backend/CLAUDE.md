@@ -31,6 +31,14 @@ Start with [`README.md`](./README.md) and
 - Talk to an agent locally (no dispatcher): `uv run python -m bot.bot`
   (`CONDUIT_AGENT=live` for the full reference agent)
 - Run the dispatcher: `uv run uvicorn app.main:app --reload`
+- Mint direct-mode creds to paste into the app: `uv run python scripts/provision.py --transport daily|livekit`
+- Register the Daily direct-mode webhook: `uv run python scripts/daily_webhook.py register --base-url <host>`
+  (LiveKit's webhook is dashboard-only — see `docs/direct-mode.md`)
+
+Endpoint notes: per-agent routes (`POST /connect/{agent_id}`, `POST
+/credentials/{agent_id}`) are the canonical shape — the app sends no agent_id;
+the bare routes default to `loopback`. LiveKit connection payloads carry
+`room_url` (canonical, what the app reads) plus `url` as a deprecated alias.
 
 ## Conventions & guardrails
 

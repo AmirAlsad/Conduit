@@ -40,11 +40,18 @@ struct ContactsView: View {
     @ViewBuilder
     private var content: some View {
         if agents.isEmpty {
-            ContentUnavailableView(
-                "No Agents",
-                systemImage: "person.crop.circle.badge.plus",
-                description: Text("Add an agent to start calling.")
-            )
+            ContentUnavailableView {
+                Label("No Agents", systemImage: "person.crop.circle.badge.plus")
+            } description: {
+                Text("Add an agent to start calling.")
+            } actions: {
+                Button("Add Agent") { showingAdd = true }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier(AccessibilityID.Contacts.emptyAddButton)
+                Link("Learn how to connect your agent", destination: ExternalLinks.connectYourAgent)
+                    .font(.footnote)
+                    .accessibilityIdentifier(AccessibilityID.Contacts.emptySetupLink)
+            }
         } else {
             List {
                 ForEach(Array(agents.enumerated()), id: \.element.id) { index, agent in

@@ -7,8 +7,9 @@
 //  read the credentials. The endpoint itself identifies the agent (one endpoint
 //  per agent), so no agent id is sent. The reference engine nests credentials
 //  under `connection` (which is why the SDK's built-in pairing decoder choked); a
-//  flat shape is also accepted. This talks to the USER's own server — there is no
-//  backend of ours.
+//  flat shape is also accepted, and `url` is read as a fallback key because
+//  LiveKit token servers commonly name the server URL that way. This talks to the
+//  USER's own server — there is no backend of ours.
 //
 
 import Foundation
@@ -40,13 +41,16 @@ enum PairingClient {
 
     /// Extract the room URL + token. Accepts the engine's nested
     /// `{ "connection": { "room_url", "token" } }` and a flat
-    /// `{ "room_url" | "roomUrl", "token" }` fallback.
+    /// `{ "room_url" | "roomUrl" | "url", "token" }` fallback —
+    /// `room_url` is canonical and wins when several are present.
     static func parse(_ data: Data) throws -> PairingCredentials {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw PairingError.invalidResponse
         }
         let source = (root["connection"] as? [String: Any]) ?? root
-        let roomString = (source["room_url"] as? String) ?? (source["roomUrl"] as? String)
+        let roomString = (source["room_url"] as? String)
+            ?? (source["roomUrl"] as? String)
+            ?? (source["url"] as? String)
         let token = source["token"] as? String
         guard let roomString, let roomURL = URL(string: roomString), let token else {
             throw PairingError.missingCredentials

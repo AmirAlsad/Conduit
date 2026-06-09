@@ -27,6 +27,16 @@ class FakeDaily:
         pass
 
 
+class FakeLiveKit:
+    url = "wss://example.livekit.cloud"
+
+    def user_token(self, room_name, *, ttl_secs):
+        return "lk-token-app"
+
+    def agent_token(self, room_name, *, ttl_secs):
+        return "lk-token-bot"
+
+
 class FakeDispatcher:
     def __init__(self):
         self.calls = []
@@ -76,6 +86,89 @@ def test_credentials_direct_registers_room_without_dispatch():
         assert rec is not None
         assert rec.agent_id == "live"
         assert rec.room_url == "https://x.daily.co/room-abc"
+
+
+def test_livekit_pairing_returns_room_url_shape():
+    # The app reads `room_url` (docs/CONNECTION_CONTRACT.md); `url` is the alias.
+    with TestClient(app) as c:
+        app.state.livekit = FakeLiveKit()
+        app.state.dispatcher = FakeDispatcher()
+
+        r = c.post("/connect", json={"transport": "livekit"}, headers=AUTH)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        conn = body["connection"]
+        assert conn["room_url"] == "wss://example.livekit.cloud"
+        assert conn["url"] == conn["room_url"]
+        assert conn["token"] == "lk-token-app"
+        assert conn["room_name"].startswith("conduit-")
+
+        # The bot got the agent token, joined to the same room.
+        ((room_key, agent_id, transport, argv),) = app.state.dispatcher.calls
+        assert (room_key, transport) == (conn["room_name"], "livekit")
+        assert "lk-token-bot" in argv
+
+
+def test_connect_default_agent_is_loopback():
+    with TestClient(app) as c:
+        app.state.daily = FakeDaily()
+        app.state.dispatcher = FakeDispatcher()
+
+        r = c.post("/connect", json={"transport": "daily"}, headers=AUTH)
+        assert r.status_code == 200, r.text
+        assert r.json()["agent_id"] == "loopback"
+
+
+def test_connect_path_route_identifies_agent():
+    # The Conduit app POSTs {"transport": ...} with no agent_id — the URL is the agent.
+    with TestClient(app) as c:
+        app.state.daily = FakeDaily()
+        app.state.dispatcher = FakeDispatcher()
+
+        r = c.post("/connect/loopback", json={"transport": "daily"}, headers=AUTH)
+        assert r.status_code == 200, r.text
+        assert r.json()["agent_id"] == "loopback"
+        ((_, agent_id, _, _),) = app.state.dispatcher.calls
+        assert agent_id == "loopback"
+
+
+def test_path_agent_overrides_body_agent():
+    with TestClient(app) as c:
+        app.state.daily = FakeDaily()
+        app.state.dispatcher = FakeDispatcher()
+
+        r = c.post(
+            "/connect/loopback",
+            json={"agent_id": "live", "transport": "daily"},
+            headers=AUTH,
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["agent_id"] == "loopback"
+
+
+def test_connect_path_route_unknown_agent_404s():
+    with TestClient(app) as c:
+        app.state.daily = FakeDaily()
+        app.state.dispatcher = FakeDispatcher()
+
+        r = c.post("/connect/nonexistent", json={"transport": "daily"}, headers=AUTH)
+        assert r.status_code == 404, r.text
+        assert app.state.dispatcher.calls == []
+
+
+def test_credentials_path_route_registers_without_dispatch():
+    with TestClient(app) as c:
+        app.state.daily = FakeDaily()
+        app.state.dispatcher = FakeDispatcher()
+        app.state.registry = InMemoryRegistry()
+
+        # No body at all — the path names the agent, defaults cover the rest.
+        r = c.post("/credentials/loopback", headers=AUTH)
+        assert r.status_code == 200, r.text
+        assert r.json()["agent_id"] == "loopback"
+        assert app.state.dispatcher.calls == []
+        rec = app.state.registry._rooms.get("room-abc")
+        assert rec is not None and rec.agent_id == "loopback"
 
 
 def test_live_without_model_keys_returns_503_not_silent_room(monkeypatch):

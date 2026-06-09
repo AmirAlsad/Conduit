@@ -72,7 +72,8 @@ AGENTS["myagent"] = AgentConfig("myagent", default_transport="daily",
                                 description="...", required_settings=("MY_KEY",))
 ```
 
-**3. Call it** — `POST /connect {"agent_id": "myagent", "transport": "daily"}`.
+**3. Call it** — `POST /connect/myagent {"transport": "daily"}` (the URL names the
+agent — this is the per-agent endpoint you paste into the Conduit app).
 
 You do **not** write transport, dispatch, teardown, greet, or RTVI plumbing — the
 provided entrypoint (`bot/runtime.py:run_bot`) wires those around your pipeline.
@@ -110,7 +111,8 @@ public spec yet):
   "transport": "daily" | "livekit",
   "connection": {
     // daily:   { "room_url": "...", "token": "..." }
-    // livekit: { "url": "wss://...", "token": "...", "room_name": "..." }
+    // livekit: { "room_url": "wss://...", "url": "wss://...", "token": "...", "room_name": "..." }
+    //          (`room_url` is canonical — what the app reads; `url` is a deprecated alias)
   },
   "agent_id": "loopback" | "live" | "<yours>",
   "expires_at": "<ISO8601 | null>"   // short for pairing, long/null for direct
@@ -159,9 +161,9 @@ CONDUIT_AGENT=live uv run python -m bot.bot     # the live agent (default is loo
 **The dispatcher + a pairing call:**
 ```bash
 uv run uvicorn app.main:app --reload           # http://localhost:8000
-curl -s -X POST http://localhost:8000/connect \
+curl -s -X POST http://localhost:8000/connect/loopback \
   -H "Authorization: Bearer $ENGINE_API_KEY" -H "Content-Type: application/json" \
-  -d '{"agent_id":"loopback","transport":"daily"}'   # ← swap in your own agent_id
+  -d '{"transport":"daily"}'                   # ← the URL names the agent
 ```
 Paste the returned JSON into the [web test client](./clients/web) (`npm run dev`)
 to join and hear the agent. `uv run pytest` runs the suite.
@@ -176,8 +178,10 @@ to join and hear the agent. `uv run pytest` runs the suite.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/connect` | bearer | Pairing: create creds, dispatch agent now, return creds |
-| POST | `/credentials` | bearer | Direct: create stable creds, register room, return creds |
+| POST | `/connect/{agent_id}` | bearer | Pairing: create creds, dispatch the named agent now, return creds |
+| POST | `/connect` | bearer | Same, body/default `agent_id` (defaults to `loopback`) |
+| POST | `/credentials/{agent_id}` | bearer | Direct: create stable creds, register room, return creds |
+| POST | `/credentials` | bearer | Same, body/default `agent_id` (defaults to `loopback`) |
 | POST | `/webhooks/daily` | signature | Daily participant.joined → idempotent dispatch |
 | POST | `/webhooks/livekit` | signature | LiveKit participant_joined → idempotent dispatch |
 | POST | `/admin/disconnect` | bearer | Force-end an agent in a room (drop test) |
@@ -185,9 +189,12 @@ to join and hear the agent. `uv run pytest` runs the suite.
 
 Bearer = `Authorization: Bearer $ENGINE_API_KEY` (the dispatcher **fails fast on
 boot if it's unset**). Webhooks authenticate by signature (the caller is the SFU).
-Body for `/connect` and `/credentials`: `{"agent_id": "...", "transport":
-"daily"|"livekit"}` (transport optional → agent/engine default). Body for
-`/admin/disconnect`: `{"room_key": "<room>"}` (the room name from the payload).
+Body for `/connect*` and `/credentials*`: `{"transport": "daily"|"livekit"}`
+(optional → agent/engine default; on the bare routes `agent_id` may ride in the
+body, but a path `agent_id` always wins — **the endpoint identifies the agent**,
+which is the shape the Conduit app expects: it POSTs only `{"transport": ...}`).
+Body for `/admin/disconnect`: `{"room_key": "<room>"}` (the room name from the
+payload).
 
 ---
 
@@ -239,7 +246,11 @@ Then set the env vars on the platform, and **for direct mode only** register the
 SFU webhook **once** against your public URL (persists across redeploys):
 ```bash
 uv run python scripts/daily_webhook.py register --base-url https://<your-public-host>
+# LiveKit: register https://<your-public-host>/webhooks/livekit in the LiveKit
+# Cloud dashboard (Settings → Webhooks) — there's no API for it.
 ```
+Provision the credentials to paste into the app with
+`uv run python scripts/provision.py --transport daily|livekit`.
 Full deploy + webhook details: **[docs/direct-mode.md](./docs/direct-mode.md)**.
 
 ---

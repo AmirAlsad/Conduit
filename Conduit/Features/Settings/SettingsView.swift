@@ -29,6 +29,8 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier(AccessibilityID.Settings.aboutRow)
+                Link("Setting up your agent", destination: ExternalLinks.connectYourAgent)
+                    .accessibilityIdentifier(AccessibilityID.Settings.agentSetupLink)
             }
 
             #if DEBUG

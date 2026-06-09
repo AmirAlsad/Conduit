@@ -3,8 +3,9 @@
 //  ConduitTests
 //
 //  The pairing-response parsing — the engine nests credentials under `connection`,
-//  which is what the SDK's built-in pairing decoder couldn't handle. A flat shape
-//  and camelCase room key are accepted as fallbacks.
+//  which is what the SDK's built-in pairing decoder couldn't handle. A flat shape,
+//  a camelCase room key, and a `url` key (LiveKit token servers' usual name for
+//  the server URL) are accepted as fallbacks.
 //
 
 import Foundation
@@ -30,6 +31,25 @@ struct PairingClientTests {
         let json = Data(#"{"connection": {"roomUrl": "https://x.daily.co/camel", "token": "t"}}"#.utf8)
         let creds = try PairingClient.parse(json)
         #expect(creds.roomURL.absoluteString == "https://x.daily.co/camel")
+    }
+
+    @Test func parsesUrlKeyFallbackFlat() throws {
+        let json = Data(#"{"url": "wss://x.livekit.cloud", "token": "jwt"}"#.utf8)
+        let creds = try PairingClient.parse(json)
+        #expect(creds.roomURL.absoluteString == "wss://x.livekit.cloud")
+        #expect(creds.token == "jwt")
+    }
+
+    @Test func parsesUrlKeyFallbackNested() throws {
+        let json = Data(#"{"connection": {"url": "wss://x.livekit.cloud", "token": "jwt"}}"#.utf8)
+        let creds = try PairingClient.parse(json)
+        #expect(creds.roomURL.absoluteString == "wss://x.livekit.cloud")
+    }
+
+    @Test func roomUrlWinsOverUrl() throws {
+        let json = Data(#"{"room_url": "wss://canonical.livekit.cloud", "url": "wss://alias.livekit.cloud", "token": "t"}"#.utf8)
+        let creds = try PairingClient.parse(json)
+        #expect(creds.roomURL.absoluteString == "wss://canonical.livekit.cloud")
     }
 
     @Test func throwsOnMissingToken() {

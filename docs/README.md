@@ -14,9 +14,22 @@ backend of ours, no accounts, no per-minute cost.
 | [ARCHITECTURE](./ARCHITECTURE.md) | The three-layer model (CallKit / WebRTC transport / the user's agent), folder structure, the key seams. |
 | [CONVENTIONS](./CONVENTIONS.md) | Code style, naming, AccessibilityID convention, the per-developer build override model, logging standards. |
 | [CORE_SYSTEMS](./CORE_SYSTEMS.md) | Shared infrastructure: the protocol seams + fakes, SwiftData models, AppEnvironment, the call state machine, reconnection/spoken state, the audio-session/CallKit wiring, audio-interruption handling, and the inbound-call path. |
-| [CONNECTION_CONTRACT](./CONNECTION_CONTRACT.md) | How a user's agent backend connects to Conduit — the pairing-endpoint request/response shapes and the direct-room fallback. Hand this to whoever runs the agent. |
-| [INBOUND_CALLS](./INBOUND_CALLS.md) | How a user's own server rings the user through Conduit (agent-initiated VoIP-push calls) — token registration + push payload contract. The inbound companion to the connection contract. |
+| [CONNECTION_CONTRACT](./CONNECTION_CONTRACT.md) | How a user's agent backend connects to Conduit — the pairing-endpoint request/response shapes and the direct-room fallback. Hand this to whoever runs the agent. *(published)* |
+| [INBOUND_CALLS](./INBOUND_CALLS.md) | How a user's own server rings the user through Conduit (agent-initiated VoIP-push calls) — token registration + push payload contract. The inbound companion to the connection contract. *(published)* |
 | [AGENT_WORKFLOW](./AGENT_WORKFLOW.md) | Operational playbook for agents driving the app: build nuances, UI verification, flow testing, the reporting contract, and the shell fallback. |
+| [index](./index.md) | Landing page of the published docs site. *(published)* |
+| [connect-your-agent](./connect-your-agent.md) | User-facing orientation: pairing vs. direct, one endpoint per agent, where the example backend fits. *(published)* |
+| [backend/quickstart](./backend/quickstart.md) | Run the example backend and point the app at it. *(published)* |
+| [backend/bring-your-own-pipeline](./backend/bring-your-own-pipeline.md) | Swap your own agent pipeline into the example backend. *(published)* |
+| [backend/direct-mode](./backend/direct-mode.md) | Direct credentials, the provision script, and the Daily/LiveKit webhooks. *(published)* |
+| [backend/deploy](./backend/deploy.md) | Deploying the example backend (Docker, Railway, post-deploy steps). *(published)* |
+
+**The docs site.** Pages marked *(published)* are built into the public site at
+<https://amiralsad.github.io/Conduit/> by `mkdocs.yml` (Material theme, deployed by
+`.github/workflows/docs.yml` on push to `main`). Everything else in `docs/` is
+internal development documentation, kept off the site via `exclude_docs`. The app
+links to the published pages through `Core/Utilities/ExternalLinks.swift` — if a
+published page's filename changes, update both the `nav` and `ExternalLinks`.
 
 Feature docs (`docs/features/<Feature>.md`) are added as features land — see the
 plan's three-tab structure (Recents, Contacts, Settings) plus Agent Detail and

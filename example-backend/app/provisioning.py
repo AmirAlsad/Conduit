@@ -31,6 +31,12 @@ def _livekit(state):
     return state.livekit
 
 
+def _livekit_connection(server_url: str, token: str, room_name: str) -> dict:
+    # `room_url` is the canonical key (docs/CONNECTION_CONTRACT.md — what the app
+    # reads); `url` stays as a deprecated alias for the web client and older scripts.
+    return {"room_url": server_url, "url": server_url, "token": token, "room_name": room_name}
+
+
 # --- pairing: create per-call creds and dispatch the bot now ---
 
 
@@ -78,7 +84,7 @@ async def provision_pairing(state, agent_id: str, transport: str) -> ConnectionP
         )
         return ConnectionPayload(
             transport="livekit",
-            connection={"url": lk.url, "token": app_token, "room_name": room_name},
+            connection=_livekit_connection(lk.url, app_token, room_name),
             agent_id=agent_id,
             expires_at=iso_expiry(settings.pairing_token_ttl_secs),
         )
@@ -111,7 +117,7 @@ async def provision_direct(state, agent_id: str, transport: str) -> ConnectionPa
         await state.registry.enable_room(room_name, agent_id, "livekit", room_url=None)
         return ConnectionPayload(
             transport="livekit",
-            connection={"url": lk.url, "token": app_token, "room_name": room_name},
+            connection=_livekit_connection(lk.url, app_token, room_name),
             agent_id=agent_id,
             expires_at=iso_expiry(settings.direct_token_ttl_secs),
         )

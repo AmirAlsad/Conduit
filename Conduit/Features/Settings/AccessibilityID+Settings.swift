@@ -12,5 +12,6 @@ extension AccessibilityID {
         static let screen = "Settings_Screen"
         static let pushToTalkToggle = "Settings_PushToTalkToggle"
         static let aboutRow = "Settings_AboutRow"
+        static let agentSetupLink = "Settings_AgentSetupLink"
     }
 }

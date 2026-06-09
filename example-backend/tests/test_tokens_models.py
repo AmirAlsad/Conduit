@@ -37,9 +37,10 @@ def test_iso_expiry():
 def test_connection_payload_shape():
     p = ConnectionPayload(
         transport="livekit",
-        connection={"url": "wss://x", "token": "t", "room_name": "r"},
+        connection={"room_url": "wss://x", "url": "wss://x", "token": "t", "room_name": "r"},
         agent_id="live",
         expires_at=None,
     )
     assert p.model_dump()["transport"] == "livekit"
-    assert set(p.connection) == {"url", "token", "room_name"}
+    # room_url is canonical (the app reads it); url is the deprecated alias.
+    assert set(p.connection) == {"room_url", "url", "token", "room_name"}

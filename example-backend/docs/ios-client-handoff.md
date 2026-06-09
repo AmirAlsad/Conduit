@@ -5,7 +5,8 @@ Everything the client team needs to connect to the deployed engine, run the
 engine side (Daily **and** LiveKit, `loopback` **and** `live`) is validated
 end-to-end against real Daily/LiveKit Cloud.
 
-**Base URL:** `https://conduit-backend.up.railway.app` (live, health-checked).
+**Base URL:** `https://<your-deployed-engine-host>` (your own deployment — see
+[deploy docs](../../docs/backend/deploy.md)).
 
 > **Two values to share separately before forwarding** (kept out of the repo):
 > - `ENGINE_API_KEY` — the bearer token (share over a secure channel, **not** in a ticket)
@@ -34,11 +35,11 @@ join credentials. The bot is already in the room when the call returns — join
 before `expires_at`.
 
 ```bash
-POST https://conduit-backend.up.railway.app/connect
+POST https://<your-deployed-engine-host>/connect/live
 Authorization: Bearer {ENGINE_API_KEY}
 Content-Type: application/json
 
-{ "agent_id": "live", "transport": "daily" }   # transport optional → engine default (daily)
+{ "transport": "daily" }   # transport optional → agent/engine default; the URL names the agent
 ```
 
 | field | values |
@@ -63,14 +64,19 @@ from the vanilla Pipecat quickstart shape):
 // LiveKit  (transport: "livekit")
 {
   "transport": "livekit",
-  "connection": { "url": "wss://<project>.livekit.cloud", "token": "<jwt>", "room_name": "conduit-<id>" },
+  "connection": {
+    "room_url": "wss://<project>.livekit.cloud",   // canonical (what the app reads)
+    "url": "wss://<project>.livekit.cloud",        // deprecated alias
+    "token": "<jwt>",
+    "room_name": "conduit-<id>"
+  },
   "agent_id": "live",
   "expires_at": "..."
 }
 ```
 
-Read `connection.room_url` + `connection.token` (Daily) or
-`connection.url` + `connection.token` + `connection.room_name` (LiveKit).
+Read `connection.room_url` + `connection.token` for both transports (LiveKit adds
+`connection.room_name`, and the token scopes the room).
 
 ### Status codes
 

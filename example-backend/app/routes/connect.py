@@ -3,13 +3,16 @@
 - POST /connect      — pairing: create creds, dispatch the bot now, return creds.
 - POST /credentials  — direct provision: create stable creds, register the room,
                        return creds (dispatch happens later via webhook).
+- POST /connect/{agent_id} and /credentials/{agent_id} — same, but the URL names
+  the agent ("the endpoint identifies the agent" — the Conduit app never sends an
+  agent_id, so each agent gets its own pairing endpoint).
 
-Both require the engine bearer token and converge on the provisioning core.
+All require the engine bearer token and converge on the provisioning core.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from app.agents import get_agent, resolve_transport
 from app.auth import require_engine_key
@@ -53,3 +56,25 @@ async def connect(req: ConnectRequest, request: Request) -> ConnectionPayload:
 async def credentials(req: ConnectRequest, request: Request) -> ConnectionPayload:
     """Direct provision: called once; result pasted into the app's add/edit sheet."""
     return await _provision(request, req, direct=True)
+
+
+def _with_path_agent(req: ConnectRequest | None, agent_id: str) -> ConnectRequest:
+    # The path names the agent; it wins over any body agent_id. Body is optional
+    # so a bare `curl -X POST .../connect/live` works without `-d`.
+    return (req or ConnectRequest()).model_copy(update={"agent_id": agent_id})
+
+
+@router.post("/connect/{agent_id}", response_model=ConnectionPayload)
+async def connect_agent(
+    agent_id: str, request: Request, req: ConnectRequest | None = Body(default=None)
+) -> ConnectionPayload:
+    """Pairing via a per-agent endpoint — what the Conduit app points at."""
+    return await _provision(request, _with_path_agent(req, agent_id), direct=False)
+
+
+@router.post("/credentials/{agent_id}", response_model=ConnectionPayload)
+async def credentials_agent(
+    agent_id: str, request: Request, req: ConnectRequest | None = Body(default=None)
+) -> ConnectionPayload:
+    """Direct provision via a per-agent endpoint (see scripts/provision.py)."""
+    return await _provision(request, _with_path_agent(req, agent_id), direct=True)

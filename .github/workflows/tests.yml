@@ -3,12 +3,13 @@ name: Tests
 on:
   push:
     branches: [main]
-    # example-backend/ is a self-contained Python project; its changes don't
-    # affect the iOS build, so skip the (macOS, ~30 min) iOS suite for them.
-    paths-ignore: ['example-backend/**']
+    # example-backend/ is a self-contained Python project and docs/ + the docs
+    # site config don't affect the iOS build, so skip the (macOS, ~30 min) iOS
+    # suite for them.
+    paths-ignore: ['example-backend/**', 'docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
   pull_request:
     branches: [main]
-    paths-ignore: ['example-backend/**']
+    paths-ignore: ['example-backend/**', 'docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
 
 concurrency:
   group: tests-${{ github.ref }}

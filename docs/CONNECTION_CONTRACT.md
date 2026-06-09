@@ -71,18 +71,21 @@ Accepted keys, precisely:
 
 | Field | Accepted keys | Required |
 |---|---|---|
-| Room URL | `room_url` **or** `roomUrl` | yes |
+| Room URL | `room_url` (canonical) **or** `roomUrl` **or** `url` (fallback) | yes |
 | Token | `token` | yes |
 | Wrapper | top level **or** nested under `connection` | either works |
+
+When several room-URL keys are present, `room_url` wins, then `roomUrl`, then `url`.
 
 Per transport:
 - **Daily:** `room_url` is the room URL (`https://<domain>.daily.co/<room>`); `token`
   is a Daily meeting token scoped to that room.
 - **LiveKit:** `room_url` is your LiveKit **server** URL (`wss://<project>.livekit.cloud`),
   the same for every call; `token` is a LiveKit **access token** (a JWT) carrying a
-  join grant for the specific room. If your token server names the URL `serverUrl` or
-  `url`, map it to `room_url`/`roomUrl` in the response — Conduit reads only
-  `room_url`/`roomUrl`.
+  join grant for the specific room. LiveKit token servers commonly name the server
+  URL `url` — Conduit reads that as a fallback, so a default LiveKit token-server
+  response usually works unmodified. `room_url` stays the canonical key; a
+  `serverUrl` key is **not** read — map that one.
 
 ### Errors
 
@@ -171,7 +174,10 @@ https://your-host/connect/support     → mints a room for the support agent
 ```
 
 Each endpoint provisions the room for *its* agent and returns the same response
-shape above.
+shape above. The reference engine in
+[`example-backend/`](https://github.com/AmirAlsad/Conduit/tree/main/example-backend)
+ships exactly this: `POST /connect/{agent_id}` routes, with the bare `/connect`
+defaulting to its `loopback` agent (see the [quickstart](backend/quickstart.md)).
 
 ---
 

@@ -108,3 +108,6 @@ logs/
 # Playgrounds
 timeline.xctimeline
 playground.xcworkspace
+
+# MkDocs build output (CI builds and deploys it; never commit)
+site/
