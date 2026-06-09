@@ -94,14 +94,19 @@ for mutations and non-view fetches; list screens use `@Query` directly.
 
 ## Keychain & adding an agent to Contacts
 
-`KeychainService` (`Keychain/`) stores each agent's connection token as a
-generic-password item keyed by `(service, KeychainTokenRef.account)`, with
+`KeychainService` (`Keychain/`) stores each agent's connection secrets as
+generic-password items keyed by `(service, KeychainTokenRef.account)`, with
 `kSecAttrAccessibleAfterFirstUnlock` so a call can connect from the lock screen /
 CarPlay after the first post-boot unlock. `setToken` is update-or-add (no
 duplicate items on re-save); `token` returns `nil` (not an error) when absent;
-`delete` treats "not found" as success. **The token never leaves the Keychain** —
-SwiftData persists only the `KeychainTokenRef`. The round-trip is unit-tested on
-the simulator under a per-test service namespace.
+`delete` treats "not found" as success. **Secrets never leave the Keychain** —
+SwiftData persists only the `KeychainTokenRef`. An agent can hold **two**
+independent secrets under separate refs both derived from its id — the **pairing
+API key** (`agent.token.<id>`, also `Agent.keychainTokenRef`) and the **direct-room
+token** (`agent.directToken.<id>`) — so the two connection paths don't share a
+field. `CallSessionCoordinator.loadToken` reads whichever the call uses (pairing
+wins when both are set). The round-trip is unit-tested on the simulator under a
+per-test service namespace.
 
 Adding an agent to Contacts is **optional and permission-free**. From AgentDetail,
 "Add to Contacts" presents the system `CNContactViewController(forNewContact:)`

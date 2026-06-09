@@ -6,8 +6,11 @@
 //  fields, validates the connection URL, persists via the repository, and runs a
 //  one-shot test connection.
 //
-//  TOKEN INVARIANT: the connection token lives only in the Keychain. It is never
-//  written to the `Agent`, never persisted in SwiftData, and never logged.
+//  Pairing and direct mode each carry their own secret (the pairing API key and the
+//  direct-room token), stored under separate Keychain refs so an agent can hold both.
+//
+//  TOKEN INVARIANT: secrets live only in the Keychain. They are never written to the
+//  `Agent`, never persisted in SwiftData, and never logged.
 //
 
 import Foundation
@@ -19,7 +22,8 @@ final class AddEditAgentViewModel {
     var detail: String
     var transportKind: TransportKind = .daily
     var connectionURLText: String
-    var token: String
+    var apiKey: String
+    var directToken: String
     var pairingEndpointText: String
     var avatarData: Data? = nil
 
@@ -58,13 +62,15 @@ final class AddEditAgentViewModel {
             self.connectionURLText = agent.connectionURL?.absoluteString ?? ""
             self.pairingEndpointText = agent.pairingEndpoint?.absoluteString ?? ""
             self.avatarData = agent.avatarData
-            self.token = (try? keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef))).flatMap { $0 } ?? ""
+            self.apiKey = (try? keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef))).flatMap { $0 } ?? ""
+            self.directToken = (try? keychain.token(for: KeychainTokenRef(directTokenForAgentID: agent.id))).flatMap { $0 } ?? ""
         } else {
             self.name = ""
             self.detail = ""
             self.connectionURLText = ""
             self.pairingEndpointText = ""
-            self.token = ""
+            self.apiKey = ""
+            self.directToken = ""
         }
     }
 
@@ -119,12 +125,8 @@ final class AddEditAgentViewModel {
             repository.insert(agent)
         }
 
-        let ref = KeychainTokenRef(account: agent.keychainTokenRef)
-        if token.isEmpty {
-            try? keychain.deleteToken(for: ref)
-        } else {
-            try keychain.setToken(token, for: ref)
-        }
+        try persistSecret(apiKey, to: KeychainTokenRef(account: agent.keychainTokenRef))
+        try persistSecret(directToken, to: KeychainTokenRef(directTokenForAgentID: agent.id))
 
         try repository.save()
 
@@ -143,11 +145,25 @@ final class AddEditAgentViewModel {
         }
     }
 
+    private func persistSecret(_ value: String, to ref: KeychainTokenRef) throws {
+        if value.isEmpty {
+            try? keychain.deleteToken(for: ref)
+        } else {
+            try keychain.setToken(value, for: ref)
+        }
+    }
+
     // MARK: - Test connection
 
     private enum TestResult {
         case success
         case failure(String)
+    }
+
+    /// The secret for the path under test — pairing wins when both are configured,
+    /// matching how a real call resolves it.
+    private var activeSecret: String {
+        pairingEndpoint != nil ? apiKey : directToken
     }
 
     func testConnection() async {
@@ -161,7 +177,7 @@ final class AddEditAgentViewModel {
         let config = TransportConfig(
             kind: transportKind,
             url: connectionURL,
-            token: token,
+            token: activeSecret,
             pairingEndpoint: pairingEndpoint
         )
         let transport = transportFactory(transportKind)

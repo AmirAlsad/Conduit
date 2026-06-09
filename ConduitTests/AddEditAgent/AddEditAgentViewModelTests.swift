@@ -79,7 +79,7 @@ struct AddEditAgentViewModelTests {
         vm.name = "Jarvis"
         vm.detail = "Personal"
         vm.connectionURLText = "https://x.daily.co/room"
-        vm.token = "secret-token"
+        vm.directToken = "secret-token"
 
         try await vm.save()
 
@@ -89,22 +89,41 @@ struct AddEditAgentViewModelTests {
         #expect(agent.name == "Jarvis")
         #expect(agent.detail == "Personal")
         #expect(agent.connectionURL?.absoluteString == "https://x.daily.co/room")
-        // Token lives ONLY in the Keychain.
-        #expect(try keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef)) == "secret-token")
+        // The direct token lives ONLY in the Keychain, under the direct-token ref.
+        #expect(try keychain.token(for: KeychainTokenRef(directTokenForAgentID: agent.id)) == "secret-token")
     }
 
-    @Test func savingPairingAgentPersistsEndpoint() async throws {
+    @Test func savingPairingAgentPersistsEndpointAndApiKey() async throws {
         let repo = try makeRepository()
-        let vm = makeViewModel(repository: repo)
+        let keychain = InMemoryKeychain()
+        let vm = makeViewModel(repository: repo, keychain: keychain)
         vm.name = "Engine Agent"
         vm.pairingEndpointText = "https://engine.example.com/connect"
-        vm.token = "api-key"
+        vm.apiKey = "api-key"
 
         try await vm.save()
 
         let agent = try #require(try repo.fetchAll().first)
         #expect(agent.connectionURL == nil)
         #expect(agent.pairingEndpoint?.absoluteString == "https://engine.example.com/connect")
+        #expect(try keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef)) == "api-key")
+    }
+
+    @Test func bothPathsPersistTheirOwnSecretIndependently() async throws {
+        let repo = try makeRepository()
+        let keychain = InMemoryKeychain()
+        let vm = makeViewModel(repository: repo, keychain: keychain)
+        vm.name = "Dual"
+        vm.pairingEndpointText = "https://engine.example.com/connect"
+        vm.apiKey = "the-api-key"
+        vm.connectionURLText = "https://x.daily.co/room"
+        vm.directToken = "the-direct-token"
+
+        try await vm.save()
+
+        let agent = try #require(try repo.fetchAll().first)
+        #expect(try keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef)) == "the-api-key")
+        #expect(try keychain.token(for: KeychainTokenRef(directTokenForAgentID: agent.id)) == "the-direct-token")
     }
 
     @Test func editingKeepsSyntheticIdentityStableAndDoesNotDuplicate() async throws {
@@ -117,7 +136,7 @@ struct AddEditAgentViewModelTests {
 
         let vm = makeViewModel(editing: agent, repository: repo)
         vm.name = "New Name"
-        vm.token = "tok"
+        vm.directToken = "tok"
         try await vm.save()
 
         #expect(agent.name == "New Name")
@@ -151,7 +170,7 @@ struct AddEditAgentViewModelTests {
         let vm = makeViewModel(repository: repo, contactSync: sync)
         vm.name = "Echo"
         vm.connectionURLText = "https://x.daily.co/room"
-        vm.token = "t"
+        vm.directToken = "t"
 
         try await vm.save()
 
@@ -164,7 +183,7 @@ struct AddEditAgentViewModelTests {
         let fake = FakeTransport()
         let vm = makeViewModel(repository: try makeRepository(), transportFactory: { _ in fake })
         vm.connectionURLText = "https://x.daily.co/room"
-        vm.token = "t"
+        vm.directToken = "t"
 
         async let run: Void = vm.testConnection()
         await waitUntil { fake.connectCount == 1 }
@@ -179,7 +198,7 @@ struct AddEditAgentViewModelTests {
         let fake = FakeTransport()
         let vm = makeViewModel(repository: try makeRepository(), transportFactory: { _ in fake })
         vm.connectionURLText = "https://x.daily.co/room"
-        vm.token = "bad"
+        vm.directToken = "bad"
 
         async let run: Void = vm.testConnection()
         await waitUntil { fake.connectCount == 1 }
@@ -194,7 +213,7 @@ struct AddEditAgentViewModelTests {
         fake.connectError = .timedOut
         let vm = makeViewModel(repository: try makeRepository(), transportFactory: { _ in fake })
         vm.connectionURLText = "https://x.daily.co/room"
-        vm.token = "t"
+        vm.directToken = "t"
 
         await vm.testConnection()
 
@@ -206,7 +225,7 @@ struct AddEditAgentViewModelTests {
         fake.connectError = .authenticationFailed
         let vm = makeViewModel(repository: try makeRepository(), transportFactory: { _ in fake })
         vm.connectionURLText = "https://x.daily.co/room"
-        vm.token = "bad"
+        vm.directToken = "bad"
 
         await vm.testConnection()
 

@@ -106,8 +106,8 @@ final class CallSessionCoordinator: CallProviderDelegate {
         announcer.startRepeating(.connecting)
 
         let token = loadToken(for: agent) ?? ""
-        // Direct mode needs a token; pairing mode authenticates with the API key
-        // (also the token field), but an endpoint may be open, so don't hard-require it.
+        // Direct mode needs its room token; pairing mode authenticates with its API
+        // key, but an endpoint may be open, so don't hard-require it.
         if token.isEmpty, agent.pairingEndpoint == nil {
             Log.error(.call, "No token for agent \(Log.redactEmail(agent.syntheticEmail))")
             fail(.badToken)
@@ -134,8 +134,13 @@ final class CallSessionCoordinator: CallProviderDelegate {
         }
     }
 
+    /// The secret for the path this call will take: the pairing API key when a
+    /// pairing endpoint is set (it wins if both are configured), otherwise the
+    /// direct-room token. Each lives under its own Keychain ref.
     private func loadToken(for agent: Agent) -> String? {
-        let ref = KeychainTokenRef(account: agent.keychainTokenRef)
+        let ref = agent.pairingEndpoint != nil
+            ? KeychainTokenRef(account: agent.keychainTokenRef)
+            : KeychainTokenRef(directTokenForAgentID: agent.id)
         let token = try? keychain.token(for: ref)
         guard let token, !token.isEmpty else { return nil }
         return token

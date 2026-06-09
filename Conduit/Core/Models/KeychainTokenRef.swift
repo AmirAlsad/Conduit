@@ -16,7 +16,14 @@ struct KeychainTokenRef: Equatable, Sendable {
         self.account = account
     }
 
+    /// The pairing API key (bearer) — also the agent's primary `keychainTokenRef`.
     init(agentID: UUID) {
         self.account = "agent.token.\(agentID.uuidString)"
+    }
+
+    /// The direct-room token, a secret distinct from the pairing API key so an agent
+    /// can carry both independently.
+    init(directTokenForAgentID agentID: UUID) {
+        self.account = "agent.directToken.\(agentID.uuidString)"
     }
 }

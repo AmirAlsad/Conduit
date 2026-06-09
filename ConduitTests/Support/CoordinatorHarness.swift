@@ -58,8 +58,10 @@ final class CoordinatorHarness {
         repository.insert(agent)
         try repository.save()
 
+        // The harness agent is direct-mode (connectionURL), so its secret lives under
+        // the direct-token ref the coordinator loads for that path.
         if let token {
-            try keychain.setToken(token, for: KeychainTokenRef(account: agent.keychainTokenRef))
+            try keychain.setToken(token, for: KeychainTokenRef(directTokenForAgentID: agent.id))
         }
 
         let transport = self.transport

@@ -13,6 +13,7 @@ import SwiftUI
 struct AddEditAgentSheet: View {
     @State private var viewModel: AddEditAgentViewModel
     @State private var photoItem: PhotosPickerItem?
+    @State private var directExpanded: Bool
     @Environment(\.dismiss) private var dismiss
 
     init(editing: Agent? = nil, environment: AppEnvironment) {
@@ -25,6 +26,8 @@ struct AddEditAgentSheet: View {
                 transportFactory: environment.transportFactory
             )
         )
+        // Reveal direct credentials only when the agent already uses them.
+        _directExpanded = State(initialValue: editing?.connectionURL != nil)
     }
 
     var body: some View {
@@ -118,8 +121,8 @@ struct AddEditAgentSheet: View {
                 .keyboardType(.URL)
                 .accessibilityIdentifier(AccessibilityID.AddAgent.pairingField)
 
-            SecureField("API key", text: $viewModel.token)
-                .accessibilityIdentifier(AccessibilityID.AddAgent.tokenField)
+            SecureField("API key", text: $viewModel.apiKey)
+                .accessibilityIdentifier(AccessibilityID.AddAgent.apiKeyField)
         } header: {
             Text("Connection")
         } footer: {
@@ -139,15 +142,19 @@ struct AddEditAgentSheet: View {
 
     private var directSection: some View {
         Section {
-            TextField("Room URL", text: $viewModel.connectionURLText)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.URL)
-                .accessibilityIdentifier(AccessibilityID.AddAgent.urlField)
-        } header: {
-            Text("Direct room (advanced)")
+            DisclosureGroup("Direct room (advanced)", isExpanded: $directExpanded) {
+                TextField("Room URL", text: $viewModel.connectionURLText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .accessibilityIdentifier(AccessibilityID.AddAgent.urlField)
+
+                SecureField("Token (optional)", text: $viewModel.directToken)
+                    .accessibilityIdentifier(AccessibilityID.AddAgent.directTokenField)
+            }
+            .accessibilityIdentifier(AccessibilityID.AddAgent.directDisclosure)
         } footer: {
-            Text("Optional. Skip pairing and connect straight to a room URL, using the key above as the room token.")
+            Text("Optional. Connect straight to a room URL with its own token instead of pairing. If you set both, pairing is used.")
         }
     }
 
