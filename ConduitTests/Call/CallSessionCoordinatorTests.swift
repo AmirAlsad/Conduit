@@ -27,6 +27,8 @@ struct CallSessionCoordinatorTests {
         #expect(h.transport.lastConfig?.token == "valid-token")
         #expect(h.transport.lastConfig?.kind == .daily)
         #expect(h.announcer.startedRepeating == [.connecting])
+        // Donated so Siri's calling domain learns "this contact calls via Conduit".
+        #expect(h.interactionDonor.donatedAgentIDs == [h.agent.id])
     }
 
     @Test func placeCallIgnoredWhenNotIdle() async throws {

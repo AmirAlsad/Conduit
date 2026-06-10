@@ -45,6 +45,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     private let interruptionObserver: AudioInterruptionObserving
     private let missedCallNotifier: MissedCallNotifying
     private let ringStatusReporter: RingStatusReporting
+    private let interactionDonor: CallInteractionDonating
     private let policy: ReconnectionPolicy
     private let now: () -> Date
     private let sleep: (Duration) async throws -> Void
@@ -77,6 +78,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         interruptionObserver: AudioInterruptionObserving,
         missedCallNotifier: MissedCallNotifying,
         ringStatusReporter: RingStatusReporting,
+        interactionDonor: CallInteractionDonating = CallInteractionDonor(),
         policy: ReconnectionPolicy = .default,
         now: @escaping () -> Date,
         sleep: @escaping (Duration) async throws -> Void,
@@ -90,6 +92,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         self.interruptionObserver = interruptionObserver
         self.missedCallNotifier = missedCallNotifier
         self.ringStatusReporter = ringStatusReporter
+        self.interactionDonor = interactionDonor
         self.policy = policy
         self.now = now
         self.sleep = sleep
@@ -124,6 +127,10 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         callProvider.reportOutgoingCallConnecting(id)
         state = .connecting
         announcer.startRepeating(.connecting)
+        // Teach Siri's calling domain that this contact is called via Conduit —
+        // enables the bare "call <agent>" phrase (the mirror contact has no
+        // phone number, so without donations Siri considers it uncallable).
+        interactionDonor.donateOutgoingCall(to: agent)
 
         await connectTransport(for: agent)
     }
