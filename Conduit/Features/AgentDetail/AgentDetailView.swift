@@ -108,11 +108,14 @@ struct AgentDetailView: View {
                 Task { await environment.callSession.placeCall(agent) }
             } label: {
                 Label("Call", systemImage: "phone.fill")
-                    .font(.headline)
+                    .font(.title3.weight(.semibold))
                     .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
             }
-            .tint(.green)
             .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .controlSize(.large)
+            .tint(.green)
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
             .accessibilityIdentifier(AccessibilityID.AgentDetail.callButton)
@@ -137,7 +140,7 @@ struct AgentDetailView: View {
                     .accessibilityIdentifier(AccessibilityID.AgentDetail.addToContactsButton)
             }
         } footer: {
-            Text("Adds a contact so this agent appears on the call and lock screens. [Learn more](\(ExternalLinks.contactMirrorDocs.absoluteString))")
+            Text("Adds a contact so this agent appears on the call and lock screens. [Learn more.](\(ExternalLinks.contactMirrorDocs.absoluteString))")
         }
     }
 

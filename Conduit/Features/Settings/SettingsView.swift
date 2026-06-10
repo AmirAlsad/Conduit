@@ -20,12 +20,12 @@ struct SettingsView: View {
             } header: {
                 Text("Audio")
             } footer: {
-                Text("When on, the mic opens only while you hold the talk button. [Learn more](\(ExternalLinks.pushToTalkDocs.absoluteString))")
+                Text("When on, the mic opens only while you hold the talk button. [Learn more.](\(ExternalLinks.pushToTalkDocs.absoluteString))")
             }
 
             Section("About") {
                 LabeledContent("Version", value: appVersion)
-                Text("Your agent, your keys — credentials never leave this device. [Learn more](\(ExternalLinks.usingConduit.absoluteString)#privacy)")
+                Text("Your agent, your keys — credentials never leave this device. [Learn more.](\(ExternalLinks.usingConduit.absoluteString)#privacy)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier(AccessibilityID.Settings.aboutRow)

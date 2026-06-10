@@ -146,12 +146,12 @@ struct AddEditAgentSheet: View {
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Conduit calls this endpoint for fresh credentials each call; the key stays in your Keychain.")
-                Link("Learn more", destination: ExternalLinks.pairingDocs)
+                Link("Learn more.", destination: ExternalLinks.pairingDocs)
                     .font(.footnote)
                     .accessibilityIdentifier(AccessibilityID.AddAgent.pairingDocsLink)
                 if viewModel.transportKind == .daily {
                     Label {
-                        Text("On Daily, switch audio output from Conduit's in-call controls. [Learn more](\(ExternalLinks.dailyAudioDocs.absoluteString))")
+                        Text("On Daily, switch audio output from Conduit's in-call controls. [Learn more.](\(ExternalLinks.dailyAudioDocs.absoluteString))")
                     } icon: {
                         Image(systemName: "info.circle")
                     }
@@ -175,7 +175,7 @@ struct AddEditAgentSheet: View {
             }
             .accessibilityIdentifier(AccessibilityID.AddAgent.directDisclosure)
         } footer: {
-            Text("Connect straight to a room URL instead of pairing — pairing wins if both are set. [Learn more](\(ExternalLinks.directRoomDocs.absoluteString))")
+            Text("Connect straight to a room URL instead of pairing — pairing wins if both are set. [Learn more.](\(ExternalLinks.directRoomDocs.absoluteString))")
         }
     }
 
@@ -199,7 +199,7 @@ struct AddEditAgentSheet: View {
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Sends this device's push token to your own server so this agent can ring you.")
-                Link("Learn more", destination: ExternalLinks.inboundCalls)
+                Link("Learn more.", destination: ExternalLinks.inboundCalls)
                     .font(.footnote)
                     .accessibilityIdentifier(AccessibilityID.AddAgent.inboundDocsLink)
             }
