@@ -137,7 +137,7 @@ struct AgentDetailView: View {
                     .accessibilityIdentifier(AccessibilityID.AgentDetail.addToContactsButton)
             }
         } footer: {
-            Text("Adds a contact so this agent's name and photo appear on the call screen, lock screen, and in your car. Saved through the system — Conduit never reads your contacts.")
+            Text("Adds a contact so this agent appears on the call and lock screens. [Learn more](\(ExternalLinks.contactMirrorDocs.absoluteString))")
         }
     }
 

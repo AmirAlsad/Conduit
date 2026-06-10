@@ -20,12 +20,12 @@ struct SettingsView: View {
             } header: {
                 Text("Audio")
             } footer: {
-                Text("When on, the mic opens only while you hold the talk button during a call. When off, the agent is always listening.")
+                Text("When on, the mic opens only while you hold the talk button. [Learn more](\(ExternalLinks.pushToTalkDocs.absoluteString))")
             }
 
             Section("About") {
                 LabeledContent("Version", value: appVersion)
-                Text("Conduit is a thin, private pipe to your own voice agent. There's no Conduit server — your connection credentials live only in your device Keychain and are never uploaded.")
+                Text("Your agent, your keys — credentials never leave this device. [Learn more](\(ExternalLinks.usingConduit.absoluteString)#privacy)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier(AccessibilityID.Settings.aboutRow)

@@ -18,6 +18,7 @@ backend of ours, no accounts, no per-minute cost.
 | [INBOUND_CALLS](./INBOUND_CALLS.md) | How a user's own server rings the user through Conduit (agent-initiated VoIP-push calls) — token registration/unregistration, the push payload, and ring-status receipts. The inbound companion to the connection contract. *(published)* |
 | [AGENT_WORKFLOW](./AGENT_WORKFLOW.md) | Operational playbook for agents driving the app: build nuances, UI verification, flow testing, the reporting contract, and the shell fallback. |
 | [index](./index.md) | Landing page of the published docs site. *(published)* |
+| [using-conduit](./using-conduit.md) | The long-form explanations behind in-app settings (push-to-talk, Daily audio routing, Add to Contacts, privacy) — each linked from a "Learn more" in the app. *(published)* |
 | [connect-your-agent](./connect-your-agent.md) | User-facing orientation: pairing vs. direct, one endpoint per agent, where the example backend fits. *(published)* |
 | [backend/quickstart](./backend/quickstart.md) | Run the example backend and point the app at it. *(published)* |
 | [backend/bring-your-own-pipeline](./backend/bring-your-own-pipeline.md) | Swap your own agent pipeline into the example backend. *(published)* |

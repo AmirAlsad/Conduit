@@ -50,6 +50,7 @@ exclude_docs: |
 
 nav:
   - Home: index.md
+  - Using Conduit: using-conduit.md
   - Connect your agent:
       - Overview: connect-your-agent.md
       - Connection contract: CONNECTION_CONTRACT.md
