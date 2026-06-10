@@ -260,6 +260,43 @@ without it. Device-only (CallKit doesn't run in the sim). Audio-interruption
 handling now has a seam (see the call state machine above); yielding the route to a
 real incoming PSTN call (`setOnHold`) remains the device-flagged follow-up.
 
+## Siri dialing (built, M10 layers 1–2)
+
+Three layers, one funnel, under `Core/Services/Siri/`. Every layer resolves the
+spoken name to an agent UUID (the pure, tiered `AgentNameMatcher`: exact →
+prefix → word-boundary contains, case/diacritic-folded) and sets
+`AppEnvironment.pendingSiriCall`; `RootTabView` consumes it **only when
+`scenePhase == .active`** and no call is up, then calls the one true entry point
+`callSession.placeCall(agent)`. The gate is load-bearing: CallKit rejects
+`CXStartCallAction` from a not-yet-foregrounded app (cold-launch-from-Siri race),
+which is also why `CallAgentIntent.openAppWhenRun = true` and why `perform()`
+never dials directly.
+
+1. **App Intents** — `CallAgentIntent` + `AgentEntity`/`AgentEntityQuery` +
+   `ConduitAppShortcuts` ("Call \(agent) on Conduit" phrase family + static
+   fallbacks with spoken disambiguation). Vocabulary refresh:
+   `ConduitAppShortcuts.refreshParameters()` at launch and at all four agent
+   mutation sites (VM save, both delete sites). The intent doubles as a
+   composable **Shortcuts action** (user automations can dial agents).
+   `CallAgentIntent`/`@Parameter agent` names are **frozen** — App Shortcut
+   identity keys on them, and the iOS 27 `.phone.startCall` schema (layer 3,
+   pending the Xcode 27 SDK) must upgrade the same type in place.
+2. **SiriKit** — `SiriCallHandler` (`INStartCallIntentHandling`, in-app via
+   `AppDelegate.application(_:handlerFor:)`, no extension target) covers
+   "call \<agent\>" without the app name plus the calling domain's
+   lock-screen/CarPlay special-casing pre-iOS 27. It responds `.continueInApp`;
+   `ConduitApp.onContinueUserActivity` extracts the agent UUID from the
+   `INPerson.customIdentifier` and feeds the funnel. Handles use the contact
+   mirror's synthetic email so Siri shows the agent's card.
+
+Config: Siri entitlement (project.yml → regenerated entitlements),
+`NSSiriUsageDescription`, `INIntentsSupported`, `NSUserActivityTypes` in
+Info.plist, and a one-time `INPreferences.requestSiriAuthorization` at launch —
+without it, Settings' "Use with Siri Requests" defaults OFF and Siri claims the
+app has no support. Locked-phone asymmetry (device-verified): the SiriKit
+app-picker path dials from the lock screen; the App Shortcut path can't (it
+must open the app) and Siri's refusal message is misleadingly generic.
+
 ## Shared utilities
 
 - **`Log`** (`Core/Utilities/Log.swift`) — categorized os.log facade. See

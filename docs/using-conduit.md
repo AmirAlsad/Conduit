@@ -24,6 +24,30 @@ SDK directly, so it always works.
 audio mode, the system owns the audio session, and the native call screen's
 audio button moves the sound like any phone call.
 
+## Call with Siri
+
+Two ways to dial hands-free:
+
+- **"Hey Siri, call \<agent\> on Conduit"** — the app's own Siri phrase. Variants
+  like "dial … on Conduit" and "make a Conduit call" (which asks which agent)
+  work too. This path opens the app to place the call, so on a locked phone Siri
+  asks you to unlock first.
+- **"Hey Siri, call \<agent\>"** — without the app name. Siri may ask whether to
+  use Conduit or Phone the first time; this route works from the lock screen.
+
+Setup notes:
+
+- The first launch asks for **Siri permission** — if you declined it, flip
+  **Settings → Apps → Conduit → Siri & Search → Use with Siri Requests**.
+- Siri learns your agents' names from the app; after **adding or renaming an
+  agent**, give it a minute (vocabulary refresh isn't instant).
+- Agent names that are real words or common names recognize best.
+
+Because the call action is a system **App Intent**, it also appears in the
+**Shortcuts app** — you can embed "Call Agent" in your own shortcuts and
+automations (for example: when my phone connects to the car's Bluetooth, call
+my agent).
+
 ## Add to Contacts
 
 **Add to Contacts** (Agent Detail) saves the agent as a regular iOS contact —
