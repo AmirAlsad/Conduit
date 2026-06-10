@@ -40,4 +40,27 @@ enum PushTokenRegistrar {
             Log.warning(.network, "VoIP token registration failed: \(error)")
         }
     }
+
+    /// Best-effort unregistration when the user deletes an inbound-enabled agent:
+    /// DELETE on the same registration endpoint, so a well-behaved server stops
+    /// ringing immediately. Deletion is NOT revocation — a server that ignores
+    /// this keeps a working token until the app is reinstalled (token rotation).
+    /// See `docs/INBOUND_CALLS.md`.
+    static func unregister(
+        endpoint: URL,
+        apiKey: String,
+        session: URLSession = .shared
+    ) async {
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "DELETE"
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            _ = try await session.data(for: request)
+            Log.info(.network, "Unregistered VoIP token with agent endpoint")
+        } catch {
+            Log.warning(.network, "VoIP token unregistration failed: \(error)")
+        }
+    }
 }

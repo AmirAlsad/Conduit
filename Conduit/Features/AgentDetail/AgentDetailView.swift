@@ -208,11 +208,22 @@ struct AgentDetailView: View {
     }
 
     private func deleteAgent() {
+        // Capture before the SwiftData delete invalidates the model.
+        let inboundEndpoint = agent.inboundRegistrationURL
+        let apiKey = (try? environment.keychain.token(
+            for: KeychainTokenRef(account: agent.keychainTokenRef)
+        )) ?? nil
         try? environment.keychain.deleteToken(
             for: KeychainTokenRef(account: agent.keychainTokenRef)
         )
+        try? environment.keychain.deleteToken(
+            for: KeychainTokenRef(directTokenForAgentID: agent.id)
+        )
         environment.agentRepository.delete(agent)
         try? environment.agentRepository.save()
+        if let inboundEndpoint {
+            Task { await PushTokenRegistrar.unregister(endpoint: inboundEndpoint, apiKey: apiKey ?? "") }
+        }
         dismiss()
     }
 }

@@ -89,7 +89,9 @@ In Conduit → Add/Edit Agent:
    you'll usually just change `connect` to `inbound/register`.
 
 The app POSTs its token immediately and on every launch; you should see
-`inbound.registered` in the engine logs.
+`inbound.registered` in the engine logs. Deleting the agent in the app sends a
+best-effort `DELETE` to the same endpoint — the engine drops the registration
+(`inbound.unregistered`) and `/admin/ring` returns 404 from then on.
 
 ## Ringing the device
 

@@ -62,6 +62,23 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
 - Authenticate with the bearer key however you like (same key as the pairing
   endpoint). Return any 2xx.
 
+### Unregistration (the user deleted the agent)
+
+When the user deletes an inbound-enabled agent, Conduit sends a best-effort
+
+```
+DELETE <your registration endpoint>
+Authorization: Bearer <API key>
+```
+
+Honor it by dropping the stored token and not ringing again. **Deletion is not
+revocation**: only servers the user explicitly opted into ever hold the token, but
+a server that ignores the DELETE (or never receives it — the request is
+fire-and-forget) still holds a working token, and every push it sends will surface
+a brief ring before the app ends it. The hard revocation is reinstalling the app —
+that rotates the VoIP token, after which pushes to the old one get APNs
+`410 Unregistered` — or revoking the APNs key itself.
+
 ---
 
 ## 2. Ringing the user

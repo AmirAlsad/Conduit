@@ -43,6 +43,19 @@ async def register(agent_id: str, req: VoipRegisterRequest, request: Request):
     return {"ok": True}
 
 
+@router.delete("/register/{agent_id}")
+async def unregister(agent_id: str, request: Request):
+    """The app deleted the agent — drop its registration so we stop ringing.
+    Idempotent: deleting a registration that doesn't exist is still ok."""
+    try:
+        get_agent(agent_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown agent_id: {agent_id!r}")
+    await request.app.state.registry.delete_voip(agent_id)
+    event(_log, "inbound.unregistered", agent=agent_id)
+    return {"ok": True}
+
+
 @router.post("/status/{agent_id}")
 async def ring_status(agent_id: str, req: RingStatusRequest):
     try:

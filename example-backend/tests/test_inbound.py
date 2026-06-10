@@ -152,6 +152,20 @@ def test_ring_status_receipt_accepted():
         assert r.json() == {"ok": True}
 
 
+def test_unregister_drops_registration_and_is_idempotent():
+    with TestClient(app) as c:
+        app.state.apns = FakeApns()
+        _register(c)
+        assert c.delete("/inbound/register/loopback", headers=AUTH).status_code == 200
+        # The next ring has nothing to send to.
+        assert c.post("/admin/ring/loopback", headers=AUTH).status_code == 404
+        assert app.state.apns.sends == []
+        # Deleting again is still ok (idempotent), unknown agent is not.
+        assert c.delete("/inbound/register/loopback", headers=AUTH).status_code == 200
+        assert c.delete("/inbound/register/nonexistent", headers=AUTH).status_code == 404
+        assert c.delete("/inbound/register/loopback").status_code in (401, 403)
+
+
 def test_ring_status_rejects_unknown_agent_and_bad_status():
     with TestClient(app) as c:
         body = {"call_id": str(uuid.uuid4()), "status": "answered"}
