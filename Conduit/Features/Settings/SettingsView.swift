@@ -29,7 +29,7 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier(AccessibilityID.Settings.aboutRow)
-                Link("How to connect your agent.", destination: ExternalLinks.connectYourAgent)
+                Link("Tap to learn how to connect your agent.", destination: ExternalLinks.connectYourAgent)
                     .accessibilityIdentifier(AccessibilityID.Settings.agentSetupLink)
             }
 
