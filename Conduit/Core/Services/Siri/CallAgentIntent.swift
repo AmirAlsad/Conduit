@@ -45,7 +45,7 @@ struct CallAgentIntent: AppIntent {
             }
         }
         Log.info(.call, "Siri dial requested: \(chosen.name)")
-        AppEnvironment.shared.pendingSiriCall = chosen.id
+        AppEnvironment.shared.pendingSiriCall = PendingSiriCall(agentID: chosen.id)
         return .result()
     }
 }

@@ -54,13 +54,17 @@ struct RootTabView: View {
     }
 
     private func consumePendingSiriCall() {
-        guard scenePhase == .active, let id = environment.pendingSiriCall else { return }
+        guard scenePhase == .active, let pending = environment.pendingSiriCall else { return }
         environment.pendingSiriCall = nil
+        guard !pending.isExpired else {
+            Log.info(.call, "Siri dial dropped — request expired unconsumed")
+            return
+        }
         guard !environment.callSession.state.isActive else {
             Log.info(.call, "Siri dial dropped — a call is already active")
             return
         }
-        guard let agent = try? environment.agentRepository.fetch(id: id) else {
+        guard let agent = try? environment.agentRepository.fetch(id: pending.agentID) else {
             Log.warning(.call, "Siri dial dropped — unknown agent id")
             return
         }

@@ -190,14 +190,22 @@ dropped the agent id (iOS doesn't reliably attach the INInteraction — the id n
 the activity's userInfo). **Found + documented:** the no-app-name phrase anchors on
 **Contacts** — agents without the Add-to-Contacts mirror are invisible to Siri's
 calling domain (it gives up silently or snaps to the nearest real contact), which is
-the contact mirror's whole Siri story working as designed. **Flaky and deferred to a TestFlight build:** locked-phone
-and app-not-running dialing — the failure signature (phrases recognized warm but
-"Conduit hasn't added support" after force-quit/reboot; the calling-domain app-picker
-appearing once then never) matches dev-build Siri indexing, which every reinstall
-resets; we reinstalled ~6× during the pass, so cold/locked verdicts aren't meaningful
-until the install churn stops. The iOS 27 `.phone.startCall` schema is the designed
-answer for locked/car dialing regardless. Outstanding: in-car steering-wheel test
-(next drive), TestFlight re-run of the cold/locked matrix, layer 3.
+the contact mirror's whole Siri story working as designed. **The bare-phrase resolution chain (debugged on device, now verified working):**
+"Hey Siri, call \<agent\>" rides Siri's calling domain, which resolves contacts
+*before* dispatching to any app — three links had to hold: (1) the **contact mirror**
+anchors the spoken name (agents without Add-to-Contacts are invisible — Siri gives up
+or snaps to the nearest real contact); (2) **interaction donations carrying
+`INPerson.contactIdentifier`** teach Siri the card is callable via Conduit (without
+the identifier Siri matched the card but refused with "add contact information" —
+the card deliberately has no phone number); (3) the **multiple-scenes declaration**
+in Info.plist, without which `application(_:handlerFor:)` is never invoked. With all
+three in place, bare-name dialing works, including rename → re-recognition. Also
+found + fixed: a never-consumed locked-phone dial request resurfacing later as a
+phantom call (`PendingSiriCall` now expires after 30 s). **Lock-screen dialing works
+but requires unlock** — inherent to `.continueInApp` opening the app; candidates for
+a no-unlock path are the Intents-extension architecture (Telegram's shape; untested
+whether it avoids the unlock) and the iOS 27 schema, which is the designed answer.
+Outstanding: in-car steering-wheel test (next drive), layer 3 (Xcode 27 SDK).
 
 **Still open in M10:** CarPlay dashboard app (needs the entitlement — out), Favorites /
 quick-dial surface, widget/Control Center.

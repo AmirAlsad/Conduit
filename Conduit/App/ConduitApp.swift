@@ -45,7 +45,7 @@ struct ConduitApp: App {
                         return
                     }
                     Log.info(.call, "SiriKit dial continued in app (via \(fromUserInfo != nil ? "userInfo" : "interaction"))")
-                    environment.pendingSiriCall = id
+                    environment.pendingSiriCall = PendingSiriCall(agentID: id)
                 }
                 // Parameterized Siri phrases only resolve after the system has
                 // fetched the agent names; refresh at launch and on every
