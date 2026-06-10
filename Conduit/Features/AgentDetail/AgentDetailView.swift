@@ -31,7 +31,6 @@ struct AgentDetailView: View {
     var body: some View {
         List {
             header
-            callAction
             contactSection
             callHistory
             deleteSection
@@ -67,6 +66,8 @@ struct AgentDetailView: View {
 
     // MARK: - Header
 
+    /// Header card + the Call row share one section so the action sits tight
+    /// under the identity block instead of a full section-gap below it.
     private var header: some View {
         Section {
             VStack(spacing: 8) {
@@ -96,31 +97,15 @@ struct AgentDetailView: View {
             .frame(maxWidth: .infinity)
             .multilineTextAlignment(.center)
             .padding(.vertical, 8)
-        }
-        .listRowBackground(Color.clear)
-    }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
 
-    // MARK: - Call action
-
-    private var callAction: some View {
-        Section {
             Button {
                 Task { await environment.callSession.placeCall(agent) }
             } label: {
-                VStack(spacing: 4) {
-                    Image(systemName: "phone.fill")
-                        .font(.title3)
-                    Text("Call")
-                        .font(.caption.weight(.medium))
-                }
-                .foregroundStyle(.white)
-                .frame(width: 96, height: 60)
-                .background(.green, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                Label("Call", systemImage: "phone.fill")
             }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity)
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
+            .foregroundStyle(.green)
             .accessibilityIdentifier(AccessibilityID.AgentDetail.callButton)
         }
     }
