@@ -177,7 +177,7 @@ struct AgentDetailView: View {
                 .foregroundStyle(entry.outcome.tint)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.outcome.displayLabel)
+                Text(entry.outcomeDisplayLabel)
                 Text(CallFormatting.relativeDate(entry.startedAt))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)

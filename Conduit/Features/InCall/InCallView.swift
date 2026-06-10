@@ -102,6 +102,14 @@ struct InCallView: View {
                 .accessibilityIdentifier(AccessibilityID.InCall.agentName)
 
             statusLine(state: state)
+
+            if case .failed(let reason) = state {
+                Text(reason.hint)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier(AccessibilityID.InCall.failureHint)
+            }
         }
     }
 

@@ -39,3 +39,14 @@ extension CallOutcome {
         }
     }
 }
+
+extension CallLogEntry {
+    /// The outcome label, qualified with WHY when a failed call recorded a
+    /// reason ("Failed — authentication"). Shared by Recents and Agent Detail.
+    var outcomeDisplayLabel: String {
+        if outcome == .failed, let short = failureReason?.shortLabel {
+            return "Failed — \(short)"
+        }
+        return outcome.displayLabel
+    }
+}

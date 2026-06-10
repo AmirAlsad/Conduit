@@ -34,17 +34,6 @@ enum InCallStatus {
     }
 
     static func text(for reason: CallFailureReason) -> String {
-        switch reason {
-        case .badToken:
-            return "Authentication failed"
-        case .agentUnreachable:
-            return "Agent unavailable"
-        case .lostConnection:
-            return "Connection lost"
-        case .transportError:
-            return "Couldn't connect"
-        case .unknown:
-            return "Call failed"
-        }
+        reason.displayLabel
     }
 }

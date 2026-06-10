@@ -12,6 +12,7 @@ extension AccessibilityID {
         static let screen = "InCall_Screen"
         static let agentName = "InCall_AgentName"
         static let statusLabel = "InCall_StatusLabel"
+        static let failureHint = "InCall_FailureHint"
         static let muteButton = "InCall_MuteButton"
         static let endButton = "InCall_EndButton"
         static let pushToTalkButton = "InCall_PushToTalkButton"

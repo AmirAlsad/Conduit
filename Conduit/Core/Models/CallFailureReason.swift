@@ -10,7 +10,7 @@
 
 import Foundation
 
-enum CallFailureReason: Equatable, Sendable {
+enum CallFailureReason: String, Equatable, Sendable, Codable {
     case badToken
     case agentUnreachable
     case lostConnection

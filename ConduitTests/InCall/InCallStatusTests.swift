@@ -37,4 +37,24 @@ struct InCallStatusTests {
         #expect(InCallStatus.text(for: reason) == expected)
         #expect(InCallStatus.text(for: .failed(reason)) == expected)
     }
+
+    @Test(arguments: [
+        (CallFailureReason.badToken, "authentication"),
+        (CallFailureReason.agentUnreachable, "agent unreachable"),
+        (CallFailureReason.lostConnection, "connection lost"),
+        (CallFailureReason.transportError, "couldn't connect"),
+    ])
+    func failureReasonsHaveLogRowQualifiers(reason: CallFailureReason, expected: String) {
+        #expect(reason.shortLabel == expected)
+    }
+
+    @Test func unknownReasonHasNoQualifier() {
+        #expect(CallFailureReason.unknown.shortLabel == nil)
+    }
+
+    @Test func everyFailureReasonHasAHint() {
+        for reason in [CallFailureReason.badToken, .agentUnreachable, .lostConnection, .transportError, .unknown] {
+            #expect(!reason.hint.isEmpty)
+        }
+    }
 }

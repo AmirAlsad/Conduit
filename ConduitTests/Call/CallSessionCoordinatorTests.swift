@@ -63,6 +63,7 @@ struct CallSessionCoordinatorTests {
         let entries = try h.loggedEntries()
         #expect(entries.count == 1)
         #expect(entries.first?.outcome == .failed)
+        #expect(entries.first?.failureReason == .badToken)
     }
 
     @Test func connectThrowingFailsWithTransportError() async throws {
@@ -74,6 +75,7 @@ struct CallSessionCoordinatorTests {
         #expect(h.provider.reportedEnded.first?.reason == .failed)
         let entries = try h.loggedEntries()
         #expect(entries.first?.outcome == .failed)
+        #expect(entries.first?.failureReason == .transportError)
     }
 
     @Test func startOutgoingCallThrowingFailsWithUnknown() async throws {

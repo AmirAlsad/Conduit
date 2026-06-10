@@ -75,6 +75,7 @@ struct CallInboundTests {
         let entries = try h.loggedEntries()
         #expect(entries.first?.direction == .incoming)
         #expect(entries.first?.outcome == .completed)
+        #expect(entries.first?.failureReason == nil)
     }
 
     @Test func answerViaSystemDelegateConnects() async throws {

@@ -617,7 +617,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         state = .failed(reason)
         announcer.stopRepeating()
         if let id = activeCallID { callProvider.reportCallEnded(id, reason: .failed) }
-        writeLog(outcome: .failed)
+        writeLog(outcome: .failed, failureReason: reason)
         teardownTransport()
     }
 
@@ -688,7 +688,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         didApplyHandsFreeDefault = false
     }
 
-    private func writeLog(outcome: CallOutcome) {
+    private func writeLog(outcome: CallOutcome, failureReason: CallFailureReason? = nil) {
         guard let agent = activeAgent else { return }
         let started = callStartedAt ?? now()
         let duration = firstConnectedAt.map { max(0, now().timeIntervalSince($0)) } ?? 0
@@ -698,7 +698,8 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
             startedAt: started,
             duration: duration,
             outcome: outcome,
-            transportKind: agent.transportKind
+            transportKind: agent.transportKind,
+            failureReason: failureReason
         )
         repository.addCallLogEntry(entry)
         do { try repository.save() }

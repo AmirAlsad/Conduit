@@ -25,7 +25,7 @@ struct RecentRow: View {
                 HStack(spacing: 4) {
                     Image(systemName: entry.outcome.iconName)
                         .foregroundStyle(entry.outcome.tint)
-                    Text("\(entry.outcome.displayLabel) · \(CallFormatting.relativeDate(entry.startedAt))")
+                    Text("\(entry.outcomeDisplayLabel) · \(CallFormatting.relativeDate(entry.startedAt))")
                         .lineLimit(1)
                 }
                 .font(.subheadline)

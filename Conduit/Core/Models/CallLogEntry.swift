@@ -20,6 +20,9 @@ final class CallLogEntry {
     var duration: TimeInterval
     var outcomeRaw: String
     var transportKindRaw: String
+    /// Why a `.failed` call failed; nil for non-failed outcomes and rows that
+    /// predate this field (optional ⇒ lightweight migration).
+    var failureReasonRaw: String?
 
     init(
         id: UUID = UUID(),
@@ -28,7 +31,8 @@ final class CallLogEntry {
         startedAt: Date = .now,
         duration: TimeInterval = 0,
         outcome: CallOutcome,
-        transportKind: TransportKind
+        transportKind: TransportKind,
+        failureReason: CallFailureReason? = nil
     ) {
         self.id = id
         self.agent = agent
@@ -37,6 +41,7 @@ final class CallLogEntry {
         self.duration = duration
         self.outcomeRaw = outcome.rawValue
         self.transportKindRaw = transportKind.rawValue
+        self.failureReasonRaw = failureReason?.rawValue
     }
 
     var direction: CallDirection {
@@ -49,5 +54,9 @@ final class CallLogEntry {
 
     var transportKind: TransportKind {
         TransportKind(rawValue: transportKindRaw) ?? .daily
+    }
+
+    var failureReason: CallFailureReason? {
+        failureReasonRaw.flatMap(CallFailureReason.init(rawValue:))
     }
 }
