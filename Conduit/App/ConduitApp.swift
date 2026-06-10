@@ -6,6 +6,7 @@
 //  (CallKit + WebRTC); see docs/ARCHITECTURE.md.
 //
 
+import Intents
 import SwiftData
 import SwiftUI
 
@@ -28,6 +29,18 @@ struct ConduitApp: App {
                     } catch {
                         Log.warning(.app, "Ignoring deep link: \(error)")
                     }
+                }
+                // SiriKit "call <agent>" lands here after SiriCallHandler
+                // responds .continueInApp; same funnel as the App Intent.
+                .onContinueUserActivity(NSStringFromClass(INStartCallIntent.self)) { activity in
+                    guard let intent = activity.interaction?.intent as? INStartCallIntent,
+                          let idString = intent.contacts?.first?.customIdentifier,
+                          let id = UUID(uuidString: idString) else {
+                        Log.warning(.call, "SiriKit activity missing agent identifier")
+                        return
+                    }
+                    Log.info(.call, "SiriKit dial continued in app")
+                    environment.pendingSiriCall = id
                 }
                 // Parameterized Siri phrases only resolve after the system has
                 // fetched the agent names; refresh at launch and on every

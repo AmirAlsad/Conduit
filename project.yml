@@ -122,6 +122,9 @@ targets:
         # Notifications capability enabled on the App ID (a paid Apple Developer
         # account); the simulator ignores it. See docs/INBOUND_CALLS.md.
         aps-environment: development
+        # SiriKit calling domain (in-app INStartCallIntent handling). Standard
+        # free capability; automatic signing adds it to the App ID.
+        com.apple.developer.siri: true
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

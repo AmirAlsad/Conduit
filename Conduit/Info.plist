@@ -44,6 +44,18 @@
 	     LAN address triggers iOS's local-network consent prompt. -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Conduit connects directly to a voice agent running on your own computer when it's on the same network.</string>
+	<!-- SiriKit calling domain, handled in-app (no extension): "Hey Siri, call
+	     <agent>" resolves against the user's agents via SiriCallHandler. -->
+	<key>NSSiriUsageDescription</key>
+	<string>Conduit lets Siri start calls to your agents by name.</string>
+	<key>INIntentsSupported</key>
+	<array>
+		<string>INStartCallIntent</string>
+	</array>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INStartCallIntent</string>
+	</array>
 	<!-- Requested only when you edit an agent that you've added to Contacts: Conduit keeps that
 	     one contact's name and photo in sync. It never reads or changes your other contacts. -->
 	<key>NSContactsUsageDescription</key>
