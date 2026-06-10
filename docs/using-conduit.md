@@ -30,10 +30,19 @@ Two ways to dial hands-free:
 
 - **"Hey Siri, call \<agent\> on Conduit"** — the app's own Siri phrase. Variants
   like "dial … on Conduit" and "make a Conduit call" (which asks which agent)
-  work too. This path opens the app to place the call, so on a locked phone Siri
-  asks you to unlock first.
-- **"Hey Siri, call \<agent\>"** — without the app name. Siri may ask whether to
-  use Conduit or Phone the first time; this route works from the lock screen.
+  work too. This path opens the app to place the call, so it needs the phone
+  unlocked (on a locked phone Siri should ask you to unlock; it may just decline).
+- **"Hey Siri, call \<agent\>"** — without the app name. This rides Siri's
+  calling domain, which anchors the spoken name against your **Contacts** —
+  so it only works for agents you've added with **Add to Contacts** (Agent
+  Detail). With the contact saved, Siri may ask whether to use Conduit or
+  Phone the first time; for an agent with no contact, Siri silently gives up
+  or snaps to the nearest real contact.
+
+Reliability honesty: Siri's recognition of app phrases can lag installs,
+renames, and reboots (launch the app once and give it a minute), and
+lock-screen / app-not-running dialing is inconsistent on current iOS —
+treat those as best-effort until the iOS 27 App Intents calling schema lands.
 
 Setup notes:
 

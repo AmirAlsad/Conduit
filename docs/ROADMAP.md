@@ -182,15 +182,22 @@ in-app tap. No CarPlay entitlements, ever (user decision).
    installed; `CallAgentIntent`'s type/parameter names are frozen so the schema
    conformance upgrades it in place (contingency: a second schema-conforming intent).
 
-**Device findings so far (June 2026):** Settings' "Use with Siri Requests" defaulted
-OFF until we added the one-time `INPreferences.requestSiriAuthorization` prompt; with
-it on, unlocked dialing works on both layers, and locked-phone "call \<agent\> on
-Conduit" via the **SiriKit app-picker works even locked**. The locked **App Shortcut**
-path refuses with a misleading "Conduit hasn't added support" (the shortcut must open
-the app; a locked phone won't) — expected, document it. Outstanding: cold-launch
-phrase, rename → vocabulary latency, and the **in-car steering-wheel test** (expected
-to work via SiriKit's calling domain; may be entitlement-gated — either outcome gets
-documented).
+**Device findings (June 2026, dev-signed build):** Settings' "Use with Siri Requests"
+defaulted OFF until we added the one-time `INPreferences.requestSiriAuthorization`
+prompt. **Reliable:** warm + unlocked dialing on both layers, the Shortcuts-app
+action, spoken disambiguation. **Found + fixed:** the in-app SiriKit continuation
+dropped the agent id (iOS doesn't reliably attach the INInteraction — the id now rides
+the activity's userInfo). **Found + documented:** the no-app-name phrase anchors on
+**Contacts** — agents without the Add-to-Contacts mirror are invisible to Siri's
+calling domain (it gives up silently or snaps to the nearest real contact), which is
+the contact mirror's whole Siri story working as designed. **Flaky and deferred to a TestFlight build:** locked-phone
+and app-not-running dialing — the failure signature (phrases recognized warm but
+"Conduit hasn't added support" after force-quit/reboot; the calling-domain app-picker
+appearing once then never) matches dev-build Siri indexing, which every reinstall
+resets; we reinstalled ~6× during the pass, so cold/locked verdicts aren't meaningful
+until the install churn stops. The iOS 27 `.phone.startCall` schema is the designed
+answer for locked/car dialing regardless. Outstanding: in-car steering-wheel test
+(next drive), TestFlight re-run of the cold/locked matrix, layer 3.
 
 **Still open in M10:** CarPlay dashboard app (needs the entitlement — out), Favorites /
 quick-dial surface, widget/Control Center.
