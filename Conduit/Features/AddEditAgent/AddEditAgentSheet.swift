@@ -16,17 +16,18 @@ struct AddEditAgentSheet: View {
     @State private var directExpanded: Bool
     @Environment(\.dismiss) private var dismiss
 
-    init(editing: Agent? = nil, environment: AppEnvironment) {
-        _viewModel = State(
-            initialValue: AddEditAgentViewModel(
-                editing: editing,
-                repository: environment.agentRepository,
-                keychain: environment.keychain,
-                contactSync: environment.contactSync,
-                transportFactory: environment.transportFactory,
-                inboundRegistrar: environment.inboundRegistrar
-            )
+    init(editing: Agent? = nil, prefill: AgentDeepLink? = nil, environment: AppEnvironment) {
+        let viewModel = AddEditAgentViewModel(
+            editing: editing,
+            repository: environment.agentRepository,
+            keychain: environment.keychain,
+            contactSync: environment.contactSync,
+            transportFactory: environment.transportFactory,
+            inboundRegistrar: environment.inboundRegistrar
         )
+        // Link values layer over the loaded agent (edit) or the blank form (add).
+        if let prefill { viewModel.apply(prefill) }
+        _viewModel = State(initialValue: viewModel)
         // Reveal direct credentials only when the agent already uses them.
         _directExpanded = State(initialValue: editing?.connectionURL != nil)
     }

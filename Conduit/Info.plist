@@ -44,5 +44,18 @@
 	     one contact's name and photo in sync. It never reads or changes your other contacts. -->
 	<key>NSContactsUsageDescription</key>
 	<string>Conduit keeps the contact you added for an agent in sync — updating its name and photo when you edit the agent. It never touches your other contacts.</string>
+	<!-- conduit://add-agent links pre-fill the Add Agent form (QR pairing). The link
+	     may carry an API key, so it must never be logged — see DeepLinkParser. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.amiralsad.Conduit</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>conduit</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

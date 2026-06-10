@@ -19,6 +19,16 @@ struct ConduitApp: App {
             rootView
                 .environment(environment)
                 .modelContainer(environment.modelContainer)
+                .onOpenURL { url in
+                    // The link may carry an API key — never log the URL itself.
+                    do {
+                        let link = try DeepLinkParser.parse(url)
+                        Log.info(.app, "Deep link parsed (hasKey: \(link.apiKey != nil))")
+                        environment.pendingAgentLink = link
+                    } catch {
+                        Log.warning(.app, "Ignoring deep link: \(error)")
+                    }
+                }
                 #if DEBUG
                 .task {
                     DebugSeed.runIfRequested(environment)

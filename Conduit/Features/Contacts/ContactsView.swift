@@ -14,7 +14,16 @@ import SwiftUI
 struct ContactsView: View {
     @Query(sort: [SortDescriptor(\Agent.name)]) private var agents: [Agent]
     @Environment(AppEnvironment.self) private var environment
-    @State private var showingAdd = false
+    @State private var sheetRequest: AgentSheetRequest?
+
+    /// What the add/edit sheet should show: a plain add, or one pre-filled from a
+    /// conduit:// link (editing the existing agent when the link's pairing
+    /// endpoint matches one — a re-scan updates instead of duplicating).
+    private struct AgentSheetRequest: Identifiable {
+        let id = UUID()
+        let editing: Agent?
+        let prefill: AgentDeepLink?
+    }
 
     var body: some View {
         content
@@ -24,7 +33,7 @@ struct ContactsView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Add Agent", systemImage: "plus") {
-                        showingAdd = true
+                        sheetRequest = AgentSheetRequest(editing: nil, prefill: nil)
                     }
                     .accessibilityIdentifier(AccessibilityID.Contacts.addButton)
                 }
@@ -32,9 +41,31 @@ struct ContactsView: View {
             .navigationDestination(for: Agent.self) { agent in
                 AgentDetailView(agent: agent)
             }
-            .sheet(isPresented: $showingAdd) {
-                AddEditAgentSheet(environment: environment)
+            .sheet(item: $sheetRequest) { request in
+                AddEditAgentSheet(
+                    editing: request.editing,
+                    prefill: request.prefill,
+                    environment: environment
+                )
             }
+            .onAppear { consumePendingLink() }
+            .onChange(of: environment.pendingAgentLink) { _, _ in consumePendingLink() }
+            // A link that arrived while a sheet or a call was up is consumed
+            // once the way is clear.
+            .onChange(of: sheetRequest == nil) { _, _ in consumePendingLink() }
+            .onChange(of: environment.callSession.state.isActive) { _, _ in consumePendingLink() }
+    }
+
+    /// Present the pending conduit:// link's sheet — unless another sheet or an
+    /// active call is in the way, in which case it stays pending.
+    private func consumePendingLink() {
+        guard let link = environment.pendingAgentLink else { return }
+        guard sheetRequest == nil, !environment.callSession.state.isActive else { return }
+        environment.pendingAgentLink = nil
+        let existing = agents.first {
+            $0.pairingEndpoint?.absoluteString == link.pairingEndpoint.absoluteString
+        }
+        sheetRequest = AgentSheetRequest(editing: existing, prefill: link)
     }
 
     @ViewBuilder
@@ -45,7 +76,7 @@ struct ContactsView: View {
             } description: {
                 Text("Add an agent to start calling.")
             } actions: {
-                Button("Add Agent") { showingAdd = true }
+                Button("Add Agent") { sheetRequest = AgentSheetRequest(editing: nil, prefill: nil) }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier(AccessibilityID.Contacts.emptyAddButton)
                 Link("Learn how to connect your agent", destination: ExternalLinks.connectYourAgent)

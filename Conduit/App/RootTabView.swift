@@ -12,17 +12,23 @@ import SwiftUI
 struct RootTabView: View {
     @Environment(AppEnvironment.self) private var environment
 
+    private enum RootTab: Hashable {
+        case recents, contacts, settings
+    }
+
+    @State private var selection: RootTab = .recents
+
     var body: some View {
-        TabView {
-            Tab("Recents", systemImage: "clock") {
+        TabView(selection: $selection) {
+            Tab("Recents", systemImage: "clock", value: RootTab.recents) {
                 NavigationStack { RecentsView() }
             }
 
-            Tab("Contacts", systemImage: "person.crop.circle") {
+            Tab("Contacts", systemImage: "person.crop.circle", value: RootTab.contacts) {
                 NavigationStack { ContactsView() }
             }
 
-            Tab("Settings", systemImage: "gearshape") {
+            Tab("Settings", systemImage: "gearshape", value: RootTab.settings) {
                 NavigationStack { SettingsView() }
             }
         }
@@ -30,6 +36,14 @@ struct RootTabView: View {
         .fullScreenCover(isPresented: callActive) {
             InCallView()
                 .environment(environment)
+        }
+        // A conduit:// add-agent link lands on the Contacts tab, whose view
+        // owns presenting the (pre-filled) sheet.
+        .onChange(of: environment.pendingAgentLink) { _, link in
+            if link != nil { selection = .contacts }
+        }
+        .onAppear {
+            if environment.pendingAgentLink != nil { selection = .contacts }
         }
     }
 

@@ -120,6 +120,20 @@ final class AddEditAgentViewModel {
         return URL(string: trimmed)
     }
 
+    /// Layer a conduit:// link's values over the form (a blank add, or an
+    /// existing agent being updated by a re-scan). A link without a key keeps
+    /// whatever key is already loaded, so re-pairing never wipes a secret.
+    func apply(_ link: AgentDeepLink) {
+        name = link.name
+        transportKind = link.transport
+        pairingEndpointText = link.pairingEndpoint.absoluteString
+        if let key = link.apiKey { apiKey = key }
+        if let inbound = link.inboundRegistrationURL {
+            inboundEnabled = true
+            inboundRegistrationURLText = inbound.absoluteString
+        }
+    }
+
     /// Default the registration URL from the pairing endpoint the first time inbound
     /// is enabled (both usually point at the same server), leaving it editable.
     func prefillInboundURLIfNeeded() {

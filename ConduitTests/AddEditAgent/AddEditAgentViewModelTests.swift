@@ -151,6 +151,51 @@ struct AddEditAgentViewModelTests {
         #expect(try repo.fetchAll().count == 1)
     }
 
+    // MARK: - Deep-link prefill
+
+    @Test func applyingALinkPrefillsTheForm() throws {
+        let vm = makeViewModel(repository: try makeRepository())
+        vm.apply(AgentDeepLink(
+            name: "Live Agent",
+            transport: .livekit,
+            pairingEndpoint: URL(string: "https://h.example/connect/live")!,
+            apiKey: "sk-123",
+            inboundRegistrationURL: URL(string: "https://h.example/inbound/register/live")!
+        ))
+
+        #expect(vm.name == "Live Agent")
+        #expect(vm.transportKind == .livekit)
+        #expect(vm.pairingEndpointText == "https://h.example/connect/live")
+        #expect(vm.apiKey == "sk-123")
+        #expect(vm.inboundEnabled)
+        #expect(vm.inboundRegistrationURLText == "https://h.example/inbound/register/live")
+        #expect(vm.canSave)
+    }
+
+    @Test func linkWithoutKeyPreservesTheExistingKeyOnEdit() async throws {
+        let repo = try makeRepository()
+        let keychain = InMemoryKeychain()
+        let agent = Agent(
+            name: "Live", transportKind: .livekit,
+            pairingEndpoint: URL(string: "https://h.example/connect/live")!
+        )
+        repo.insert(agent)
+        try repo.save()
+        try keychain.setToken("existing-key", for: KeychainTokenRef(account: agent.keychainTokenRef))
+
+        let vm = makeViewModel(editing: agent, repository: repo, keychain: keychain)
+        vm.apply(AgentDeepLink(
+            name: "Live v2",
+            transport: .livekit,
+            pairingEndpoint: URL(string: "https://h.example/connect/live")!,
+            apiKey: nil,
+            inboundRegistrationURL: nil
+        ))
+
+        #expect(vm.name == "Live v2")
+        #expect(vm.apiKey == "existing-key") // a key-less re-scan never wipes the secret
+    }
+
     // MARK: - Inbound registration on save
 
     @Test func savingWithInboundEnabledRegistersImmediately() async throws {

@@ -31,6 +31,10 @@ final class AppEnvironment {
     /// implementation), so saving an inbound-enabled agent registers immediately
     /// instead of waiting for the next launch. Weak: the delegate owns the service.
     weak var inboundRegistrar: InboundRegistering?
+    /// A parsed conduit:// add-agent link awaiting consumption. Set by onOpenURL
+    /// at the app root; consumed by ContactsView when it can present the sheet
+    /// (deferred while another sheet or a call is up).
+    var pendingAgentLink: AgentDeepLink?
 
     init(
         modelContainer: ModelContainer,
