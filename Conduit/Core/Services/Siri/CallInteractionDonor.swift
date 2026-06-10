@@ -27,7 +27,11 @@ struct CallInteractionDonor: CallInteractionDonating {
             contacts: [SiriCallHandler.person(for: agent)],
             callCapability: .audioCall
         )
-        let interaction = INInteraction(intent: intent, response: nil)
+        // A completed-looking response, like the reference implementations — the
+        // card-augmentation Siri learns from hangs off completed interactions.
+        // (.continueInApp is this domain's success shape; there is no .success.)
+        let response = INStartCallIntentResponse(code: .continueInApp, userActivity: nil)
+        let interaction = INInteraction(intent: intent, response: response)
         interaction.direction = .outgoing
         interaction.donate { error in
             if let error {

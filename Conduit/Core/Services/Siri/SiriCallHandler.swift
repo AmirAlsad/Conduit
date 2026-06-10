@@ -76,13 +76,17 @@ final class SiriCallHandler: NSObject, INStartCallIntentHandling {
 
     /// The handle matches the contact mirror's synthetic email so Siri shows the
     /// agent's contact card (name/photo); customIdentifier carries our UUID back.
+    /// contactIdentifier is the linked CNContact's id — the field Siri uses to
+    /// learn "this contact is reachable via this app" from donations; without it
+    /// Siri matches the card, finds no app-callable handle, and refuses with
+    /// "you'll need to add contact information".
     static func person(for agent: Agent) -> INPerson {
         INPerson(
             personHandle: INPersonHandle(value: agent.syntheticEmail, type: .emailAddress),
             nameComponents: nil,
             displayName: agent.name,
             image: nil,
-            contactIdentifier: nil,
+            contactIdentifier: agent.contactIdentifier,
             customIdentifier: agent.id.uuidString
         )
     }

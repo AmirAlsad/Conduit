@@ -44,6 +44,14 @@
 	     LAN address triggers iOS's local-network consent prompt. -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Conduit connects directly to a voice agent running on your own computer when it's on the same network.</string>
+	<!-- application(_:handlerFor:) — the in-app SiriKit handler — is only invoked
+	     in apps that declare multiple-scenes support (WWDC20 10073). iPhone never
+	     actually creates a second scene, so this is declaration-only. -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+	</dict>
 	<!-- SiriKit calling domain, handled in-app (no extension): "Hey Siri, call
 	     <agent>" resolves against the user's agents via SiriCallHandler. -->
 	<key>NSSiriUsageDescription</key>
