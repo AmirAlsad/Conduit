@@ -27,8 +27,15 @@ struct AvatarCropView: View {
             GeometryReader { proxy in
                 let diameter = min(proxy.size.width, proxy.size.height) - 48
                 let liveZoom = clampZoom(zoom * pinch)
+                // Anchor-preserving zoom: scaling the committed offset by the
+                // pinch ratio keeps the content under the viewport center fixed
+                // while zooming, instead of letting it slide away.
+                let ratio = liveZoom / zoom
                 let liveOffset = clampOffset(
-                    CGSize(width: offset.width + drag.width, height: offset.height + drag.height),
+                    CGSize(
+                        width: offset.width * ratio + drag.width,
+                        height: offset.height * ratio + drag.height
+                    ),
                     diameter: diameter, zoom: liveZoom
                 )
                 let fill = AvatarCrop.baseFillScale(imageSize: image.size, diameter: diameter)
@@ -62,8 +69,13 @@ struct AvatarCropView: View {
                         MagnificationGesture()
                             .updating($pinch) { value, state, _ in state = value }
                             .onEnded { value in
-                                zoom = clampZoom(zoom * value)
-                                offset = clampOffset(offset, diameter: diameter, zoom: zoom)
+                                let newZoom = clampZoom(zoom * value)
+                                let ratio = newZoom / zoom
+                                zoom = newZoom
+                                offset = clampOffset(
+                                    CGSize(width: offset.width * ratio, height: offset.height * ratio),
+                                    diameter: diameter, zoom: zoom
+                                )
                             },
                         DragGesture()
                             .updating($drag) { value, state, _ in state = value.translation }
