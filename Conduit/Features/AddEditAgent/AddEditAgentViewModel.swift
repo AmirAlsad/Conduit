@@ -37,6 +37,8 @@ final class AddEditAgentViewModel {
     }
 
     private(set) var testState: TestState = .idle
+    /// The staged "Test connection" checklist (empty until the first run).
+    private(set) var diagnosticSteps: [DiagnosticStep] = []
 
     private let editingAgent: Agent?
     private let repository: AgentRepository
@@ -44,6 +46,7 @@ final class AddEditAgentViewModel {
     private let contactSync: ContactSyncing
     private let transportFactory: (TransportKind) -> Transport
     private let inboundRegistrar: InboundRegistering?
+    private let pairingResolver: @Sendable (URL, String, TransportKind) async throws -> PairingCredentials
 
     init(
         editing agent: Agent? = nil,
@@ -51,7 +54,10 @@ final class AddEditAgentViewModel {
         keychain: KeychainStoring,
         contactSync: ContactSyncing,
         transportFactory: @escaping (TransportKind) -> Transport,
-        inboundRegistrar: InboundRegistering? = nil
+        inboundRegistrar: InboundRegistering? = nil,
+        pairingResolver: @escaping @Sendable (URL, String, TransportKind) async throws -> PairingCredentials = {
+            try await PairingClient.resolve(endpoint: $0, apiKey: $1, transport: $2)
+        }
     ) {
         self.editingAgent = agent
         self.repository = repository
@@ -59,6 +65,7 @@ final class AddEditAgentViewModel {
         self.contactSync = contactSync
         self.transportFactory = transportFactory
         self.inboundRegistrar = inboundRegistrar
+        self.pairingResolver = pairingResolver
 
         if let agent {
             self.name = agent.name
@@ -187,17 +194,18 @@ final class AddEditAgentViewModel {
         }
     }
 
-    // MARK: - Test connection
+    // MARK: - Test connection (staged diagnostics)
+    //
+    // The VM sequences the stages itself: pairing is resolved here (not inside the
+    // transport adapter, which does its own pairing on a real call) so a failure
+    // names the step that broke. Bounded divergence — both paths share
+    // PairingClient and then connect with the same room URL + token.
 
     private enum TestResult {
         case success
+        case authFailure
         case failure(String)
-    }
-
-    /// The secret for the path under test — pairing wins when both are configured,
-    /// matching how a real call resolves it.
-    private var activeSecret: String {
-        pairingEndpoint != nil ? apiKey : directToken
+        case timeout
     }
 
     func testConnection() async {
@@ -207,25 +215,48 @@ final class AddEditAgentViewModel {
         }
 
         testState = .testing
+        diagnosticSteps = (pairingEndpoint != nil
+            ? [DiagnosticStage.pairing, .credentials, .transport, .ready]
+            : [.transport, .ready]
+        ).map { DiagnosticStep(stage: $0) }
 
-        let config = TransportConfig(
-            kind: transportKind,
-            url: connectionURL,
-            token: activeSecret,
-            pairingEndpoint: pairingEndpoint
-        )
+        var roomURL = connectionURL
+        var token = directToken
+
+        if let endpoint = pairingEndpoint {
+            setStatus(.running, for: .pairing)
+            do {
+                let creds = try await resolvePairing(endpoint)
+                setStatus(.passed, for: .pairing)
+                setStatus(.passed, for: .credentials)
+                roomURL = creds.roomURL
+                token = creds.token
+            } catch PairingError.missingCredentials {
+                setStatus(.passed, for: .pairing)
+                failDiagnostics(at: .credentials, message: "Response missing room URL or token")
+                return
+            } catch {
+                Log.warning(.transport, "Test connection pairing failed: \(error)")
+                failDiagnostics(at: .pairing, message: Self.pairingFailureMessage(error, endpoint: endpoint))
+                return
+            }
+        }
+
+        setStatus(.running, for: .transport)
         let transport = transportFactory(transportKind)
-
         do {
-            try await transport.connect(config)
+            try await transport.connect(TransportConfig(kind: transportKind, url: roomURL, token: token))
         } catch {
             Log.warning(.transport, "Test connection failed to start: \(error)")
             let message = (error as? TransportError) == .authenticationFailed
-                ? "Authentication failed" : "Couldn't reach the agent"
-            testState = .failure(message)
+                ? "Room token rejected"
+                : "Couldn't negotiate the \(transportKind.displayName) connection"
+            failDiagnostics(at: .transport, message: message)
             await transport.disconnect()
             return
         }
+        setStatus(.passed, for: .transport)
+        setStatus(.running, for: .ready)
 
         let result = await withTaskGroup(of: TestResult.self) { group -> TestResult in
             group.addTask {
@@ -234,20 +265,20 @@ final class AddEditAgentViewModel {
                     case .connected:
                         return .success
                     case .error(.authenticationFailed), .disconnected(reason: .authFailed):
-                        return .failure("Authentication failed")
+                        return .authFailure
                     case .error:
-                        return .failure("Connection error")
+                        return .failure("Connected, but the agent never became ready — is the bot running?")
                     case .disconnected:
-                        return .failure("Disconnected")
+                        return .failure("Disconnected before the agent was ready")
                     default:
                         continue
                     }
                 }
-                return .failure("Disconnected")
+                return .failure("Disconnected before the agent was ready")
             }
             group.addTask {
                 try? await Task.sleep(for: .seconds(20))
-                return .failure("Timed out")
+                return .timeout
             }
 
             let first = await group.next() ?? .failure("Connection error")
@@ -259,9 +290,60 @@ final class AddEditAgentViewModel {
 
         switch result {
         case .success:
+            setStatus(.passed, for: .ready)
             testState = .success
+        case .authFailure:
+            // The room rejected the token after the join started — a transport-
+            // stage fact discovered late; report it on that stage.
+            setStatus(.pending, for: .ready)
+            failDiagnostics(at: .transport, message: "Room token rejected")
         case .failure(let message):
-            testState = .failure(message)
+            failDiagnostics(at: .ready, message: message)
+        case .timeout:
+            failDiagnostics(at: .ready, message: "Timed out after 20 seconds waiting for the agent")
+        }
+    }
+
+    private func setStatus(_ status: DiagnosticStatus, for stage: DiagnosticStage) {
+        guard let index = diagnosticSteps.firstIndex(where: { $0.stage == stage }) else { return }
+        diagnosticSteps[index].status = status
+    }
+
+    private func failDiagnostics(at stage: DiagnosticStage, message: String) {
+        setStatus(.failed(message), for: stage)
+        testState = .failure(message)
+    }
+
+    /// Race the pairing resolve against its own timeout so a hung endpoint fails
+    /// in 10 s instead of URLSession's 60 s default.
+    private func resolvePairing(_ endpoint: URL) async throws -> PairingCredentials {
+        let resolver = pairingResolver
+        let key = apiKey
+        let kind = transportKind
+        return try await withThrowingTaskGroup(of: PairingCredentials.self) { group in
+            group.addTask { try await resolver(endpoint, key, kind) }
+            group.addTask {
+                try await Task.sleep(for: .seconds(10))
+                throw URLError(.timedOut)
+            }
+            guard let first = try await group.next() else { throw PairingError.invalidResponse }
+            group.cancelAll()
+            return first
+        }
+    }
+
+    private static func pairingFailureMessage(_ error: Error, endpoint: URL) -> String {
+        switch error {
+        case PairingError.unauthorized:
+            return "API key rejected (401) — check it matches your server's key"
+        case PairingError.server(let code):
+            return "Server error (HTTP \(code))"
+        case PairingError.invalidResponse:
+            return "Endpoint didn't return JSON — is this the right URL?"
+        case let urlError as URLError where urlError.code == .timedOut:
+            return "Timed out reaching \(endpoint.host() ?? "the endpoint")"
+        default:
+            return "Couldn't reach \(endpoint.host() ?? "the endpoint")"
         }
     }
 }

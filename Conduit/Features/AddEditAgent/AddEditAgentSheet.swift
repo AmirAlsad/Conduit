@@ -198,27 +198,48 @@ struct AddEditAgentSheet: View {
             .disabled(!viewModel.canSave || viewModel.testState == .testing)
             .accessibilityIdentifier(AccessibilityID.AddAgent.testConnectionButton)
 
-            testResultView
+            if !viewModel.diagnosticSteps.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(viewModel.diagnosticSteps) { step in
+                        diagnosticRow(step)
+                            .accessibilityIdentifier(AccessibilityID.AddAgent.diagnosticRow(step.stage))
+                    }
+                }
                 .accessibilityIdentifier(AccessibilityID.AddAgent.testResult)
+            }
+        }
+    }
+
+    private func diagnosticRow(_ step: DiagnosticStep) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                diagnosticIcon(step.status)
+                Text(step.stage.title)
+                    .foregroundStyle(step.status == .pending ? .secondary : .primary)
+            }
+            if case .failed(let message) = step.status {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .padding(.leading, 28)
+            }
         }
     }
 
     @ViewBuilder
-    private var testResultView: some View {
-        switch viewModel.testState {
-        case .idle:
-            EmptyView()
-        case .testing:
-            HStack {
-                ProgressView()
-                Text("Testing…")
-            }
-            .foregroundStyle(.secondary)
-        case .success:
-            Label("Connected", systemImage: "checkmark.circle.fill")
+    private func diagnosticIcon(_ status: DiagnosticStatus) -> some View {
+        switch status {
+        case .pending:
+            Image(systemName: "circle.dashed")
+                .foregroundStyle(.secondary)
+        case .running:
+            ProgressView()
+                .controlSize(.small)
+        case .passed:
+            Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-        case .failure(let message):
-            Label(message, systemImage: "exclamationmark.circle.fill")
+        case .failed:
+            Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(.red)
         }
     }

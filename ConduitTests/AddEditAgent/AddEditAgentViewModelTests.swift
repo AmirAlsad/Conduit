@@ -30,7 +30,10 @@ struct AddEditAgentViewModelTests {
         keychain: KeychainStoring = InMemoryKeychain(),
         contactSync: ContactSyncing = FakeContactSync(),
         transportFactory: @escaping (TransportKind) -> Transport = { _ in FakeTransport() },
-        inboundRegistrar: InboundRegistering? = nil
+        inboundRegistrar: InboundRegistering? = nil,
+        pairingResolver: @escaping @Sendable (URL, String, TransportKind) async throws -> PairingCredentials = { _, _, _ in
+            throw PairingError.invalidResponse
+        }
     ) -> AddEditAgentViewModel {
         AddEditAgentViewModel(
             editing: agent,
@@ -38,7 +41,8 @@ struct AddEditAgentViewModelTests {
             keychain: keychain,
             contactSync: contactSync,
             transportFactory: transportFactory,
-            inboundRegistrar: inboundRegistrar
+            inboundRegistrar: inboundRegistrar,
+            pairingResolver: pairingResolver
         )
     }
 
@@ -210,9 +214,13 @@ struct AddEditAgentViewModelTests {
         #expect(sync.syncCount == 0) // no contact linked → permission-free
     }
 
-    // MARK: - Test connection
+    // MARK: - Test connection (staged diagnostics)
 
-    @Test func testConnectionSucceedsOnConnectedEvent() async throws {
+    private func status(of stage: DiagnosticStage, in vm: AddEditAgentViewModel) -> DiagnosticStatus? {
+        vm.diagnosticSteps.first { $0.stage == stage }?.status
+    }
+
+    @Test func directModeShowsTwoStagesAndSucceeds() async throws {
         let fake = FakeTransport()
         let vm = makeViewModel(repository: try makeRepository(), transportFactory: { _ in fake })
         vm.connectionURLText = "https://x.daily.co/room"
@@ -224,10 +232,13 @@ struct AddEditAgentViewModelTests {
         await run
 
         #expect(vm.testState == .success)
+        #expect(vm.diagnosticSteps.map(\.stage) == [.transport, .ready])
+        #expect(status(of: .transport, in: vm) == .passed)
+        #expect(status(of: .ready, in: vm) == .passed)
         #expect(fake.disconnectCount == 1) // always tears the probe down
     }
 
-    @Test func testConnectionReportsAuthFailureFromEvent() async throws {
+    @Test func authEventAfterJoinFailsTheTransportStage() async throws {
         let fake = FakeTransport()
         let vm = makeViewModel(repository: try makeRepository(), transportFactory: { _ in fake })
         vm.connectionURLText = "https://x.daily.co/room"
@@ -238,10 +249,11 @@ struct AddEditAgentViewModelTests {
         fake.emit(.error(.authenticationFailed))
         await run
 
-        #expect(vm.testState == .failure("Authentication failed"))
+        #expect(vm.testState == .failure("Room token rejected"))
+        #expect(status(of: .transport, in: vm) == .failed("Room token rejected"))
     }
 
-    @Test func testConnectionFailsWhenConnectThrows() async throws {
+    @Test func connectThrowingFailsTheTransportStage() async throws {
         let fake = FakeTransport()
         fake.connectError = .timedOut
         let vm = makeViewModel(repository: try makeRepository(), transportFactory: { _ in fake })
@@ -250,18 +262,77 @@ struct AddEditAgentViewModelTests {
 
         await vm.testConnection()
 
-        #expect(vm.testState == .failure("Couldn't reach the agent"))
+        #expect(status(of: .transport, in: vm) == .failed("Couldn't negotiate the Daily connection"))
+        #expect(status(of: .ready, in: vm) == .pending) // run stopped at the failure
     }
 
-    @Test func testConnectionReportsAuthFailureWhenConnectThrowsAuth() async throws {
+    @Test func pairingResolveDrivesAllFourStages() async throws {
         let fake = FakeTransport()
-        fake.connectError = .authenticationFailed
-        let vm = makeViewModel(repository: try makeRepository(), transportFactory: { _ in fake })
-        vm.connectionURLText = "https://x.daily.co/room"
-        vm.directToken = "bad"
+        let room = URL(string: "https://x.daily.co/minted")!
+        let vm = makeViewModel(
+            repository: try makeRepository(),
+            transportFactory: { _ in fake },
+            pairingResolver: { _, _, _ in PairingCredentials(roomURL: room, token: "minted-token") }
+        )
+        vm.pairingEndpointText = "https://engine.example.com/connect/live"
+        vm.apiKey = "key"
+        vm.name = "Live"
+
+        async let run: Void = vm.testConnection()
+        await waitUntil { fake.connectCount == 1 }
+        fake.emit(.connected)
+        await run
+
+        #expect(vm.testState == .success)
+        #expect(vm.diagnosticSteps.map(\.stage) == [.pairing, .credentials, .transport, .ready])
+        #expect(vm.diagnosticSteps.allSatisfy { $0.status == .passed })
+        // The transport joined with the RESOLVED creds, not the pairing config.
+        #expect(fake.lastConfig?.url == room)
+        #expect(fake.lastConfig?.token == "minted-token")
+        #expect(fake.lastConfig?.pairingEndpoint == nil)
+    }
+
+    @Test func unauthorizedPairingFailsStageOneWithoutConnecting() async throws {
+        let fake = FakeTransport()
+        let vm = makeViewModel(
+            repository: try makeRepository(),
+            transportFactory: { _ in fake },
+            pairingResolver: { _, _, _ in throw PairingError.unauthorized }
+        )
+        vm.pairingEndpointText = "https://engine.example.com/connect/live"
 
         await vm.testConnection()
 
-        #expect(vm.testState == .failure("Authentication failed"))
+        #expect(status(of: .pairing, in: vm) == .failed("API key rejected (401) — check it matches your server's key"))
+        #expect(status(of: .credentials, in: vm) == .pending)
+        #expect(fake.connectCount == 0)
+    }
+
+    @Test func missingCredentialsPassesPairingFailsCredentials() async throws {
+        let fake = FakeTransport()
+        let vm = makeViewModel(
+            repository: try makeRepository(),
+            transportFactory: { _ in fake },
+            pairingResolver: { _, _, _ in throw PairingError.missingCredentials }
+        )
+        vm.pairingEndpointText = "https://engine.example.com/connect/live"
+
+        await vm.testConnection()
+
+        #expect(status(of: .pairing, in: vm) == .passed)
+        #expect(status(of: .credentials, in: vm) == .failed("Response missing room URL or token"))
+        #expect(fake.connectCount == 0)
+    }
+
+    @Test func serverErrorSurfacesTheStatusCode() async throws {
+        let vm = makeViewModel(
+            repository: try makeRepository(),
+            pairingResolver: { _, _, _ in throw PairingError.server(503) }
+        )
+        vm.pairingEndpointText = "https://engine.example.com/connect/live"
+
+        await vm.testConnection()
+
+        #expect(status(of: .pairing, in: vm) == .failed("Server error (HTTP 503)"))
     }
 }
