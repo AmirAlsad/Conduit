@@ -46,6 +46,16 @@ struct ConduitApp: App {
                 // fetched the agent names; refresh at launch and on every
                 // agent mutation (save/delete hooks).
                 .task { ConduitAppShortcuts.refreshParameters() }
+                // Without this one-time prompt, Settings' "Use with Siri
+                // Requests" toggle defaults OFF and Siri claims the app has no
+                // support (found in the M10 device pass).
+                .task {
+                    if INPreferences.siriAuthorizationStatus() == .notDetermined {
+                        INPreferences.requestSiriAuthorization { status in
+                            Log.info(.app, "Siri authorization: \(String(describing: status))")
+                        }
+                    }
+                }
                 #if DEBUG
                 .task {
                     DebugSeed.runIfRequested(environment)

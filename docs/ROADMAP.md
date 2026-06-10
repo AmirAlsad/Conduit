@@ -160,24 +160,40 @@ Wi-Fi-drop reconnect (re-pairs to a fresh bot — context resets by design).
 
 ---
 
-## M10 — Hands-free reach (the car vision)
+## M10 — Hands-free reach (the car vision) — voice dialing built, device pass in progress
 
 **Goal:** deliver the original "take it in the car, hands-free" promise beyond a manual
-in-app tap.
+in-app tap. No CarPlay entitlements, ever (user decision).
 
-**Scope:**
-- **"Hey Siri, call &lt;agent&gt;"** via App Intents / Assistant intents, leaning on the
-  synthetic contact handle already laid for Siri/CallKit matching — lock-screen and
-  CarPlay voice dialing.
-- **CarPlay dashboard app** + its entitlement — the call list / recents on the car
-  screen. *(Named fast-follow; needs the CarPlay entitlement.)*
-- **Favorites / quick-dial** — a Favorites surface, a widget, or Control Center for the
-  agents you call most.
+**Shipped — three-layer Siri dialing, one funnel:**
+1. **App Intents App Shortcut** — "Call \<agent\> on Conduit" (`CallAgentIntent` +
+   `AgentEntity` backed by the tiered `AgentNameMatcher`). `openAppWhenRun = true` is
+   load-bearing: CallKit rejects `CXStartCallAction` from a background intent, so
+   `perform()` only parks the id on `AppEnvironment.pendingSiriCall`, consumed by
+   `RootTabView` once the scene is `.active`. Vocabulary refreshes at launch + every
+   agent save/delete. Because it's an App Intent, **"call my agent" composes into any
+   user Shortcut or Automation** (e.g. car-Bluetooth-connected → call agent) — document
+   and extend this (more actions: end call, mute?) as a follow-up.
+2. **SiriKit `INStartCallIntent`** (in-app handling, no extension) — covers "call
+   \<agent\>" without the app name and the calling domain's lock-screen/CarPlay
+   special-casing until iOS 27. `INPerson` handles reuse the contact-mirror synthetic
+   email; resolution feeds the same funnel.
+3. **iOS 27 `.phone.startCall` schema** — deferred until the Xcode 27 beta SDK is
+   installed; `CallAgentIntent`'s type/parameter names are frozen so the schema
+   conformance upgrades it in place (contingency: a second schema-conforming intent).
 
-**Verification:** intent donation + parsing in the sim; Siri/CarPlay dialing is
-device/CarPlay-only.
+**Device findings so far (June 2026):** Settings' "Use with Siri Requests" defaulted
+OFF until we added the one-time `INPreferences.requestSiriAuthorization` prompt; with
+it on, unlocked dialing works on both layers, and locked-phone "call \<agent\> on
+Conduit" via the **SiriKit app-picker works even locked**. The locked **App Shortcut**
+path refuses with a misleading "Conduit hasn't added support" (the shortcut must open
+the app; a locked phone won't) — expected, document it. Outstanding: cold-launch
+phrase, rename → vocabulary latency, and the **in-car steering-wheel test** (expected
+to work via SiriKit's calling domain; may be entitlement-gated — either outcome gets
+documented).
 
-**Why now:** the in-car, hands-free use case is the reason Conduit rides CallKit at all.
+**Still open in M10:** CarPlay dashboard app (needs the entitlement — out), Favorites /
+quick-dial surface, widget/Control Center.
 Once the call path is proven (M7) and agents connect easily (M8), this is the experience
 payoff — and the heavier entitlement/device lift earns it a later slot.
 
