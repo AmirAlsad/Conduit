@@ -13,6 +13,12 @@
 
 import Foundation
 
+/// Thrown by `reportIncomingCall` when the system suppressed the ring (Focus/DND).
+/// Not a failure: the caller logs a missed call instead of entering a failed state.
+enum IncomingCallReportError: Error {
+    case filteredByFocus
+}
+
 @MainActor
 protocol CallProviding: AnyObject {
     var delegate: CallProviderDelegate? { get set }

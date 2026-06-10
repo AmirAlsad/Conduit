@@ -114,3 +114,22 @@ lands (WS-3), keep this invariant; do not assume one End = one callback.
 
 **Why it's missed:** Fakes that don't model CallKit's request→delegate round-trip
 make double-fire invisible in the simulator; it only manifests on device.
+
+### A VoIP push must ALWAYS report a CallKit call — silent "ignore" kills the app
+First seen: 2026-06-10 (M7 inbound device verification)
+
+**Pattern:** `receiveCall` guarded `state == .idle` and silently returned on a
+mid-call push. On device, iOS enforces that every PushKit VoIP push results in
+`reportNewIncomingCall` *in that handler invocation* — a silent return gets the
+app terminated, which tears down the **active** call's media (mic dot vanished,
+WebRTC dead) while the CallKit UI lingered. Unit tests passed because fakes
+don't model the PushKit kill.
+
+**Rule:** Every path out of the push handler must report a call — busy means
+report under the push's `call_id`, then immediately `reportCallEnded(.unanswered)`
+and log a missed incoming entry; never touch the active call's state. Same
+invariant family as "report even for unknown agents."
+
+**Why it's missed:** The PushKit termination rule is invisible in the simulator
+(PushKit doesn't deliver there) and in unit tests (no OS watchdog in fakes);
+it only manifests as a mysterious mid-call death on hardware.

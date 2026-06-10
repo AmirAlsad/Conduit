@@ -119,5 +119,7 @@ agent's transport — same shapes as the pairing response.
 - **Privacy.** The VoIP token is not a secret credential, but treat it with care: a
   party holding both your APNs key and a device token can ring that device. Keys live
   on your server; tokens are sent only to servers the user opted into.
-- **One call at a time.** Conduit handles a single call; a push that arrives mid-call
-  is ignored.
+- **One call at a time.** Conduit handles a single call; a push that arrives
+  mid-call is reported to the system and immediately ended (iOS requires every
+  VoIP push to surface a call), landing in Recents as a missed incoming call —
+  the active call is unaffected.

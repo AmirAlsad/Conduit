@@ -54,6 +54,7 @@ final class AppEnvironment {
             repository: agentRepository,
             announcer: announcer,
             interruptionObserver: interruptionObserver,
+            missedCallNotifier: MissedCallNotifier(),
             now: { .now },
             sleep: { try await Task.sleep(for: $0) },
             isPushToTalkEnabled: isPushToTalkEnabled

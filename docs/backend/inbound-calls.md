@@ -115,6 +115,13 @@ Two modes:
   leaves it running (billing) until `PIPELINE_IDLE_TIMEOUT_SECS` reaps it. Prefer
   pairing unless you need the agent mid-sentence-ready at pickup.
 
+    !!! warning "Inline must match the app's transport"
+        The app joins inline credentials over the transport **configured for that
+        agent in the app**. Pass `--transport daily|livekit` to match it — a
+        mismatch (e.g. a Daily room pushed to an agent the app dials over LiveKit)
+        fails at answer time. Pairing mode can't mismatch: the app negotiates the
+        transport in its `/connect` call.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
@@ -125,4 +132,4 @@ Two modes:
 | `502` · `TopicDisallowed` | Push Notifications not enabled on the App ID, or the topic doesn't match `<bundle id>.voip` |
 | `502` · `Unregistered` | The token is stale (app reinstalled); the engine evicted it — re-enable inbound in the app |
 | `503` | APNs vars not set on the engine (or, for `--inline`, the transport/model keys are missing) |
-| APNs `200` but no ring | The app must be on a real device; one call at a time (a ring during an active call is ignored); an unknown agent UUID in the app ends the call gracefully |
+| APNs `200` but no ring | The app must be on a real device; one call at a time (a ring during an active call is logged as missed, never breaks through); an unknown agent UUID in the app ends the call gracefully |

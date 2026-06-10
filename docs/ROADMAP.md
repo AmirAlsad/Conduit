@@ -19,12 +19,13 @@ Both call directions exist in code. See [ARCHITECTURE](./ARCHITECTURE.md) and
 
 **The one fact that shapes this roadmap:** a large share of what's "built" is verified
 only in the **simulator against fakes**. The real CallKit + **Daily** two-way audio was
-device-verified (M3/M5), and the **LiveKit** call path (pairing connect, two-way
+device-verified (M3/M5), the **LiveKit** call path (pairing connect, two-way
 audio, the native route button, reconnection — against the deployed reference
-engine) in June 2026. Not yet proven on hardware: the **inbound VoIP-push**
-round-trip, **interruption/ducking** audio, `setOnHold` for a real incoming phone
-call, and finalized spoken-state ducking. You cannot responsibly build on a
-foundation that hasn't rung a real phone — so the roadmap leads with closing that debt.
+engine) in June 2026, and the **inbound VoIP-push round-trip** (cold ring through
+redeploy survival, LiveKit agent) days later. Not yet proven on hardware:
+**interruption/ducking** audio, `setOnHold` for a real incoming phone call, and
+finalized spoken-state ducking. You cannot responsibly build on a foundation that
+hasn't rung a real phone — so the roadmap leads with closing that debt.
 
 ## Guiding principles (the constraints that pick priorities)
 
@@ -54,10 +55,13 @@ bug-fix, not new surface.
   call-screen route button actually moving audio (LiveKit's manual-audio advantage
   over Daily), and reconnection, device-verified June 2026 against the deployed
   reference engine over pairing. Still to check: the in-app picker on LiveKit.
-- **Inbound VoIP-push round-trip on device** — needs a **paid Apple Developer account**,
-  the Push Notifications capability, and a server sending a real VoIP push. Verify
-  cold-wake ring → answer → connect → two-way audio **on both transports**; the decline
-  path (logged `.declined` incoming); unknown-agent graceful end.
+- **Inbound VoIP-push round-trip on device** ✅ — device-verified June 2026 against
+  the deployed reference engine (LiveKit agent): cold ring → answer → two-way audio,
+  decline → Recents, inline credentials, Focus/DND-filtered rings logged as missed
+  with a quiet local notification, busy pushes report-then-end (silently ignoring a
+  VoIP push gets the app killed — `bugs.md`), and rings surviving a backend redeploy
+  (volume-backed registry). Still to check: the answer path over a **Daily** agent,
+  and unknown-agent graceful end.
 - **Interruptions & ducking, real audio** — Siri mid-call (pause + clean resume), an
   incoming PSTN call (yield the route), and **nav/GPS prompts ducking/mixing over the
   call** in the car (AirPods / CarPlay). Verify on both transports.

@@ -11,8 +11,10 @@
 > agent-initiated inbound calls (VoIP push, `Core/Services/Push/`; see
 > [INBOUND_CALLS](./INBOUND_CALLS.md)). The LiveKit call path is device-verified
 > (pairing connect, two-way audio, native route button, reconnection — against the
-> deployed reference engine, June 2026). Remaining: device verification of the
-> inbound-call path. See [CORE_SYSTEMS](./CORE_SYSTEMS.md).
+> deployed reference engine, June 2026), and so is the **inbound path** (cold ring,
+> answer, decline, inline creds, Focus-filtered → missed + local notification,
+> busy report-and-end, redeploy survival — June 2026, LiveKit agent).
+> See [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 ## Overview
 

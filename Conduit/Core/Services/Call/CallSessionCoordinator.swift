@@ -43,6 +43,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     private let repository: AgentRepository
     private let announcer: SpokenStateAnnouncing
     private let interruptionObserver: AudioInterruptionObserving
+    private let missedCallNotifier: MissedCallNotifying
     private let policy: ReconnectionPolicy
     private let now: () -> Date
     private let sleep: (Duration) async throws -> Void
@@ -71,6 +72,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         repository: AgentRepository,
         announcer: SpokenStateAnnouncing,
         interruptionObserver: AudioInterruptionObserving,
+        missedCallNotifier: MissedCallNotifying,
         policy: ReconnectionPolicy = .default,
         now: @escaping () -> Date,
         sleep: @escaping (Duration) async throws -> Void,
@@ -82,6 +84,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         self.repository = repository
         self.announcer = announcer
         self.interruptionObserver = interruptionObserver
+        self.missedCallNotifier = missedCallNotifier
         self.policy = policy
         self.now = now
         self.sleep = sleep
@@ -127,7 +130,31 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     /// reports — credentials (inline or via pairing) are used on answer.
     func receiveCall(_ payload: IncomingCallPayload) async {
         guard case .idle = state else {
-            Log.warning(.call, "receiveCall ignored; state is \(String(describing: state))")
+            // One call at a time — but iOS terminates the app (killing the active
+            // call's media) if a VoIP push doesn't report an incoming call. Report
+            // under the push's own id, end it immediately, and log the missed ring
+            // without touching the active call's state.
+            Log.warning(.call, "Busy on VoIP push; reporting call \(payload.callID) and ending it")
+            let busyAgent = (try? repository.fetch(id: payload.agentID)) ?? nil
+            try? await callProvider.reportIncomingCall(
+                id: payload.callID,
+                handle: busyAgent?.callHandle ?? CallHandle(value: "agent"),
+                displayName: busyAgent?.name ?? "Agent"
+            )
+            callProvider.reportCallEnded(payload.callID, reason: .unanswered)
+            if let busyAgent {
+                let entry = CallLogEntry(
+                    agent: busyAgent,
+                    direction: .incoming,
+                    startedAt: now(),
+                    duration: 0,
+                    outcome: .noAnswer,
+                    transportKind: busyAgent.transportKind
+                )
+                repository.addCallLogEntry(entry)
+                try? repository.save()
+                missedCallNotifier.notifyMissedCall(agentName: busyAgent.name)
+            }
             return
         }
 
@@ -148,6 +175,16 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
                 handle: agent?.callHandle ?? CallHandle(value: "agent"),
                 displayName: agent?.name ?? "Agent"
             )
+        } catch IncomingCallReportError.filteredByFocus {
+            // The system suppressed the ring (Focus/DND) — a missed call, not a
+            // failure. Log it, notify quietly, and return to idle so the next
+            // push rings normally.
+            Log.info(.call, "Incoming call filtered by Focus; logging as missed")
+            interruptionObserver.stopObserving()
+            writeLog(outcome: .noAnswer)
+            if let agent { missedCallNotifier.notifyMissedCall(agentName: agent.name) }
+            resetState()
+            return
         } catch {
             Log.error(.callkit, "reportIncomingCall failed: \(error)")
             fail(.unknown)

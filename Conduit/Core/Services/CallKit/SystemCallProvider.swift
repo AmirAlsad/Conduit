@@ -66,8 +66,14 @@ final class SystemCallProvider: NSObject, CallProviding, CXProviderDelegate {
         update.hasVideo = false
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             provider.reportNewIncomingCall(with: id, update: update) { error in
-                if let error { continuation.resume(throwing: error) }
-                else { continuation.resume() }
+                if let cxError = error as? CXErrorCodeIncomingCallError,
+                   cxError.code == .filteredByDoNotDisturb {
+                    continuation.resume(throwing: IncomingCallReportError.filteredByFocus)
+                } else if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
             }
         }
     }

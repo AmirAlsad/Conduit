@@ -106,12 +106,46 @@ struct CallInboundTests {
         #expect(try h.loggedEntries().isEmpty) // no agent to attribute the log to
     }
 
-    @Test func receiveCallIgnoredWhenNotIdle() async throws {
+    @Test func receiveCallWhileBusyReportsAndImmediatelyEnds() async throws {
+        // iOS terminates the app (killing the active call) if a VoIP push isn't
+        // reported to CallKit — busy means report-then-end, never silent ignore.
         let h = try CoordinatorHarness()
         await h.coordinator.placeCall(h.agent) // already in a call
+        let busyCallID = UUID()
+        await h.coordinator.receiveCall(payload(for: h, callID: busyCallID))
+
+        #expect(h.coordinator.state.isConnecting) // active call untouched
+        #expect(h.provider.reportedIncoming.map(\.id) == [busyCallID])
+        #expect(h.provider.reportedEnded.map(\.id) == [busyCallID])
+        #expect(h.provider.reportedEnded.first?.reason == .unanswered)
+
+        // The missed ring lands in Recents as an incoming no-answer, with a
+        // quiet missed-call notification.
+        let entries = try h.loggedEntries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.direction == .incoming)
+        #expect(entries.first?.outcome == .noAnswer)
+        #expect(h.missedNotifier.missedAgentNames == [h.agent.name])
+    }
+
+    @Test func focusFilteredRingLogsMissedAndReturnsToIdle() async throws {
+        // Focus/DND makes reportNewIncomingCall fail with a filtered error: not a
+        // failure — log a missed call, notify quietly, and stay ready to ring again.
+        let h = try CoordinatorHarness()
+        h.provider.reportIncomingError = IncomingCallReportError.filteredByFocus
         await h.coordinator.receiveCall(payload(for: h))
 
-        #expect(h.coordinator.state.isConnecting) // unchanged by the ignored inbound
-        #expect(h.provider.reportedIncoming.isEmpty)
+        #expect(h.coordinator.state == .idle) // not stuck in .failed
+        #expect(!h.interruption.isObserving)
+        let entries = try h.loggedEntries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.direction == .incoming)
+        #expect(entries.first?.outcome == .noAnswer)
+        #expect(h.missedNotifier.missedAgentNames == [h.agent.name])
+
+        // A later push (Focus off) rings normally.
+        h.provider.reportIncomingError = nil
+        await h.coordinator.receiveCall(payload(for: h))
+        #expect(h.coordinator.state == .incomingRinging)
     }
 }

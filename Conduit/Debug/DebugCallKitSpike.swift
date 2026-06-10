@@ -71,6 +71,7 @@ enum DebugCallKitSpike {
             repository: repository,
             announcer: SpeechSpokenStateAnnouncer(),
             interruptionObserver: SystemAudioInterruptionObserver(),
+            missedCallNotifier: MissedCallNotifier(),
             now: { .now },
             sleep: { try await Task.sleep(for: $0) },
             isPushToTalkEnabled: { false }
