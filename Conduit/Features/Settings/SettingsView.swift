@@ -33,16 +33,6 @@ struct SettingsView: View {
                     .accessibilityIdentifier(AccessibilityID.Settings.agentSetupLink)
             }
 
-            #if DEBUG
-            Section("Developer") {
-                NavigationLink {
-                    DebugDailyConnectView()
-                } label: {
-                    Label("Daily connect (debug)", systemImage: "ladybug")
-                }
-                .accessibilityIdentifier(AccessibilityID.Debug.dailyConnectLink)
-            }
-            #endif
         }
         .navigationTitle("Settings")
         .brandMarkToolbar()
