@@ -11,13 +11,15 @@ from contextlib import asynccontextmanager
 
 import aiohttp
 import certifi
+import httpx
 from fastapi import FastAPI
 
+from app.apns import ApnsSender
 from app.config import settings
 from app.dispatch import Dispatcher
 from app.obs import event, get_logger, setup_logging
-from app.registry import InMemoryRegistry
-from app.routes import admin, connect, webhooks
+from app.registry import SQLiteRegistry
+from app.routes import admin, connect, inbound, webhooks
 from app.transports.daily import DailyService
 
 
@@ -46,12 +48,15 @@ async def lifespan(app: FastAPI):
     # self-contained and works the same on macOS dev and Linux prod.
     ssl_context = ssl.create_default_context(cafile=certifi.where())
     session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context))
-    registry = InMemoryRegistry()
+    registry = SQLiteRegistry(settings.registry_db_path)
+    # APNs' provider API is HTTP/2-only — hence a dedicated httpx client.
+    apns_client = httpx.AsyncClient(http2=True, timeout=10)
     app.state.session = session
     app.state.registry = registry
     app.state.dispatcher = Dispatcher(registry)
     app.state.daily = DailyService(session) if settings.daily_api_key else None
     app.state.livekit = _make_livekit()
+    app.state.apns = ApnsSender(apns_client)
 
     event(
         log,
@@ -64,6 +69,8 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await session.close()
+        await apns_client.aclose()
+        registry.close()
         event(log, "engine.stopped")
 
 
@@ -72,6 +79,7 @@ app = FastAPI(title="Conduit Engine", version="0.1.0", lifespan=lifespan)
 app.include_router(connect.router)
 app.include_router(webhooks.router)
 app.include_router(admin.router)
+app.include_router(inbound.router)
 
 
 @app.get("/health")

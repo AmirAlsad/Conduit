@@ -6,9 +6,9 @@ UDP/TURN/media termination to operate. Two constraints shape every deployment:
 
 - **Always-on.** It must answer `/connect` and webhooks without a cold start —
   disable any serverless/app-sleeping mode.
-- **Single process.** Idempotent dispatch relies on an in-memory registry and
-  per-room locks, which only serialize within one event loop. Don't run replicas
-  or `--workers > 1` until the registry is moved to a shared store.
+- **Single process.** Idempotent dispatch relies on per-room locks that only
+  serialize within one event loop (the SQLite registry doesn't change this).
+  Don't run replicas or `--workers > 1`.
 
 ## Docker / any host
 
@@ -29,6 +29,11 @@ inject secrets through your platform, never bake them in.
 then **disable Serverless / App Sleeping** in the service settings and set the
 environment variables.
 
+For registry durability across redeploys (direct-mode rooms + inbound VoIP
+tokens), mount a **volume** at `/data` and set `REGISTRY_DB_PATH=/data/registry.db`
+— see [Inbound calls](inbound-calls.md) for what this defends against and when
+it's fine to skip.
+
 ## After deploy
 
 1. Set env vars on the platform — at minimum `ENGINE_API_KEY` plus your SFU keys;
@@ -43,8 +48,10 @@ environment variables.
 ## Operational caveats
 
 - **Redeploys kill in-flight agents** and drop active calls — deploy when quiet.
-- **Redeploys orphan direct-mode rooms** (in-memory registry; see
-  [Direct mode](direct-mode.md)). Pairing is unaffected.
+- **Redeploys wipe the registry unless it's on durable storage** — direct-mode
+  rooms are orphaned and inbound VoIP tokens forgotten until re-registered.
+  Pairing is unaffected. Fix: a volume + `REGISTRY_DB_PATH` (see
+  [Inbound calls](inbound-calls.md)).
 - Keep `HUMAN_ABSENT_GRACE_SECS` ≥ the app's reconnect-with-backoff budget — the
   agent is a billed participant during the window, but cutting it short breaks
   reconnection, Conduit's headline feature.

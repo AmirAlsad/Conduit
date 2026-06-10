@@ -34,6 +34,7 @@ Start with [`README.md`](./README.md) and
 - Mint direct-mode creds to paste into the app: `uv run python scripts/provision.py --transport daily|livekit`
 - Register the Daily direct-mode webhook: `uv run python scripts/daily_webhook.py register --base-url <host>`
   (LiveKit's webhook is dashboard-only — see `docs/direct-mode.md`)
+- Ring the device (inbound call; needs the `APNS_*` vars): `uv run python scripts/ring.py --agent <id> [--inline]`
 
 Endpoint notes: per-agent routes (`POST /connect/{agent_id}`, `POST
 /credentials/{agent_id}`) are the canonical shape — the app sends no agent_id;
@@ -47,5 +48,7 @@ the bare routes default to `loopback`. LiveKit connection payloads carry
 - This backend implements the contracts the app depends on — keep it in sync with the
   repo's [`docs/CONNECTION_CONTRACT.md`](../docs/CONNECTION_CONTRACT.md) (outbound) and
   [`docs/INBOUND_CALLS.md`](../docs/INBOUND_CALLS.md) (agent-initiated inbound).
-- Single always-on process; the in-memory registry is **not** redeploy-safe — read the
-  README's operational caveats before relying on direct mode.
+- Single always-on process (replicas are still unsafe — dispatch idempotency is
+  per-event-loop). The registry is SQLite at `REGISTRY_DB_PATH`; it survives
+  redeploys only on durable storage (volume) — read the README's operational
+  caveats. Never persist active-bot pids.

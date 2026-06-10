@@ -5,6 +5,8 @@ import base64
 import os
 
 os.environ.setdefault("ENGINE_API_KEY", "test-engine-key")
+# Throwaway registry per TestClient lifespan; never write a db file into cwd.
+os.environ.setdefault("REGISTRY_DB_PATH", ":memory:")
 os.environ.setdefault("DAILY_API_KEY", "test-daily-key")
 os.environ.setdefault(
     "DAILY_WEBHOOK_SECRET", base64.b64encode(b"daily-webhook-secret").decode()

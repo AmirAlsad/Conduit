@@ -1,11 +1,11 @@
 """Registry behavior + agent/transport resolution."""
 
 from app.agents import AGENTS, get_agent, resolve_transport
-from app.registry import InMemoryRegistry
+from app.registry import SQLiteRegistry
 
 
 async def test_enable_and_get_room():
-    reg = InMemoryRegistry()
+    reg = SQLiteRegistry(":memory:")
     assert await reg.get_room("r1") is None
     await reg.enable_room("r1", "live", "daily", room_url="https://x.daily.co/r1")
     rec = await reg.get_room("r1")
@@ -18,7 +18,7 @@ async def test_enable_and_get_room():
 
 
 async def test_active_bot_lifecycle():
-    reg = InMemoryRegistry()
+    reg = SQLiteRegistry(":memory:")
     assert await reg.active_bot("r1") is None
     await reg.set_active_bot("r1", 4242)
     assert await reg.active_bot("r1") == 4242

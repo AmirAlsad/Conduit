@@ -184,6 +184,8 @@ to join and hear the agent. `uv run pytest` runs the suite.
 | POST | `/credentials` | bearer | Same, body/default `agent_id` (defaults to `loopback`) |
 | POST | `/webhooks/daily` | signature | Daily participant.joined → idempotent dispatch |
 | POST | `/webhooks/livekit` | signature | LiveKit participant_joined → idempotent dispatch |
+| POST | `/inbound/register/{agent_id}` | bearer | The app registers its VoIP push token (inbound calls) |
+| POST | `/admin/ring/{agent_id}` | bearer | Ring the registered device — agent-initiated inbound call |
 | POST | `/admin/disconnect` | bearer | Force-end an agent in a room (drop test) |
 | GET  | `/health` | none | Liveness / keep-warm |
 
@@ -194,7 +196,8 @@ Body for `/connect*` and `/credentials*`: `{"transport": "daily"|"livekit"}`
 body, but a path `agent_id` always wins — **the endpoint identifies the agent**,
 which is the shape the Conduit app expects: it POSTs only `{"transport": ...}`).
 Body for `/admin/disconnect`: `{"room_key": "<room>"}` (the room name from the
-payload).
+payload). `/admin/ring` rings via APNs VoIP push (`scripts/ring.py` wraps it;
+needs the `APNS_*` vars) — full setup in the docs site's **Inbound calls** guide.
 
 ---
 
@@ -257,14 +260,15 @@ Full deploy + webhook details: **[docs/direct-mode.md](./docs/direct-mode.md)**.
 
 ## ⚠️ Operational caveats
 
-- **In-memory registry is not redeploy-safe.** Direct-mode rooms live in process
-  memory; a restart/redeploy orphans them (webhook arrives → room unrecognized → no
-  agent dispatched → call connects to silence). The `Registry` interface in
-  `app/registry.py` is the swap seam — wire Postgres/Redis before relying on direct
-  mode in production. (Pairing is unaffected.)
-- **Single dispatcher process only.** Idempotency uses the in-memory registry +
-  per-room asyncio locks, which serialize only within one event loop. Don't run
-  replicas or `--workers > 1` until the registry is shared.
+- **The registry is durable only if its file is.** Direct-mode rooms and inbound
+  VoIP tokens live in a SQLite file (`REGISTRY_DB_PATH`, default `registry.db`).
+  On an ephemeral filesystem a redeploy wipes it: direct-mode webhooks find no
+  room (call connects to silence) until you re-provision, and inbound ringing
+  fails until the app's next launch re-registers its token. Mount a volume (e.g.
+  `/data/registry.db` on Railway) to survive redeploys. (Pairing is unaffected.)
+- **Single dispatcher process only.** Idempotency uses per-room asyncio locks +
+  process-local active-bot state, which serialize only within one event loop —
+  SQLite does not make replicas safe. Don't run replicas or `--workers > 1`.
 - **Daily webhooks** need a credit card on the Daily account and fire domain-wide;
   the engine filters to registered rooms and ignores the agent's own join.
 - **No Pipecat JS LiveKit client** yet — the web test client drives **Daily only**.
@@ -274,5 +278,4 @@ Full deploy + webhook details: **[docs/direct-mode.md](./docs/direct-mode.md)**.
 ## Design & scope
 
 **Out of scope (fast-follows):** SmallWebRTC/TURN, native `livekit-agents`
-token-encoded dispatch, freezing the public connection spec, a persistent registry
-store (interface is in place).
+token-encoded dispatch, freezing the public connection spec.

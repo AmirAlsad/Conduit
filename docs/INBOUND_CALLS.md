@@ -6,6 +6,11 @@ phone call, then connected over the same WebRTC transport as an outgoing call. H
 it to whoever runs the agent's backend. It is the inbound companion to
 [CONNECTION_CONTRACT](./CONNECTION_CONTRACT.md) (outbound); read that first.
 
+!!! tip "Reference implementation"
+    The example backend implements all of this — token registration, the APNs
+    sender, and a ring trigger. Operational guide:
+    [Example backend → Inbound calls](backend/inbound-calls.md).
+
 **Still no backend of ours.** Inbound needs a VoIP push, and Apple ties VoIP push to
 the *app's* APNs key. Because Conduit is **self-built and self-signed** — you build
 it under *your own* Apple Developer team — *you* hold the APNs key and *your* server

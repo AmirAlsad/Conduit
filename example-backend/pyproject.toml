@@ -25,6 +25,10 @@ dependencies = [
     # Usually pulled in by pipecat's [livekit] extra, pinned here so the webhook
     # path doesn't silently depend on a transitive.
     "livekit-api>=0.8",
+    # Inbound calls (app/apns.py): APNs' provider API is HTTP/2-only, hence the
+    # h2 extra; PyJWT signs the ES256 provider token (cryptography is transitive).
+    "httpx[http2]>=0.27",
+    "pyjwt>=2.9",
 ]
 
 [dependency-groups]

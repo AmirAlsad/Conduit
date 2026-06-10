@@ -3,7 +3,7 @@
 import asyncio
 
 from app.dispatch import Dispatcher
-from app.registry import InMemoryRegistry
+from app.registry import SQLiteRegistry
 
 
 class FakeProc:
@@ -30,7 +30,7 @@ class FakeProc:
 
 
 async def test_concurrent_dispatch_spawns_exactly_one(monkeypatch):
-    reg = InMemoryRegistry()
+    reg = SQLiteRegistry(":memory:")
     disp = Dispatcher(reg)
     procs: list[FakeProc] = []
     calls = 0
@@ -70,7 +70,7 @@ async def test_concurrent_dispatch_spawns_exactly_one(monkeypatch):
 
 
 async def test_dispatch_runs_cleanup_on_exit(monkeypatch):
-    reg = InMemoryRegistry()
+    reg = SQLiteRegistry(":memory:")
     disp = Dispatcher(reg)
     proc = FakeProc()
 
@@ -94,7 +94,7 @@ async def test_dispatch_runs_cleanup_on_exit(monkeypatch):
 
 
 async def test_disconnect_terminates_held_handle(monkeypatch):
-    reg = InMemoryRegistry()
+    reg = SQLiteRegistry(":memory:")
     disp = Dispatcher(reg)
     proc = FakeProc()
 

@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 
 from app.config import settings
 from app.main import app
-from app.registry import InMemoryRegistry
 
 AUTH = {"Authorization": f"Bearer {settings.engine_api_key}"}
 
@@ -71,10 +70,10 @@ def test_connect_pairing_daily_dispatches_and_returns_contract():
 
 
 def test_credentials_direct_registers_room_without_dispatch():
+    # The lifespan builds a fresh :memory: registry per TestClient context.
     with TestClient(app) as c:
         app.state.daily = FakeDaily()
         app.state.dispatcher = FakeDispatcher()
-        app.state.registry = InMemoryRegistry()
 
         r = c.post("/credentials", json={"agent_id": "live", "transport": "daily"}, headers=AUTH)
         assert r.status_code == 200, r.text
@@ -82,7 +81,7 @@ def test_credentials_direct_registers_room_without_dispatch():
         # No dispatch at provision time (that happens later via webhook).
         assert app.state.dispatcher.calls == []
         # Room is registered for the webhook to find, with its URL stored.
-        rec = app.state.registry._rooms.get("room-abc")
+        rec = app.state.registry._get_room("room-abc")
         assert rec is not None
         assert rec.agent_id == "live"
         assert rec.room_url == "https://x.daily.co/room-abc"
@@ -160,14 +159,13 @@ def test_credentials_path_route_registers_without_dispatch():
     with TestClient(app) as c:
         app.state.daily = FakeDaily()
         app.state.dispatcher = FakeDispatcher()
-        app.state.registry = InMemoryRegistry()
 
         # No body at all — the path names the agent, defaults cover the rest.
         r = c.post("/credentials/loopback", headers=AUTH)
         assert r.status_code == 200, r.text
         assert r.json()["agent_id"] == "loopback"
         assert app.state.dispatcher.calls == []
-        rec = app.state.registry._rooms.get("room-abc")
+        rec = app.state.registry._get_room("room-abc")
         assert rec is not None and rec.agent_id == "loopback"
 
 

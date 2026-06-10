@@ -58,4 +58,5 @@ nav:
       - Quickstart: backend/quickstart.md
       - Bring your own pipeline: backend/bring-your-own-pipeline.md
       - Direct mode & webhooks: backend/direct-mode.md
+      - Inbound calls: backend/inbound-calls.md
       - Deploy: backend/deploy.md

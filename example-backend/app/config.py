@@ -106,6 +106,26 @@ class Settings(BaseSettings):
     pairing_room_exp_secs: int = 60 * 60  # 1 h safety cap on a pairing room
     direct_room_exp_secs: int = 60 * 60 * 24 * 90  # 90 days
 
+    # --- Registry persistence ---
+    # SQLite file backing the room/VoIP-token registry. Point it at a mounted
+    # volume (e.g. /data/registry.db on Railway) to survive redeploys; the default
+    # cwd file is fine for local dev. ":memory:" for tests.
+    registry_db_path: str = "registry.db"
+
+    # --- Inbound calls (APNs VoIP push) ---
+    # The .p8 auth key: a file path locally, or the base64 of its contents where a
+    # file is awkward (e.g. a Railway variable). Key ID + Team ID come from the
+    # Apple Developer portal. Sandbox is correct for dev-signed (Xcode) builds;
+    # flip to false only for TestFlight/App Store distribution signing.
+    apns_key_path: str | None = None
+    apns_key_base64: str | None = None
+    apns_key_id: str | None = None
+    apns_team_id: str | None = None
+    # Normally derived from the registered bundle_id + ".voip"; override only if
+    # your topic differs from the app's bundle id.
+    apns_topic: str | None = None
+    apns_use_sandbox: bool = True
+
     # --- Deployment / ops ---
     public_base_url: str | None = None  # for webhook registration at deploy time
     log_level: str = "INFO"

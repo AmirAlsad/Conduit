@@ -24,3 +24,7 @@ clients/web/.env.local
 
 # OS
 .DS_Store
+
+# Inbound calls: APNs auth keys + the registry SQLite file
+*.p8
+registry.db*

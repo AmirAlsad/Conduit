@@ -30,6 +30,38 @@ class DisconnectRequest(BaseModel):
     room_key: str = Field(..., description="Room name/key the bot is in (idempotency key).")
 
 
+class VoipRegisterRequest(BaseModel):
+    """POST /inbound/register/{agent_id} — the Conduit app registering its VoIP push
+    token (docs/INBOUND_CALLS.md §1). The path names OUR agent; the body's
+    ``agent_id`` is the app's own UUID for it, echoed back in the push payload."""
+
+    voip_token: str = Field(..., min_length=1)
+    platform: str = "ios"
+    bundle_id: str = Field(..., min_length=1)
+    agent_id: str = Field(..., min_length=1)
+
+
+class RingRequest(BaseModel):
+    """POST /admin/ring/{agent_id} — ring the registered device.
+
+    Default (pairing) mode sends a credential-free push; the app resolves
+    /connect/{agent_id} after the user answers, so a declined ring costs nothing.
+    ``inline`` provisions a room + token NOW and embeds them in the push — the bot
+    is dispatched before the user answers and idles on a decline until the
+    pipeline timeouts reap it."""
+
+    inline: bool = False
+    transport: Transport | None = None
+
+
+class RingResponse(BaseModel):
+    call_id: str
+    agent_id: str  # the app-side UUID the push was addressed to
+    mode: Literal["pairing", "inline"]
+    apns_status: int
+    apns_id: str | None = None
+
+
 class ConnectionPayload(BaseModel):
     """The connection contract returned by /connect and /credentials.
 
