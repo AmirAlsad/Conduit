@@ -14,8 +14,8 @@ backend of ours, no accounts, no per-minute cost.
 | [ARCHITECTURE](./ARCHITECTURE.md) | The three-layer model (CallKit / WebRTC transport / the user's agent), folder structure, the key seams. |
 | [CONVENTIONS](./CONVENTIONS.md) | Code style, naming, AccessibilityID convention, the per-developer build override model, logging standards. |
 | [CORE_SYSTEMS](./CORE_SYSTEMS.md) | Shared infrastructure: the protocol seams + fakes, SwiftData models, AppEnvironment, the call state machine, reconnection/spoken state, the audio-session/CallKit wiring, audio-interruption handling, and the inbound-call path. |
-| [CONNECTION_CONTRACT](./CONNECTION_CONTRACT.md) | How a user's agent backend connects to Conduit — the pairing-endpoint request/response shapes and the direct-room fallback. Hand this to whoever runs the agent. *(published)* |
-| [INBOUND_CALLS](./INBOUND_CALLS.md) | How a user's own server rings the user through Conduit (agent-initiated VoIP-push calls) — token registration + push payload contract. The inbound companion to the connection contract. *(published)* |
+| [CONNECTION_CONTRACT](./CONNECTION_CONTRACT.md) | How a user's agent backend connects to Conduit — the pairing-endpoint request/response shapes, the direct-room fallback, and the call-lifecycle expectations (grace window, the end-call signal). Hand this to whoever runs the agent. *(published)* |
+| [INBOUND_CALLS](./INBOUND_CALLS.md) | How a user's own server rings the user through Conduit (agent-initiated VoIP-push calls) — token registration/unregistration, the push payload, and ring-status receipts. The inbound companion to the connection contract. *(published)* |
 | [AGENT_WORKFLOW](./AGENT_WORKFLOW.md) | Operational playbook for agents driving the app: build nuances, UI verification, flow testing, the reporting contract, and the shell fallback. |
 | [index](./index.md) | Landing page of the published docs site. *(published)* |
 | [connect-your-agent](./connect-your-agent.md) | User-facing orientation: pairing vs. direct, one endpoint per agent, where the example backend fits. *(published)* |
