@@ -27,6 +27,10 @@ final class AppEnvironment {
     let interruptionObserver: AudioInterruptionObserving
     let transportFactory: (TransportKind) -> Transport
     let callSession: CallSessionCoordinator
+    /// Set by the AppDelegate once PushKit is up (`VoIPPushService` is the real
+    /// implementation), so saving an inbound-enabled agent registers immediately
+    /// instead of waiting for the next launch. Weak: the delegate owns the service.
+    weak var inboundRegistrar: InboundRegistering?
 
     init(
         modelContainer: ModelContainer,
@@ -55,6 +59,7 @@ final class AppEnvironment {
             announcer: announcer,
             interruptionObserver: interruptionObserver,
             missedCallNotifier: MissedCallNotifier(),
+            ringStatusReporter: RingStatusReporter(),
             now: { .now },
             sleep: { try await Task.sleep(for: $0) },
             isPushToTalkEnabled: isPushToTalkEnabled

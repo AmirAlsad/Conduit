@@ -20,3 +20,10 @@ os.environ.setdefault("GROQ_API_KEY", "test-groq-key")
 os.environ.setdefault("CARTESIA_API_KEY", "test-cartesia-key")
 os.environ.setdefault("BOT_NAME", "Conduit Bot")
 os.environ.setdefault("HUMAN_ABSENT_GRACE_SECS", "60")
+# Force APNs UNCONFIGURED (overriding any developer .env with a real key), so the
+# real ApnsSender 503s instead of sending live pushes to Apple from the test suite.
+os.environ["APNS_KEY_PATH"] = ""
+os.environ["APNS_KEY_BASE64"] = ""
+os.environ["APNS_KEY_ID"] = ""
+os.environ["APNS_TEAM_ID"] = ""
+os.environ["APNS_TOPIC"] = ""

@@ -44,6 +44,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     private let announcer: SpokenStateAnnouncing
     private let interruptionObserver: AudioInterruptionObserving
     private let missedCallNotifier: MissedCallNotifying
+    private let ringStatusReporter: RingStatusReporting
     private let policy: ReconnectionPolicy
     private let now: () -> Date
     private let sleep: (Duration) async throws -> Void
@@ -57,6 +58,8 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     private var callDirection: CallDirection = .outgoing
     /// Inline room credentials from an incoming push, consumed when the user answers.
     private var pendingInlineCreds: PairingCredentials?
+    /// Where to report this ring's terminal status, when the push asked for receipts.
+    private var ringStatusURL: URL?
     private var callStartedAt: Date?
     private var firstConnectedAt: Date?
     private var reconnectAttempt = 0
@@ -73,6 +76,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         announcer: SpokenStateAnnouncing,
         interruptionObserver: AudioInterruptionObserving,
         missedCallNotifier: MissedCallNotifying,
+        ringStatusReporter: RingStatusReporting,
         policy: ReconnectionPolicy = .default,
         now: @escaping () -> Date,
         sleep: @escaping (Duration) async throws -> Void,
@@ -85,6 +89,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         self.announcer = announcer
         self.interruptionObserver = interruptionObserver
         self.missedCallNotifier = missedCallNotifier
+        self.ringStatusReporter = ringStatusReporter
         self.policy = policy
         self.now = now
         self.sleep = sleep
@@ -155,6 +160,9 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
                 try? repository.save()
                 missedCallNotifier.notifyMissedCall(agentName: busyAgent.name)
             }
+            if let url = payload.statusURL {
+                reportRingStatus(.busy, callID: payload.callID, endpoint: url, agent: busyAgent)
+            }
             return
         }
 
@@ -164,6 +172,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         callDirection = .incoming
         callStartedAt = now()
         pendingInlineCreds = payload.inlineCredentials
+        ringStatusURL = payload.statusURL
         state = .incomingRinging
         interruptionObserver.startObserving()
 
@@ -183,6 +192,9 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
             interruptionObserver.stopObserving()
             writeLog(outcome: .noAnswer)
             if let agent { missedCallNotifier.notifyMissedCall(agentName: agent.name) }
+            if let url = ringStatusURL {
+                reportRingStatus(.suppressedByFocus, callID: payload.callID, endpoint: url, agent: agent)
+            }
             resetState()
             return
         } catch {
@@ -202,10 +214,25 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     func answer() async {
         guard case .incomingRinging = state, let agent = activeAgent else { return }
         state = .connecting
+        // Answering is the ring's terminal status — the receipt fires here whether
+        // or not the transport subsequently connects.
+        if let url = ringStatusURL, let id = activeCallID {
+            reportRingStatus(.answered, callID: id, endpoint: url, agent: agent)
+            ringStatusURL = nil
+        }
         announcer.startRepeating(.connecting)
         let creds = pendingInlineCreds
         pendingInlineCreds = nil
         await connectTransport(for: agent, inlineCreds: creds)
+    }
+
+    /// Fire-and-forget receipt to the server that rang us, authenticated like token
+    /// registration: bearer = the agent's API key (omitted when none is stored).
+    private func reportRingStatus(_ status: RingStatus, callID: UUID, endpoint: URL, agent: Agent?) {
+        let apiKey = agent.flatMap {
+            try? keychain.token(for: KeychainTokenRef(account: $0.keychainTokenRef))
+        } ?? nil
+        ringStatusReporter.report(status, callID: callID, endpoint: endpoint, apiKey: apiKey ?? "")
     }
 
     /// Build the transport config (inline push credentials win; otherwise the agent's
@@ -614,6 +641,10 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         // one was canceled.
         let outcome: CallOutcome = connected ? .completed
             : (callDirection == .incoming ? .declined : .canceled)
+        if outcome == .declined, let url = ringStatusURL, let id = activeCallID {
+            reportRingStatus(.declined, callID: id, endpoint: url, agent: activeAgent)
+            ringStatusURL = nil
+        }
         state = .ended(outcome)
         announcer.stopRepeating()
         writeLog(outcome: outcome)
@@ -642,6 +673,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         activeCallID = nil
         callDirection = .outgoing
         pendingInlineCreds = nil
+        ringStatusURL = nil
         currentConfig = nil
         callStartedAt = nil
         firstConnectedAt = nil

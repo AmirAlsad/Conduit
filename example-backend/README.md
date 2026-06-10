@@ -185,6 +185,7 @@ to join and hear the agent. `uv run pytest` runs the suite.
 | POST | `/webhooks/daily` | signature | Daily participant.joined → idempotent dispatch |
 | POST | `/webhooks/livekit` | signature | LiveKit participant_joined → idempotent dispatch |
 | POST | `/inbound/register/{agent_id}` | bearer | The app registers its VoIP push token (inbound calls) |
+| POST | `/inbound/status/{agent_id}` | bearer | The app reports how a ring ended (answered / declined / busy / suppressed_by_focus) |
 | POST | `/admin/ring/{agent_id}` | bearer | Ring the registered device — agent-initiated inbound call |
 | POST | `/admin/disconnect` | bearer | Force-end an agent in a room (drop test) |
 | GET  | `/health` | none | Liveness / keep-warm |

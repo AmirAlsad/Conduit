@@ -16,6 +16,10 @@ struct IncomingCallPayload: Equatable, Sendable {
     let callID: UUID
     let roomURL: URL?
     let token: String?
+    /// Where to POST the ring's terminal status (answered/declined/busy/
+    /// suppressed_by_focus), when the server asked for receipts. Optional —
+    /// servers that don't care simply omit it.
+    let statusURL: URL?
 
     /// Inline credentials, if the push carried both a room and a token.
     var inlineCredentials: PairingCredentials? {
@@ -37,5 +41,6 @@ extension IncomingCallPayload {
         self.callID = (dictionary["call_id"] as? String).flatMap(UUID.init(uuidString:)) ?? UUID()
         self.roomURL = (dictionary["room_url"] as? String).flatMap { URL(string: $0) }
         self.token = dictionary["token"] as? String
+        self.statusURL = (dictionary["status_url"] as? String).flatMap { URL(string: $0) }
     }
 }

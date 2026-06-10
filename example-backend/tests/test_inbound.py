@@ -77,6 +77,7 @@ def test_ring_pairing_mode_sends_credential_free_push():
         assert (token, bundle_id) == ("ab12cd34", "com.example.Conduit")
         assert payload["agent_id"] == APP_UUID
         uuid.UUID(payload["call_id"])  # parseable
+        assert payload["status_url"].endswith("/inbound/status/loopback")
         assert "room_url" not in payload and "token" not in payload
         # Nothing provisioned or billed until the user answers and the app pairs.
         assert app.state.dispatcher.calls == []
@@ -141,3 +142,20 @@ def test_ring_without_apns_config_503s():
         r = c.post("/admin/ring/loopback", headers=AUTH)
         assert r.status_code == 503, r.text
         assert "apns" in r.json()["detail"].lower()
+
+
+def test_ring_status_receipt_accepted():
+    with TestClient(app) as c:
+        body = {"call_id": str(uuid.uuid4()), "status": "suppressed_by_focus"}
+        r = c.post("/inbound/status/loopback", json=body, headers=AUTH)
+        assert r.status_code == 200, r.text
+        assert r.json() == {"ok": True}
+
+
+def test_ring_status_rejects_unknown_agent_and_bad_status():
+    with TestClient(app) as c:
+        body = {"call_id": str(uuid.uuid4()), "status": "answered"}
+        assert c.post("/inbound/status/nonexistent", json=body, headers=AUTH).status_code == 404
+        bad = {"call_id": str(uuid.uuid4()), "status": "exploded"}
+        assert c.post("/inbound/status/loopback", json=bad, headers=AUTH).status_code == 422
+        assert c.post("/inbound/status/loopback", json=body).status_code in (401, 403)

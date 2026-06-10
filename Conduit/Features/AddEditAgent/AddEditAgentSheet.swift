@@ -23,7 +23,8 @@ struct AddEditAgentSheet: View {
                 repository: environment.agentRepository,
                 keychain: environment.keychain,
                 contactSync: environment.contactSync,
-                transportFactory: environment.transportFactory
+                transportFactory: environment.transportFactory,
+                inboundRegistrar: environment.inboundRegistrar
             )
         )
         // Reveal direct credentials only when the agent already uses them.

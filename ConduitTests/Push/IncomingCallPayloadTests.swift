@@ -37,6 +37,19 @@ struct IncomingCallPayloadTests {
         #expect(creds.token == "room-token")
     }
 
+    @Test func parsesStatusURL() throws {
+        let payload = try #require(IncomingCallPayload(dictionary: [
+            "agent_id": UUID().uuidString,
+            "status_url": "https://engine.example.com/inbound/status/live",
+        ]))
+        #expect(payload.statusURL == URL(string: "https://engine.example.com/inbound/status/live"))
+    }
+
+    @Test func statusURLAbsentIsNil() throws {
+        let payload = try #require(IncomingCallPayload(dictionary: ["agent_id": UUID().uuidString]))
+        #expect(payload.statusURL == nil)
+    }
+
     @Test func mintsCallIDWhenAbsent() throws {
         let payload = try #require(IncomingCallPayload(dictionary: ["agent_id": UUID().uuidString]))
         #expect(payload.inlineCredentials == nil) // call id minted; no inline creds

@@ -75,10 +75,11 @@ apns-push-type: voip
 authorization: bearer <APNs JWT signed with your .p8>
 
 {
-  "agent_id": "<the agent's UUID>",   // required — which agent is calling
-  "call_id":  "<a UUID you mint>",     // used as the CallKit call id
-  "room_url": "<optional>",            // inline credentials (see hybrid below)
-  "token":    "<optional>"
+  "agent_id": "<the agent's UUID>",     // required — which agent is calling
+  "call_id":  "<a UUID you mint>",       // used as the CallKit call id
+  "room_url": "<optional>",              // inline credentials (see hybrid below)
+  "token":    "<optional>",
+  "status_url": "<optional>"             // ring-status receipts (see §4)
 }
 ```
 
@@ -109,6 +110,38 @@ agent's transport — same shapes as the pairing response.
    **incoming** call.
 4. **Unknown `agent_id`** (not configured in the app) → Conduit still reports the call
    to satisfy PushKit, then ends it gracefully.
+
+---
+
+## 4. Ring-status receipts (optional)
+
+If you really needed to reach the user, "did the phone actually ring?" matters. Put a
+`status_url` in the push payload and Conduit POSTs the ring's terminal status back to
+it — fire-and-forget, authenticated like token registration (bearer = the agent's API
+key, omitted if blank):
+
+```
+POST <status_url>
+Content-Type: application/json
+Authorization: Bearer <API key>
+
+{ "call_id": "<the push's call_id>", "status": "<see below>" }
+```
+
+| `status` | Meaning |
+|---|---|
+| `answered` | The user answered (sent at answer, before the transport connects) |
+| `declined` | The user declined the ring |
+| `busy` | The push arrived during another Conduit call (logged as missed) |
+| `suppressed_by_focus` | Focus/DND filtered the ring — the phone never rang |
+
+One receipt per ring, describing the *ring*: a normal hang-up after an answered call
+sends nothing further. Omit `status_url` and the app sends nothing. Return any 2xx;
+the app never retries.
+
+**Privacy note.** Receipts reveal the user's busy/Focus state to the server that rang
+them. That server is the user's own (they opted into inbound for it), but if you're
+adapting this contract, don't forward receipts anywhere else.
 
 ---
 

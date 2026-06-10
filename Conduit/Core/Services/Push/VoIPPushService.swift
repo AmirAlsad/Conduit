@@ -44,7 +44,7 @@ final class VoIPPushService: NSObject, PKPushRegistryDelegate {
         for type: PKPushType
     ) {
         guard type == .voIP else { return }
-        let token = pushCredentials.token.map { String(format: "%02x", $0) }.joined()
+        let token = Self.hexString(pushCredentials.token)
         MainActor.assumeIsolated {
             _ = Task { await self.registerTokenWithAgents(token) }
         }
@@ -82,16 +82,33 @@ final class VoIPPushService: NSObject, PKPushRegistryDelegate {
         let agents = ((try? environment.agentRepository.fetchAll()) ?? [])
             .filter { $0.inboundRegistrationURL != nil }
         for agent in agents {
-            guard let endpoint = agent.inboundRegistrationURL else { continue }
-            let apiKey = (try? environment.keychain.token(
-                for: KeychainTokenRef(account: agent.keychainTokenRef)
-            )) ?? nil
-            await PushTokenRegistrar.register(
-                token: token,
-                agentID: agent.id,
-                endpoint: endpoint,
-                apiKey: apiKey ?? ""
-            )
+            await register(token: token, agent: agent)
         }
+    }
+
+    private func register(token: String, agent: Agent) async {
+        guard let endpoint = agent.inboundRegistrationURL else { return }
+        let apiKey = (try? environment.keychain.token(
+            for: KeychainTokenRef(account: agent.keychainTokenRef)
+        )) ?? nil
+        await PushTokenRegistrar.register(
+            token: token,
+            agentID: agent.id,
+            endpoint: endpoint,
+            apiKey: apiKey ?? ""
+        )
+    }
+
+    private nonisolated static func hexString(_ data: Data) -> String {
+        data.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+// MARK: - InboundRegistering (registration on toggle-save, not just app launch)
+
+extension VoIPPushService: InboundRegistering {
+    func registerInbound(for agent: Agent) async {
+        guard let tokenData = registry?.pushToken(for: .voIP), !tokenData.isEmpty else { return }
+        await register(token: Self.hexString(tokenData), agent: agent)
     }
 }

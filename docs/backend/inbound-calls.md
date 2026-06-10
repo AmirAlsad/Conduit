@@ -8,8 +8,8 @@ reference engine; the app↔server contract it implements is
 How it fits together:
 
 1. The user enables **"Let this agent call me"** in the app → the app registers its
-   VoIP push token at `POST /inbound/register/{agent_id}` (automatically re-sent on
-   every app launch).
+   VoIP push token at `POST /inbound/register/{agent_id}` (sent on save and
+   automatically re-sent on every app launch).
 2. You trigger `POST /admin/ring/{agent_id}` (or `scripts/ring.py`) → the engine
    sends a **VoIP push** to Apple → the phone rings.
 3. The user answers → the app resolves your pairing endpoint
@@ -121,6 +121,29 @@ Two modes:
         mismatch (e.g. a Daily room pushed to an agent the app dials over LiveKit)
         fails at answer time. Pairing mode can't mismatch: the app negotiates the
         transport in its `/connect` call.
+
+## Ring-status receipts
+
+Every ring's push carries a `status_url` pointing back at the engine, and the app
+reports how the ring ended — so you can tell from the engine logs whether the user
+**answered**, **declined**, was **busy** in another call, or never saw the ring
+because **Focus/DND suppressed it**:
+
+```
+inbound.ring_status agent=live call_id=… status=suppressed_by_focus
+```
+
+That last one is the valuable signal: APNs said `200`, the engine did everything
+right, and the phone still didn't ring. If your agent escalates (retry later, fall
+back to a text channel), this receipt is the hook. The receipt is fire-and-forget
+from the app and the engine just logs it — extend the `/inbound/status` route if
+your agent should react.
+
+The engine derives `status_url` from the ring request's own URL, which behind a
+TLS-terminating proxy (any hosted platform) requires uvicorn's
+`--proxy-headers --forwarded-allow-ips="*"` — already part of this repo's start
+commands. A status receipt also reveals the user's busy/Focus state — fine here
+(it's the user's own server), but don't forward receipts elsewhere.
 
 ## Troubleshooting
 

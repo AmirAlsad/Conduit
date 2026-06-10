@@ -29,14 +29,16 @@ struct AddEditAgentViewModelTests {
         repository: SwiftDataAgentRepository,
         keychain: KeychainStoring = InMemoryKeychain(),
         contactSync: ContactSyncing = FakeContactSync(),
-        transportFactory: @escaping (TransportKind) -> Transport = { _ in FakeTransport() }
+        transportFactory: @escaping (TransportKind) -> Transport = { _ in FakeTransport() },
+        inboundRegistrar: InboundRegistering? = nil
     ) -> AddEditAgentViewModel {
         AddEditAgentViewModel(
             editing: agent,
             repository: repository,
             keychain: keychain,
             contactSync: contactSync,
-            transportFactory: transportFactory
+            transportFactory: transportFactory,
+            inboundRegistrar: inboundRegistrar
         )
     }
 
@@ -143,6 +145,37 @@ struct AddEditAgentViewModelTests {
         #expect(agent.syntheticEmail == originalEmail)
         #expect(agent.keychainTokenRef == originalRef)
         #expect(try repo.fetchAll().count == 1)
+    }
+
+    // MARK: - Inbound registration on save
+
+    @Test func savingWithInboundEnabledRegistersImmediately() async throws {
+        let repo = try makeRepository()
+        let registrar = FakeInboundRegistrar()
+        let vm = makeViewModel(repository: repo, inboundRegistrar: registrar)
+        vm.name = "Jarvis"
+        vm.pairingEndpointText = "https://engine.example.com/connect"
+        vm.inboundEnabled = true
+        vm.inboundRegistrationURLText = "https://engine.example.com/inbound/register/live"
+
+        try await vm.save()
+
+        let agent = try #require(try repo.fetchAll().first)
+        await waitUntil { !registrar.registeredAgentIDs.isEmpty }
+        #expect(registrar.registeredAgentIDs == [agent.id])
+    }
+
+    @Test func savingWithInboundDisabledDoesNotRegister() async throws {
+        let repo = try makeRepository()
+        let registrar = FakeInboundRegistrar()
+        let vm = makeViewModel(repository: repo, inboundRegistrar: registrar)
+        vm.name = "Jarvis"
+        vm.pairingEndpointText = "https://engine.example.com/connect"
+
+        try await vm.save()
+
+        await waitUntil(ticks: 50) { !registrar.registeredAgentIDs.isEmpty }
+        #expect(registrar.registeredAgentIDs.isEmpty)
     }
 
     // MARK: - Contact sync on save

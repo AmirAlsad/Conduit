@@ -19,10 +19,15 @@ struct CallInboundTests {
         for h: CoordinatorHarness,
         callID: UUID = UUID(),
         roomURL: URL? = nil,
-        token: String? = nil
+        token: String? = nil,
+        statusURL: URL? = nil
     ) -> IncomingCallPayload {
-        IncomingCallPayload(agentID: h.agent.id, callID: callID, roomURL: roomURL, token: token)
+        IncomingCallPayload(
+            agentID: h.agent.id, callID: callID, roomURL: roomURL, token: token, statusURL: statusURL
+        )
     }
+
+    private let statusEndpoint = URL(string: "https://engine.example.com/inbound/status/live")!
 
     @Test func receiveCallRingsAndResolvesAgent() async throws {
         let h = try CoordinatorHarness()
@@ -98,7 +103,9 @@ struct CallInboundTests {
 
     @Test func unknownAgentReportsThenFails() async throws {
         let h = try CoordinatorHarness()
-        let unknown = IncomingCallPayload(agentID: UUID(), callID: UUID(), roomURL: nil, token: nil)
+        let unknown = IncomingCallPayload(
+            agentID: UUID(), callID: UUID(), roomURL: nil, token: nil, statusURL: nil
+        )
         await h.coordinator.receiveCall(unknown)
 
         #expect(h.provider.reportedIncoming.count == 1) // reported before failing
@@ -147,5 +154,70 @@ struct CallInboundTests {
         h.provider.reportIncomingError = nil
         await h.coordinator.receiveCall(payload(for: h))
         #expect(h.coordinator.state == .incomingRinging)
+    }
+
+    // MARK: - Ring-status receipts (push carried a status_url)
+
+    @Test func answerReportsAnsweredReceiptWithBearer() async throws {
+        let h = try CoordinatorHarness()
+        try h.keychain.setToken("agent-api-key", for: KeychainTokenRef(account: h.agent.keychainTokenRef))
+        let callID = UUID()
+        await h.coordinator.receiveCall(payload(for: h, callID: callID, statusURL: statusEndpoint))
+        await h.coordinator.answer()
+
+        #expect(h.ringStatusReporter.reports == [
+            .init(status: .answered, callID: callID, endpoint: statusEndpoint, apiKey: "agent-api-key")
+        ])
+    }
+
+    @Test func declineReportsDeclinedReceipt() async throws {
+        let h = try CoordinatorHarness()
+        let callID = UUID()
+        await h.coordinator.receiveCall(payload(for: h, callID: callID, statusURL: statusEndpoint))
+        h.coordinator.providerPerformEndCall(callID)
+
+        #expect(h.ringStatusReporter.reports.map(\.status) == [.declined])
+        #expect(h.ringStatusReporter.reports.first?.callID == callID)
+    }
+
+    @Test func busyPushReportsBusyReceipt() async throws {
+        let h = try CoordinatorHarness()
+        await h.coordinator.placeCall(h.agent)
+        let busyCallID = UUID()
+        await h.coordinator.receiveCall(payload(for: h, callID: busyCallID, statusURL: statusEndpoint))
+
+        #expect(h.ringStatusReporter.reports.map(\.status) == [.busy])
+        #expect(h.ringStatusReporter.reports.first?.callID == busyCallID)
+    }
+
+    @Test func focusFilteredRingReportsSuppressedReceipt() async throws {
+        let h = try CoordinatorHarness()
+        h.provider.reportIncomingError = IncomingCallReportError.filteredByFocus
+        let callID = UUID()
+        await h.coordinator.receiveCall(payload(for: h, callID: callID, statusURL: statusEndpoint))
+
+        #expect(h.ringStatusReporter.reports.map(\.status) == [.suppressedByFocus])
+        #expect(h.ringStatusReporter.reports.first?.callID == callID)
+    }
+
+    @Test func completedCallReportsOnlyTheAnswerReceipt() async throws {
+        // The receipt describes the RING's outcome; a normal hang-up after a
+        // connected call must not produce a second (declined) report.
+        let h = try CoordinatorHarness()
+        await h.coordinator.receiveCall(payload(for: h, statusURL: statusEndpoint))
+        await h.coordinator.answer()
+        h.coordinator.handle(.connected)
+        await h.coordinator.endCall()
+
+        #expect(h.ringStatusReporter.reports.map(\.status) == [.answered])
+    }
+
+    @Test func noStatusURLReportsNothing() async throws {
+        let h = try CoordinatorHarness()
+        let callID = UUID()
+        await h.coordinator.receiveCall(payload(for: h, callID: callID))
+        h.coordinator.providerPerformEndCall(callID)
+
+        #expect(h.ringStatusReporter.reports.isEmpty)
     }
 }

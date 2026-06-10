@@ -29,6 +29,7 @@ final class CoordinatorHarness {
     let announcer = FakeSpokenStateAnnouncer()
     let interruption = FakeAudioInterruptionObserver()
     let missedNotifier = FakeMissedCallNotifier()
+    let ringStatusReporter = FakeRingStatusReporter()
     let transport = FakeTransport()
     let container: ModelContainer
     let repository: SwiftDataAgentRepository
@@ -75,6 +76,7 @@ final class CoordinatorHarness {
             announcer: announcer,
             interruptionObserver: interruption,
             missedCallNotifier: missedNotifier,
+            ringStatusReporter: ringStatusReporter,
             policy: policy,
             now: now,
             sleep: { _ in },

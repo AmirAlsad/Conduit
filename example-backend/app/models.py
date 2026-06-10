@@ -62,6 +62,15 @@ class RingResponse(BaseModel):
     apns_id: str | None = None
 
 
+class RingStatusRequest(BaseModel):
+    """POST /inbound/status/{agent_id} — the app reporting how a ring ended
+    (docs/INBOUND_CALLS.md, ring-status receipts). Fire-and-forget on the app
+    side; the engine just logs it."""
+
+    call_id: str = Field(..., min_length=1)
+    status: Literal["answered", "declined", "busy", "suppressed_by_focus"]
+
+
 class ConnectionPayload(BaseModel):
     """The connection contract returned by /connect and /credentials.
 

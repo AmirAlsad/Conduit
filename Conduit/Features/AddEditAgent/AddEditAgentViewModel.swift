@@ -43,19 +43,22 @@ final class AddEditAgentViewModel {
     private let keychain: KeychainStoring
     private let contactSync: ContactSyncing
     private let transportFactory: (TransportKind) -> Transport
+    private let inboundRegistrar: InboundRegistering?
 
     init(
         editing agent: Agent? = nil,
         repository: AgentRepository,
         keychain: KeychainStoring,
         contactSync: ContactSyncing,
-        transportFactory: @escaping (TransportKind) -> Transport
+        transportFactory: @escaping (TransportKind) -> Transport,
+        inboundRegistrar: InboundRegistering? = nil
     ) {
         self.editingAgent = agent
         self.repository = repository
         self.keychain = keychain
         self.contactSync = contactSync
         self.transportFactory = transportFactory
+        self.inboundRegistrar = inboundRegistrar
 
         if let agent {
             self.name = agent.name
@@ -153,6 +156,13 @@ final class AddEditAgentViewModel {
         try persistSecret(directToken, to: KeychainTokenRef(directTokenForAgentID: agent.id))
 
         try repository.save()
+
+        // Register the VoIP token now (not just on the next launch) so inbound works
+        // the moment the toggle is saved. Fire-and-forget: a slow endpoint must not
+        // hold the sheet open, and the launch-time pass self-heals any failure.
+        if agent.inboundRegistrationURL != nil, let inboundRegistrar {
+            Task { await inboundRegistrar.registerInbound(for: agent) }
+        }
 
         // Keep an already-linked contact in step with the agent (name + photo).
         // No-op for unlinked agents, so the default stays permission-free.

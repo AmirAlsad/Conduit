@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         let service = VoIPPushService(environment: .shared)
         service.start()
         pushService = service
+        AppEnvironment.shared.inboundRegistrar = service
         return true
     }
 }

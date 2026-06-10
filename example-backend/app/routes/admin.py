@@ -49,7 +49,14 @@ async def ring(
             "\"Let this agent call me\" in the Conduit app first.",
         )
 
-    payload: dict = {"agent_id": reg.app_agent_id, "call_id": str(uuid.uuid4())}
+    payload: dict = {
+        "agent_id": reg.app_agent_id,
+        "call_id": str(uuid.uuid4()),
+        # Receipt channel: the app POSTs the ring's terminal status back here
+        # (answered / declined / busy / suppressed_by_focus). Correct absolute
+        # URLs behind a TLS-terminating proxy need uvicorn's --proxy-headers.
+        "status_url": str(request.url_for("ring_status", agent_id=agent_id)),
+    }
     mode = "pairing"
     if req.inline:
         # Provision NOW and ride the creds in the push: the bot is dispatched
