@@ -27,6 +27,29 @@ Conduit joins the room; your agent is already there.
   [connection contract](CONNECTION_CONTRACT.md). It also includes a minimal
   FastAPI pairing endpoint you can adapt — it's ~15 lines.
 
+## Or scan a QR
+
+Anything your server knows, a link can pre-fill. Conduit registers the
+`conduit://` URL scheme:
+
+```
+conduit://add-agent?v=1&name=Live&transport=livekit
+    &pair=<url-encoded pairing endpoint>[&key=…][&inbound=<url-encoded registration endpoint>]
+```
+
+Render that as a QR code and scanning it with the iPhone Camera opens a
+pre-filled Add Agent sheet — the user just taps Save. Re-scanning a link whose
+pairing endpoint matches an existing agent opens **Edit** instead of creating a
+duplicate (handy after a key rotation), and a link without `key` never clears a
+stored key. The example backend ships this as
+[`scripts/pair.py`](backend/quickstart.md#4-point-the-conduit-app-at-it),
+QR included.
+
+!!! warning "A link with `key` is a secret"
+    Treat a key-bearing link or QR exactly like the API key itself — share it
+    over channels you'd trust with the key, or omit `key` and enter it in the
+    app.
+
 ## Direct room (advanced)
 
 No endpoint: mint a long-lived room + token yourself and paste them into

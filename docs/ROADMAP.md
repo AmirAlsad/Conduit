@@ -14,7 +14,9 @@ Built through **M6** plus post-M6 follow-ons: the call state machine, **Daily** 
 **LiveKit** transports, the CallKit + audio-session seam, Keychain, permission-free
 Add-to-Contacts, reconnection + spoken state, Recents swipe-to-delete, the
 audio-interruption seam, and the **full inbound (agent-initiated) call plumbing**.
-Both call directions exist in code. See [ARCHITECTURE](./ARCHITECTURE.md) and
+Both call directions exist in code — and **M8's on-ramp is built** (QR/deep-link
+pairing, staged connection diagnostics, persisted failure reasons, decluttered
+in-app copy). See [ARCHITECTURE](./ARCHITECTURE.md) and
 [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 **The one fact that shapes this roadmap:** a large share of what's "built" is verified
@@ -93,22 +95,30 @@ work for the **developers** in the core purpose: today the friction isn't the ap
 standing up a backend to pair through.
 
 **Scope:**
-- **A runnable reference backend** (in-repo `examples/` or a sibling repo) — a minimal
-  Pipecat agent + a pairing/token endpoint + an inbound-push sender, implementing
+- **A runnable reference backend** ✅ — `example-backend/`: Pipecat agents + the
+  pairing/credentials endpoints + the inbound-push stack, implementing
   [CONNECTION_CONTRACT](./CONNECTION_CONTRACT.md) and [INBOUND_CALLS](./INBOUND_CALLS.md).
-  Turns the contract docs into code a developer can run. **Not "our backend"** — sample
-  code they own and host. (Also the tool M7 needs to verify inbound.)
-- **QR / deep-link pairing** — scan a code your server prints, or open a `conduit://…`
-  link, to pre-fill agent name + transport + pairing endpoint + key. Removes the most
-  error-prone manual typing. *(Named fast-follow.)*
-- **Connection diagnostics** — a real "Test connection" that reports each step (resolve
-  pairing → got room/token → transport negotiated → bot-ready) and maps the coordinator's
-  failure distinctions (`badToken` / `transportError` / `lostConnection`) to actionable
-  messages, surfaced in Add/Edit Agent.
-- **Better failure copy** in-call and in Recents — *why* a call failed, in human terms.
+  **Not "our backend"** — sample code they own and host.
+- **QR / deep-link pairing** ✅ — `conduit://add-agent` links (versioned, validated
+  `DeepLinkParser`) pre-fill the whole Add Agent form; a link matching an existing
+  agent's pairing endpoint opens **Edit** (re-scan after key rotation, no duplicates),
+  and a key-less link never wipes a stored key. `scripts/pair.py` prints the link + a
+  terminal QR (key embedded by default, `--no-key` opt-out — the link is then a secret;
+  documented). Verified in the sim via `simctl openurl`; Camera-scan is the device pass.
+- **Connection diagnostics** ✅ — "Test connection" is a staged checklist (pairing
+  endpoint reached → credentials minted → transport connected → agent ready) with a
+  granular message on the failing step (401 vs HTTP n vs malformed response vs
+  room-token rejection vs bot-never-ready).
+- **Better failure copy** ✅ — the failure reason persists into the call log
+  (`CallLogEntry.failureReasonRaw`, lightweight migration): Recents/Agent Detail read
+  "Failed — authentication", and the failed-call screen adds an actionable hint.
+- Alongside: the app's forms **decluttered** to one-line footers + "Learn more" links;
+  the long-form explanations moved to the published `using-conduit.md`.
 
-**Verification:** pairing/QR parsing + diagnostics logic unit-test in the sim; the
-example backend is runnable + documented; live connect is device-only.
+**Verification:** parser/diagnostics/VM logic unit-tested in the sim (136 tests);
+deep-link flow verified live in the sim. Device pass outstanding: Camera-scan QR →
+prefilled sheet, staged diagnostics against the deployed engine, and a migration
+sanity check over existing on-device history.
 
 **Why now:** with M7 proving the pipe works, getting agents *connected* becomes the
 bottleneck. This is what makes Conduit adoptable.

@@ -126,6 +126,11 @@ Two ways the app gets here:
   (pasted into the app once). At call time the app joins directly and an SFU
   **webhook** dispatches your agent. See **[docs/direct-mode.md](./docs/direct-mode.md)**.
 
+Fastest app setup: `uv run python scripts/pair.py --agent live` prints a
+`conduit://` pairing link + QR — scan it with the iPhone Camera and the app's
+Add Agent sheet arrives pre-filled (the link embeds `ENGINE_API_KEY` unless
+`--no-key`; treat it like the key).
+
 A token's expiry gates only the **initial** connect, never reconnects — a
 long-lived direct token won't sabotage reconnection-with-backoff.
 

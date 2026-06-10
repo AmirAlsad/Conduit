@@ -68,14 +68,30 @@ the caller joins, with the agent already dispatched into the room.
 
 ## 4. Point the Conduit app at it
 
-Deploy the engine to a public HTTPS host ([Deploy](deploy.md)), then in the app:
-**Add Agent → Connection**:
+Deploy the engine to a public HTTPS host ([Deploy](deploy.md)), then the fast
+path is a **QR code**:
+
+```bash
+uv run python scripts/pair.py --agent live --base-url https://your-host
+```
+
+Scan the printed QR with the iPhone Camera app — Conduit opens with the agent
+pre-filled (name, transport, endpoint, key); just tap Save. Add `--inbound` to
+also enable "Let this agent call me".
+
+!!! warning "The link embeds your API key by default"
+    One scan = fully configured, but the link (and the QR) is then as secret as
+    `ENGINE_API_KEY` itself. Pass `--no-key` to leave it out and type the key in
+    the app instead.
+
+Or fill **Add Agent → Connection** by hand:
 
 - **Pairing endpoint** → `https://your-host/connect/live` (or any agent id)
 - **API key** → your `ENGINE_API_KEY`
 - **Transport** → Daily or LiveKit, matching the keys you configured
 
-Tap **Test Connection**, then call.
+Tap **Test Connection** — it walks the stages (pairing endpoint → credentials →
+transport → agent ready) and names the step that fails — then call.
 
 ## Endpoints
 

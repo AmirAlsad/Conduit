@@ -29,6 +29,8 @@ dependencies = [
     # h2 extra; PyJWT signs the ES256 provider token (cryptography is transitive).
     "httpx[http2]>=0.27",
     "pyjwt>=2.9",
+    # Terminal QR codes for scripts/pair.py (pure Python, no transitive deps).
+    "segno>=1.6",
 ]
 
 [dependency-groups]

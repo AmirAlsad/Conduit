@@ -35,6 +35,8 @@ Start with [`README.md`](./README.md) and
 - Register the Daily direct-mode webhook: `uv run python scripts/daily_webhook.py register --base-url <host>`
   (LiveKit's webhook is dashboard-only — see `docs/direct-mode.md`)
 - Ring the device (inbound call; needs the `APNS_*` vars): `uv run python scripts/ring.py --agent <id> [--inline]`
+- Print a conduit:// pairing link + QR for the app: `uv run python scripts/pair.py --agent <id> [--no-key] [--inbound]`
+  (the link embeds `ENGINE_API_KEY` unless `--no-key` — treat it like the key; shape is a contract with the app's `DeepLinkParser`)
 
 Endpoint notes: per-agent routes (`POST /connect/{agent_id}`, `POST
 /credentials/{agent_id}`) are the canonical shape — the app sends no agent_id;
