@@ -107,15 +107,18 @@ struct AgentDetailView: View {
             Button {
                 Task { await environment.callSession.placeCall(agent) }
             } label: {
-                Label("Call", systemImage: "phone.fill")
-                    .font(.title3.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                VStack(spacing: 4) {
+                    Image(systemName: "phone.fill")
+                        .font(.title3)
+                    Text("Call")
+                        .font(.caption.weight(.medium))
+                }
+                .foregroundStyle(.white)
+                .frame(width: 96, height: 60)
+                .background(.green, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .controlSize(.large)
-            .tint(.green)
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
             .accessibilityIdentifier(AccessibilityID.AgentDetail.callButton)
