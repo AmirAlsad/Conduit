@@ -192,7 +192,7 @@ struct AddEditAgentViewModelTests {
             inboundRegistrationURL: nil
         ))
 
-        #expect(vm.name == "Live v2")
+        #expect(vm.name == "Live") // a re-scan refreshes connection details, not the user's name
         #expect(vm.apiKey == "existing-key") // a key-less re-scan never wipes the secret
     }
 

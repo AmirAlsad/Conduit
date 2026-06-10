@@ -122,9 +122,11 @@ final class AddEditAgentViewModel {
 
     /// Layer a conduit:// link's values over the form (a blank add, or an
     /// existing agent being updated by a re-scan). A link without a key keeps
-    /// whatever key is already loaded, so re-pairing never wipes a secret.
+    /// whatever key is already loaded, so re-pairing never wipes a secret —
+    /// and on a re-scan the link refreshes CONNECTION details only: the name
+    /// is the user's customization, not the server's to overwrite.
     func apply(_ link: AgentDeepLink) {
-        name = link.name
+        if editingAgent == nil { name = link.name }
         transportKind = link.transport
         pairingEndpointText = link.pairingEndpoint.absoluteString
         if let key = link.apiKey { apiKey = key }

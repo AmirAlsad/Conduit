@@ -23,4 +23,19 @@ extension UIImage {
         }
         return resized.jpegData(compressionQuality: quality)
     }
+
+    /// Redraw with `.up` orientation at a crop-friendly working size, so the
+    /// cropper's geometry (`AvatarCrop`) can treat `size` as plain pixels
+    /// without EXIF-orientation gymnastics.
+    func normalizedUp(maxDimension: CGFloat = 2048) -> UIImage {
+        let longest = max(size.width, size.height)
+        let scale = longest > maxDimension ? maxDimension / longest : 1
+        let target = CGSize(width: size.width * scale, height: size.height * scale)
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: target))
+        }
+    }
 }

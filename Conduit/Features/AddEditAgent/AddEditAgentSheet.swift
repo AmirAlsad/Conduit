@@ -13,8 +13,14 @@ import SwiftUI
 struct AddEditAgentSheet: View {
     @State private var viewModel: AddEditAgentViewModel
     @State private var photoItem: PhotosPickerItem?
+    @State private var cropRequest: CropRequest?
     @State private var directExpanded: Bool
     @Environment(\.dismiss) private var dismiss
+
+    private struct CropRequest: Identifiable {
+        let id = UUID()
+        let image: UIImage
+    }
 
     init(editing: Agent? = nil, prefill: AgentDeepLink? = nil, environment: AppEnvironment) {
         let viewModel = AddEditAgentViewModel(
@@ -100,13 +106,22 @@ struct AddEditAgentSheet: View {
         .onChange(of: photoItem) { _, item in
             Task { await loadAvatar(item) }
         }
+        .fullScreenCover(item: $cropRequest) { request in
+            AvatarCropView(image: request.image) { cropped in
+                viewModel.avatarData = cropped.conduitAvatarData()
+            }
+        }
     }
 
+    /// Picked photos route through the move-and-scale cropper; only the chosen
+    /// circle's square lands on the agent.
     @MainActor
     private func loadAvatar(_ item: PhotosPickerItem?) async {
         guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
-        let avatar = await Task.detached { UIImage(data: data)?.conduitAvatarData() }.value
-        viewModel.avatarData = avatar ?? data
+        photoItem = nil // allow re-picking the same photo
+        guard let image = await Task.detached(operation: { UIImage(data: data)?.normalizedUp() }).value
+        else { return }
+        cropRequest = CropRequest(image: image)
     }
 
     private var pairingSection: some View {
