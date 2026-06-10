@@ -78,8 +78,11 @@ settings:
       VALIDATE_PRODUCT: true
 
 # Transport SDKs. Daily (WS-2) pulls in daily-client-ios (DailyCore + Google
-# WebRTC) transitively; native LiveKit (M6) pulls in LiveKitWebRTC. Both ship as
-# binary xcframeworks, so the two WebRTC stacks coexist. LiveKit's manual-audio
+# WebRTC) transitively; native LiveKit (M6) pulls in LiveKitWebRTC (LKRTC*-
+# prefixed, collision-safe). SmallWebRTC (M9) pulls in stasel/WebRTC, whose
+# un-prefixed RTC* ObjC classes overlap Daily's statically-linked WebRTC —
+# coexistence is device-probed (see docs/ROADMAP.md M9); watch launch logs for
+# "Class RTCx is implemented in both" after SDK bumps. LiveKit's manual-audio
 # API (AudioManager.setEngineAvailability) lets CallKit own the AVAudioSession.
 packages:
   PipecatClientIOS:
@@ -87,6 +90,9 @@ packages:
     from: "1.2.0"
   PipecatClientIOSDaily:
     url: https://github.com/pipecat-ai/pipecat-client-ios-daily.git
+    from: "1.2.0"
+  PipecatClientIOSSmallWebrtc:
+    url: https://github.com/pipecat-ai/pipecat-client-ios-small-webrtc.git
     from: "1.2.0"
   LiveKit:
     url: https://github.com/livekit/client-sdk-swift.git
@@ -138,6 +144,7 @@ targets:
     dependencies:
       - package: PipecatClientIOS
       - package: PipecatClientIOSDaily
+      - package: PipecatClientIOSSmallWebrtc
       - package: LiveKit
 
   ConduitTests:

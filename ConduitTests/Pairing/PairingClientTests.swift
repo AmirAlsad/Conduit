@@ -52,6 +52,15 @@ struct PairingClientTests {
         #expect(creds.roomURL.absoluteString == "wss://canonical.livekit.cloud")
     }
 
+    @Test func parsesSmallWebRTCOfferShape() throws {
+        // smallwebrtc pairing: room_url is the engine's plain-http LAN offer
+        // endpoint, token a short-lived bearer for it.
+        let json = Data(#"{"connection": {"room_url": "http://192.168.1.50:8000/webrtc/loopback/offer", "token": "eph-1"}}"#.utf8)
+        let creds = try PairingClient.parse(json)
+        #expect(creds.roomURL.absoluteString == "http://192.168.1.50:8000/webrtc/loopback/offer")
+        #expect(creds.token == "eph-1")
+    }
+
     @Test func throwsOnMissingToken() {
         let json = Data(#"{"connection": {"room_url": "https://x.daily.co/abc"}}"#.utf8)
         #expect(throws: PairingError.missingCredentials) {

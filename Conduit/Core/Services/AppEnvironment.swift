@@ -110,6 +110,7 @@ final class AppEnvironment {
             switch kind {
             case .daily: PipecatDailyTransport()
             case .livekit: LiveKitTransport()
+            case .smallwebrtc: PipecatSmallWebRTCTransport()
             }
         }
         #endif

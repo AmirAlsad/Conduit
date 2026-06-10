@@ -45,6 +45,14 @@ struct DeepLinkParserTests {
         #expect(link.apiKey == nil)
     }
 
+    @Test func parsesSmallWebRTCTransport() throws {
+        let link = try DeepLinkParser.parse(url(
+            "conduit://add-agent?v=1&name=Local&transport=smallwebrtc"
+            + "&pair=http%3A%2F%2F192.168.1.50%3A8000%2Fconnect%2Floopback"
+        ))
+        #expect(link.transport == .smallwebrtc)
+    }
+
     @Test func allowsHTTPForLocalDevelopment() throws {
         let link = try DeepLinkParser.parse(url(
             "conduit://add-agent?v=1&name=Dev&pair=http%3A%2F%2Flocalhost%3A8000%2Fconnect%2Floopback"
