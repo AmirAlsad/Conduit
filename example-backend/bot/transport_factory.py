@@ -21,8 +21,10 @@ def build_transport(transport_type: str, creds: dict) -> BaseTransport:
     """Construct a transport from dispatcher-supplied creds.
 
     creds keys:
-      daily   -> {"room_url", "token"}
-      livekit -> {"url", "token", "room_name"}
+      daily       -> {"room_url", "token"}
+      livekit     -> {"url", "token", "room_name"}
+      smallwebrtc -> {"connection"} (a live SmallWebRTCConnection — the offer
+                     route owns signaling, so the "cred" is the peer itself)
     """
     if transport_type == "daily":
         from pipecat.transports.daily.transport import DailyParams, DailyTransport
@@ -42,6 +44,14 @@ def build_transport(transport_type: str, creds: dict) -> BaseTransport:
             token=creds["token"],
             room_name=creds["room_name"],
             params=LiveKitParams(audio_in_enabled=True, audio_out_enabled=True),
+        )
+
+    if transport_type == "smallwebrtc":
+        from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+
+        return SmallWebRTCTransport(
+            webrtc_connection=creds["connection"],
+            params=TransportParams(audio_in_enabled=True, audio_out_enabled=True),
         )
 
     raise ValueError(f"Unknown transport type: {transport_type!r}")

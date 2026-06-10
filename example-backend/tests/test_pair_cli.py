@@ -64,6 +64,21 @@ def test_no_key_omits_the_param():
     assert "inbound" not in params
 
 
+def test_smallwebrtc_lan_link():
+    # The smallwebrtc on-ramp: plain-http LAN base, key in hand, no inbound.
+    link = build_link(
+        base_url="http://192.168.1.50:8000",
+        agent_id="loopback",
+        transport="smallwebrtc",
+        name="Loopback",
+        key="sk-123",
+        inbound=False,
+    )
+    params = _params(link)
+    assert params["transport"] == "smallwebrtc"
+    assert params["pair"] == "http://192.168.1.50:8000/connect/loopback"
+
+
 def test_trailing_slash_base_url_is_normalized():
     link = build_link(
         base_url="https://host.example/",

@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Transport = Literal["daily", "livekit"]
+Transport = Literal["daily", "livekit", "smallwebrtc"]
 
 
 class ConnectRequest(BaseModel):
@@ -75,8 +75,9 @@ class ConnectionPayload(BaseModel):
     """The connection contract returned by /connect and /credentials.
 
     ``connection`` is transport-specific:
-      daily:   {"room_url": "...", "token": "..."}
-      livekit: {"room_url": "wss://...", "url": "wss://...", "token": "...", "room_name": "..."}
+      daily:       {"room_url": "...", "token": "..."}
+      livekit:     {"room_url": "wss://...", "url": "wss://...", "token": "...", "room_name": "..."}
+      smallwebrtc: {"room_url": "http(s)://<engine>/webrtc/<agent>/offer", "token": "<ephemeral>"}
 
     ``room_url`` is the canonical key for both transports (docs/CONNECTION_CONTRACT.md);
     LiveKit also carries ``url`` as a deprecated alias for older consumers.

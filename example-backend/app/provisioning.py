@@ -40,7 +40,9 @@ def _livekit_connection(server_url: str, token: str, room_name: str) -> dict:
 # --- pairing: create per-call creds and dispatch the bot now ---
 
 
-async def provision_pairing(state, agent_id: str, transport: str) -> ConnectionPayload:
+async def provision_pairing(
+    state, agent_id: str, transport: str, *, base_url: str | None = None
+) -> ConnectionPayload:
     if transport == "daily":
         daily = _daily(state)
         room = await daily.create_room(exp_secs=settings.pairing_room_exp_secs)
@@ -89,6 +91,23 @@ async def provision_pairing(state, agent_id: str, transport: str) -> ConnectionP
             expires_at=iso_expiry(settings.pairing_token_ttl_secs),
         )
 
+    if transport == "smallwebrtc":
+        # No room, no dispatch: the client's offer POST is the rendezvous and the
+        # bot spawns in-process when it lands (app/transports/smallwebrtc.py).
+        # The "credential" is the offer URL plus a short-lived bearer for it.
+        base = (settings.public_base_url or base_url or "").rstrip("/")
+        if not base:
+            raise TransportUnavailable(
+                "smallwebrtc needs a reachable base URL (set PUBLIC_BASE_URL)."
+            )
+        token = state.smallwebrtc.mint_token(agent_id, settings.pairing_token_ttl_secs)
+        return ConnectionPayload(
+            transport="smallwebrtc",
+            connection={"room_url": f"{base}/webrtc/{agent_id}/offer", "token": token},
+            agent_id=agent_id,
+            expires_at=iso_expiry(settings.pairing_token_ttl_secs),
+        )
+
     raise TransportUnavailable(f"Unknown transport: {transport!r}")
 
 
@@ -120,6 +139,12 @@ async def provision_direct(state, agent_id: str, transport: str) -> ConnectionPa
             connection=_livekit_connection(lk.url, app_token, room_name),
             agent_id=agent_id,
             expires_at=iso_expiry(settings.direct_token_ttl_secs),
+        )
+
+    if transport == "smallwebrtc":
+        raise TransportUnavailable(
+            "smallwebrtc is pairing-only; for direct use, point the app at the "
+            "offer URL with the engine key as the token."
         )
 
     raise TransportUnavailable(f"Unknown transport: {transport!r}")

@@ -88,14 +88,18 @@ def _wire_presence(transport, transport_type: str, controller: TeardownControlle
                 event(log, "bot.end_call_signal", via="livekit-data")
                 await controller.end_now("client-end-call")
 
-    else:  # webrtc (dev runner): client-level events are the available signal
+    else:  # smallwebrtc / webrtc dev runner: client-level events are the signal
         @transport.event_handler("on_client_connected")
         async def _on_conn(transport, client):  # noqa: ANN001
             controller.human_joined(_client_id(client))
 
+        # End immediately instead of granting the grace window: the iOS client
+        # has no in-place reconnect — its retry sends a NEW offer, which spawns a
+        # new bot, so a grace timer on the dead peer connection only burns money
+        # and races the replacement.
         @transport.event_handler("on_client_disconnected")
         async def _on_disc(transport, client):  # noqa: ANN001
-            controller.human_left(_client_id(client))
+            await controller.end_now("client-left")
 
 
 async def run_bot(
@@ -104,6 +108,7 @@ async def run_bot(
     transport_type: str,
     *,
     handle_sigint: bool = True,
+    handle_sigterm: bool = True,
 ) -> None:
     log = get_logger("bot")
 
@@ -142,9 +147,10 @@ async def run_bot(
     _wire_presence(transport, transport_type, controller, log)
 
     event(log, "bot.starting", agent=agent_id, transport=transport_type)
-    # handle_sigterm so the dispatcher's /admin/disconnect (SIGTERM) tears down
-    # gracefully — the bot leaves the room cleanly instead of being hard-killed.
-    runner = WorkerRunner(handle_sigint=handle_sigint, handle_sigterm=True)
+    # Subprocess bots take handle_sigterm so the dispatcher's /admin/disconnect
+    # (SIGTERM) tears down gracefully. In-process bots (smallwebrtc) must pass
+    # False for both — installing handlers there would clobber uvicorn's own.
+    runner = WorkerRunner(handle_sigint=handle_sigint, handle_sigterm=handle_sigterm)
     await runner.add_workers(worker)
     await runner.run()
     event(log, "bot.finished", agent=agent_id, transport=transport_type)

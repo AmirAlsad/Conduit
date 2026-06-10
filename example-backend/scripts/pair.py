@@ -64,7 +64,9 @@ def main() -> None:
     )
     parser.add_argument("--agent", default="loopback", help="Agent id (default: loopback).")
     parser.add_argument(
-        "--transport", choices=["daily", "livekit"], help="Default: the agent's own default."
+        "--transport",
+        choices=["daily", "livekit", "smallwebrtc"],
+        help="Default: the agent's own default.",
     )
     parser.add_argument("--name", help="Display name in the app (default: the agent id, title-cased).")
     parser.add_argument(

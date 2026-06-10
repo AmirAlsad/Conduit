@@ -19,8 +19,9 @@ from app.config import settings
 from app.dispatch import Dispatcher
 from app.obs import event, get_logger, setup_logging
 from app.registry import SQLiteRegistry
-from app.routes import admin, connect, inbound, webhooks
+from app.routes import admin, connect, inbound, webhooks, webrtc
 from app.transports.daily import DailyService
+from app.transports.smallwebrtc import SmallWebRTCService
 
 
 def _make_livekit():
@@ -56,6 +57,10 @@ async def lifespan(app: FastAPI):
     app.state.dispatcher = Dispatcher(registry)
     app.state.daily = DailyService(session) if settings.daily_api_key else None
     app.state.livekit = _make_livekit()
+    # Always available — the engine itself terminates WebRTC (no cloud account).
+    # Media is UDP, so this only works where the device can reach the engine
+    # directly (LAN / self-hosted), not behind an HTTP-only ingress like Railway.
+    app.state.smallwebrtc = SmallWebRTCService()
     app.state.apns = ApnsSender(apns_client)
 
     event(
@@ -68,6 +73,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await app.state.smallwebrtc.close()
         await session.close()
         await apns_client.aclose()
         registry.close()
@@ -80,6 +86,7 @@ app.include_router(connect.router)
 app.include_router(webhooks.router)
 app.include_router(admin.router)
 app.include_router(inbound.router)
+app.include_router(webrtc.router)
 
 
 @app.get("/health")

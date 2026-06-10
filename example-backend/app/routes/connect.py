@@ -41,7 +41,12 @@ async def _provision(request: Request, req: ConnectRequest, *, direct: bool) -> 
         settings.require(*agent.required_settings)
         if direct:
             return await provision_direct(request.app.state, agent.agent_id, transport)
-        return await provision_pairing(request.app.state, agent.agent_id, transport)
+        # base_url backs smallwebrtc's offer URL when PUBLIC_BASE_URL is unset:
+        # the device reached us at this address, so the offer URL at the same
+        # host is correct by construction (the LAN case).
+        return await provision_pairing(
+            request.app.state, agent.agent_id, transport, base_url=str(request.base_url)
+        )
     except (TransportUnavailable, MissingSettingError) as e:
         raise HTTPException(status_code=503, detail=str(e))
 
