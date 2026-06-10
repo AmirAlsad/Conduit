@@ -174,3 +174,25 @@ engine listens on Daily via `on_client_message` and on LiveKit via the raw
 
 **Why it's missed:** Nothing fails — the call ends normally for the user and the
 grace timer cleans up server-side. Only the engine logs (and the bill) show it.
+
+### Two un-prefixed WebRTC copies in one binary — every Daily call crashed
+First seen: 2026-06-10 (device probe for the SmallWebRTC transport, M9)
+
+**Pattern:** pipecat-client-ios-small-webrtc depends on stasel/WebRTC, whose
+un-prefixed `RTC*` ObjC classes duplicate the WebRTC statically linked inside
+Daily.xcframework (66 classes defined in both, incl. `RTCAudioSession` and the
+track types). The ObjC runtime's named-class table maps each name to ONE image,
+so name-based resolution (Swift KVO's dynamic casts) got the wrong class:
+`swift_dynamicCastFailure` in `DailyTransport.tracks()` on every participant
+update. LiveKit never collides because its build prefixes everything (`LKRTC*`).
+
+**Rule:** Never ship two un-prefixed WebRTC copies. Our fork
+(AmirAlsad/pipecat-client-ios-small-webrtc, branch `livekit-webrtc`, pinned by
+revision in project.yml) rebuilds the package against LiveKitWebRTC via a
+typealias shim. After ANY transport-SDK bump, check the device launch/bundle:
+`Frameworks/` must contain no `WebRTC.framework` (stasel), and a real Daily call
+is the regression test. Upstream: pipecat-client-ios-small-webrtc#6.
+
+**Why it's missed:** Links clean, sim is fine (FakeTransport), and even on
+device the app launches normally — it only dies when Daily's track KVO fires
+mid-call. Static check: intersect `llvm-objdump --objc-meta-data` class lists.

@@ -18,7 +18,7 @@ suite, SwiftUI previews, and the future CallKit-free debug path all reuse them.
 |---|---|---|---|
 | CallKit | `CallProviding` + `CallProviderDelegate` + `AudioSessionActivating` (`CallKit/`) | `FakeCallProvider` / `FakeAudioSession` | `SystemCallProvider` (built, M3) |
 | Audio interruptions | `AudioInterruptionObserving` + `…Delegate` (`CallKit/`) | `FakeAudioInterruptionObserver` | `SystemAudioInterruptionObserver` (built; audio device-only) |
-| Transport | `Transport` (`Transport/`) | `FakeTransport` | `PipecatDailyTransport` (built, M2); `LiveKitTransport` (built, M6) |
+| Transport | `Transport` (`Transport/`) | `FakeTransport` | `PipecatDailyTransport` (built, M2); `LiveKitTransport` (built, M6); `PipecatSmallWebRTCTransport` (built, M9) |
 | Keychain | `KeychainStoring` (`Keychain/`) | `InMemoryKeychain` | `KeychainService` (built, WS-4) |
 | Contacts sync | `ContactSyncing` (`Contacts/`) | `FakeContactSync` | `ContactSyncService` (built) |
 | Persistence | `AgentRepository` (`Persistence/`) | — | `SwiftDataAgentRepository` (built) |
@@ -63,12 +63,26 @@ through `AVAudioSession` directly (`LiveKitAudioRouter`) instead of the SDK. Lik
 Daily, it's **device-only** (WebRTC audio aborts in the sim), so `live()` uses
 `FakeTransport` in the simulator; the only sim-tested logic is `LiveKitConnectGate`.
 
-Both adapters send the engine's **`end-call` signal** in `disconnect()` — a
+`PipecatSmallWebRTCTransport` (`Transport/`, M9) is the zero-cloud third
+transport: peer-to-peer WebRTC straight to the user's own Pipecat server (LAN /
+self-hosted — UDP media, so never behind an HTTP-only host). It mirrors the Daily
+adapter (`PipecatClient` + the package's `SmallWebRTCTransport`); pairing returns
+the engine's **offer URL** + a short-lived bearer as `room_url`/`token`, and the
+SDK POSTs the SDP offer / PATCHes trickle-ICE to that URL with the bearer
+attached. Audio follows the **Daily pattern** (SDK owns the session config; joins
+mic-disabled; attach/detach no-ops). **Load-bearing:** the stock package's
+stasel/WebRTC collides with Daily's embedded WebRTC (un-prefixed `RTC*` classes
+duplicated → Daily calls crash), so `project.yml` pins our fork built against
+`LiveKitWebRTC` — see `bugs.md` and ROADMAP M9 before bumping any transport SDK.
+
+All three adapters send the engine's **`end-call` signal** in `disconnect()` — a
 deliberate hangup ends the bot at once instead of burning its human-absent grace
-window (Daily: `sendClientMessage("end-call")` over the Pipecat channel; LiveKit:
-the RTVI envelope published on the data channel, because Pipecat's LiveKit input
-path doesn't deliver client RTVI messages — see `bugs.md`). Reconnects never call
-`disconnect()`, so a genuine drop still gets the grace window.
+window (Daily and SmallWebRTC: `sendClientMessage("end-call")` over the Pipecat
+channel; LiveKit: the RTVI envelope published on the data channel, because
+Pipecat's LiveKit input path doesn't deliver client RTVI messages — see
+`bugs.md`). Reconnects never call `disconnect()`, so a genuine drop still gets
+the grace window (smallwebrtc's engine side ends immediately on peer drop
+instead — the iOS SDK can't reconnect in place; a retry re-pairs to a fresh bot).
 
 ## AppEnvironment (composition root)
 

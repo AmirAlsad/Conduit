@@ -36,13 +36,14 @@ Fill in only the keys for what you run (`.env.example` annotates every variable)
 
 | You want | You need |
 |---|---|
+| `loopback` over SmallWebRTC (zero cloud, LAN) | `ENGINE_API_KEY` only |
 | `loopback` over Daily pairing | `ENGINE_API_KEY` + `DAILY_API_KEY` |
 | Anything over LiveKit | + `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` |
 | The `live` agent | + `DEEPGRAM_API_KEY`, `GROQ_API_KEY`, `CARTESIA_API_KEY` |
-| Direct mode (either SFU) | a public URL + the SFU webhook ([details](direct-mode.md)) |
+| Direct mode (Daily/LiveKit) | a public URL + the SFU webhook ([details](direct-mode.md)) |
 
-Both transports run the **same pipelines with the same keys** — LiveKit only adds
-the `LIVEKIT_*` trio; the agent's STT/LLM/TTS keys are shared.
+All transports run the **same pipelines with the same keys** — the transport only
+changes how audio travels; the agent's STT/LLM/TTS keys are shared.
 
 ## 2. Talk to an agent locally (no dispatcher)
 
@@ -66,6 +67,23 @@ The URL names the agent; the response is the
 [connection contract](../CONNECTION_CONTRACT.md) shape — a `room_url` + `token`
 the caller joins, with the agent already dispatched into the room.
 
+## 3b. Zero-cloud on your own Wi-Fi (SmallWebRTC)
+
+The fastest zero-to-call path needs **no Daily or LiveKit account** — the engine
+terminates WebRTC itself and your phone talks straight to your machine:
+
+```bash
+uv run uvicorn app.main:app --host 0.0.0.0     # 0.0.0.0 so the phone can reach it
+uv run python scripts/pair.py --agent loopback --transport smallwebrtc \
+    --base-url http://$(ipconfig getifaddr en0):8000
+```
+
+Scan the QR, allow the **local network** prompt iOS shows on first connect, and
+call. Phone and laptop must share a network (the phone's hotspot counts); allow
+incoming connections if macOS's firewall asks. Media is UDP peer-to-peer, so
+this transport is for LAN / self-hosted-with-UDP setups — it won't work behind
+an HTTP-only host like Railway.
+
 ## 4. Point the Conduit app at it
 
 Deploy the engine to a public HTTPS host ([Deploy](deploy.md)), then the fast
@@ -88,7 +106,7 @@ Or fill **Add Agent → Connection** by hand:
 
 - **Pairing endpoint** → `https://your-host/connect/live` (or any agent id)
 - **API key** → your `ENGINE_API_KEY`
-- **Transport** → Daily or LiveKit, matching the keys you configured
+- **Transport** → Daily, LiveKit, or SmallWebRTC, matching the keys you configured
 
 Tap **Test Connection** — it walks the stages (pairing endpoint → credentials →
 transport → agent ready) and names the step that fails — then call.
@@ -101,6 +119,8 @@ transport → agent ready) and names the step that fails — then call.
 | POST | `/connect` | bearer | Same; agent from body or default (`loopback`) |
 | POST | `/credentials/{agent_id}` | bearer | Direct: mint stable creds, dispatch later via webhook |
 | POST | `/credentials` | bearer | Same; agent from body or default (`loopback`) |
+| POST | `/webrtc/{agent_id}/offer` | bearer or offer token | SmallWebRTC: SDP offer in, answer out; spawns the agent in-process |
+| PATCH | `/webrtc/{agent_id}/offer` | bearer or offer token | SmallWebRTC trickle-ICE candidates |
 | POST | `/webhooks/daily`, `/webhooks/livekit` | signature | participant-joined → idempotent dispatch |
 | POST | `/admin/disconnect` | bearer | Force-end an agent in a room |
 | GET | `/health` | none | Liveness / keep-warm |

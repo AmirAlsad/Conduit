@@ -46,9 +46,9 @@ third is the user's.
 │  (2) Transport layer — WebRTC via the Pipecat iOS client     │
 │      Carries real-time audio to/from the agent. Turn          │
 │      detection + interruption handled by the framework.       │
-│      Transports are SWAPPABLE: Daily and LiveKit in this      │
-│      build, SmallWebRTC later. Sits behind a protocol so the  │
-│      logic layer can test against fakes.                       │
+│      Transports are SWAPPABLE: Daily, LiveKit, and            │
+│      SmallWebRTC (self-hosted P2P). Sits behind a protocol    │
+│      so the logic layer can test against fakes.                │
 └───────────────────────────┬─────────────────────────────────┘
                             │  ← WebRTC transport (user's room/token)
 ┌───────────────────────────┴─────────────────────────────────┐
@@ -73,7 +73,8 @@ locked-screen UI and cannot be replicated.
 ### (2) The transport layer — WebRTC (Pipecat iOS client)
 
 Carries the live audio. Transports are interchangeable behind one client: **Daily
-and LiveKit** in this build, **SmallWebRTC** as a later self-host transport.
+and LiveKit** over their clouds, and **SmallWebRTC** peer-to-peer with the user's
+own server (LAN / self-hosted — the zero-cloud option).
 Because model APIs ride inside the agent, supporting the orchestration transports
 transitively covers every model and voice. This layer is meant to live behind a
 protocol boundary so the call state machine, connection parsing, and transport
@@ -157,8 +158,8 @@ Three layers (full detail in [CORE_SYSTEMS](./CORE_SYSTEMS.md) and the CI workfl
 
 ## Out of Scope / Fast-Follows
 
-The CarPlay dashboard app and its entitlement; QR / pairing-endpoint onboarding;
-SmallWebRTC as a transport; reliable lock-screen "Hey Siri, call my agent"
-dialing; a Favorites tab; cross-drive persistent memory (lives in the agent).
+The CarPlay dashboard app and its entitlement; reliable lock-screen "Hey Siri,
+call my agent" dialing; a Favorites tab; cross-drive persistent memory (lives in
+the agent). (QR onboarding shipped in M8; SmallWebRTC shipped in M9.)
 Each is a known next step, not a gap — sequenced (with rationale) in
 [ROADMAP](./ROADMAP.md).

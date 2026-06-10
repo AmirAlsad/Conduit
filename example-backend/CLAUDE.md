@@ -42,6 +42,14 @@ Endpoint notes: per-agent routes (`POST /connect/{agent_id}`, `POST
 /credentials/{agent_id}`) are the canonical shape — the app sends no agent_id;
 the bare routes default to `loopback`. LiveKit connection payloads carry
 `room_url` (canonical, what the app reads) plus `url` as a deprecated alias.
+**SmallWebRTC** (`{"transport":"smallwebrtc"}`) is pairing-only: `/connect`
+mints a short-lived offer token and returns `room_url` = the engine's own
+`POST/PATCH /webrtc/{agent_id}/offer` route, where the bot runs as an **asyncio
+task in the dispatcher process** (no room, no subprocess; `run_bot(...,
+handle_sigint=False, handle_sigterm=False)` so uvicorn keeps its signal
+handlers). Media is UDP peer-to-peer — LAN/self-hosted only, never Railway. For
+LAN testing run uvicorn with `--host 0.0.0.0` and build the pair.py link from
+the Mac's LAN IP.
 
 ## Conventions & guardrails
 

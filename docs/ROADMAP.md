@@ -125,22 +125,38 @@ bottleneck. This is what makes Conduit adoptable.
 
 ---
 
-## M9 — Fully self-hosted transport (SmallWebRTC)
+## M9 — Fully self-hosted transport (SmallWebRTC) ✅ *(built & device-verified, June 2026)*
 
 **Goal:** run Conduit against your own WebRTC server with **no Daily/LiveKit cloud
 account** — the purest expression of "you own everything."
 
-**Scope:** a **SmallWebRTC** transport behind the existing `Transport` protocol (the
-Pipecat client supports it), reusing the connect-gate and audio-ownership patterns
-proven for Daily/LiveKit; the connection contract extended for its signaling shape; the
-M8 reference backend gains a SmallWebRTC variant.
+**Shipped:** `TransportKind.smallwebrtc` + `PipecatSmallWebRTCTransport` (mirrors the
+Daily adapter; pairing returns the offer URL + a short-lived bearer as
+`connection.room_url`/`token`, so `PairingClient` needed zero changes); the engine
+gained `POST/PATCH /webrtc/{agent_id}/offer` with **in-process bots** (the offer is the
+rendezvous — no room, no subprocess; dropped peer ⇒ immediate `end_now`); contract +
+quickstart document the offer leg and the zero-cloud LAN path (`pair.py --transport
+smallwebrtc`). **Scope is LAN / self-hosted-with-UDP** — media is UDP, so no Railway.
 
-**Verification:** connect-gate logic in the sim; audio device-only (same posture as the
-other transports).
+**The collision war story:** the stock package depends on stasel/WebRTC, whose
+un-prefixed `RTC*` ObjC classes duplicate Daily's statically-linked WebRTC — on device
+every Daily call crashed (`swift_dynamicCastFailure` in `DailyTransport.tracks()` KVO;
+66 classes defined in both images). Fix: our fork
+[`AmirAlsad/pipecat-client-ios-small-webrtc@livekit-webrtc`](https://github.com/AmirAlsad/pipecat-client-ios-small-webrtc)
+rebuilds the package against LiveKit's `LKRTC*`-prefixed WebRTC (a typealias shim —
+SmallWebRTC and LiveKit now share one prefixed copy; Daily keeps the only un-prefixed
+one). Reported upstream as
+[pipecat-client-ios-small-webrtc#6](https://github.com/pipecat-ai/pipecat-client-ios-small-webrtc/issues/6);
+revisit the fork if upstream adopts a prefixed flavor.
 
-**Why now:** removes the last third-party cloud dependency and completes the self-host
-story the whole app is premised on. Additive transport surface, so it sits after the
-on-ramp rather than blocking it.
+**Device-verified** (iPhone over hotspot LAN → Mac engine): pairing → offer/answer →
+trickle ICE → two-way audio on the loopback agent; clean `end-call` via the standard
+RTVI path; immediate bot teardown; Daily + LiveKit regression calls green in the same
+binary. Found along the way: iOS's **local-network permission** gates the first LAN
+connection (`NSLocalNetworkUsageDescription` added); Test Connection briefly grabs the
+mic on this transport (the SDK starts its audio unit on connect — known wart).
+Unverified leftovers: native route button behavior on SmallWebRTC calls, mid-call
+Wi-Fi-drop reconnect (re-pairs to a fresh bot — context resets by design).
 
 ---
 

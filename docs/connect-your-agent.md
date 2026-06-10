@@ -21,8 +21,8 @@ Conduit joins the room; your agent is already there.
 - **The endpoint identifies the agent.** Conduit never sends an agent id — to
   offer several agents, expose one endpoint per agent (`/connect/jarvis`,
   `/connect/support`) and add each as its own agent in the app.
-- **The `transport` field is authoritative** — provision a Daily room or a LiveKit
-  room+token to match what the app asked for.
+- **The `transport` field is authoritative** — provision a Daily room, a LiveKit
+  room+token, or a SmallWebRTC offer endpoint to match what the app asked for.
 - The exact shapes, accepted key aliases, and error semantics are in the
   [connection contract](CONNECTION_CONTRACT.md). It also includes a minimal
   FastAPI pairing endpoint you can adapt — it's ~15 lines.
@@ -49,6 +49,26 @@ QR included.
     Treat a key-bearing link or QR exactly like the API key itself — share it
     over channels you'd trust with the key, or omit `key` and enter it in the
     app.
+
+## SmallWebRTC — no cloud at all
+
+The third transport drops the WebRTC cloud entirely: your server terminates the
+peer connection itself (Pipecat's SmallWebRTC transport), so there's **no Daily
+or LiveKit account** and nothing between your phone and your machine. Pairing
+works exactly as above — the endpoint just returns an **offer URL** instead of a
+room, and the app exchanges SDP with your server directly.
+
+It's the fastest zero-to-call path for local development: run the
+[example backend](backend/quickstart.md) on your laptop, scan a `pair.py` QR,
+and you're talking to your agent over your own Wi-Fi. Two things to know:
+
+- **Reachability:** media is UDP straight to your server — same network (or
+  tailnet/VPN) required. It won't work behind an HTTP-only host like Railway,
+  and crossing strict NATs needs STUN/TURN you'd configure yourself.
+- iOS asks for **local network** permission on the first connection to a LAN
+  address — a one-time prompt; the call connects once you allow it.
+
+Wire details are in the [connection contract](CONNECTION_CONTRACT.md#smallwebrtc-offer-leg).
 
 ## Direct room (advanced)
 

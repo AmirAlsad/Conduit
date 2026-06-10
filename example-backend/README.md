@@ -187,6 +187,8 @@ to join and hear the agent. `uv run pytest` runs the suite.
 | POST | `/connect` | bearer | Same, body/default `agent_id` (defaults to `loopback`) |
 | POST | `/credentials/{agent_id}` | bearer | Direct: create stable creds, register room, return creds |
 | POST | `/credentials` | bearer | Same, body/default `agent_id` (defaults to `loopback`) |
+| POST | `/webrtc/{agent_id}/offer` | bearer or offer token | SmallWebRTC: SDP offer → answer; spawns the agent **in-process** |
+| PATCH | `/webrtc/{agent_id}/offer` | bearer or offer token | SmallWebRTC trickle-ICE candidates |
 | POST | `/webhooks/daily` | signature | Daily participant.joined → idempotent dispatch |
 | POST | `/webhooks/livekit` | signature | LiveKit participant_joined → idempotent dispatch |
 | POST | `/inbound/register/{agent_id}` | bearer | The app registers its VoIP push token (inbound calls) |
@@ -198,10 +200,16 @@ to join and hear the agent. `uv run pytest` runs the suite.
 
 Bearer = `Authorization: Bearer $ENGINE_API_KEY` (the dispatcher **fails fast on
 boot if it's unset**). Webhooks authenticate by signature (the caller is the SFU).
-Body for `/connect*` and `/credentials*`: `{"transport": "daily"|"livekit"}`
+The `/webrtc/*/offer` routes also accept the short-lived **offer token** that a
+smallwebrtc `/connect` minted, so the engine key never rides the offer leg.
+Body for `/connect*` and `/credentials*`:
+`{"transport": "daily"|"livekit"|"smallwebrtc"}`
 (optional → agent/engine default; on the bare routes `agent_id` may ride in the
 body, but a path `agent_id` always wins — **the endpoint identifies the agent**,
 which is the shape the Conduit app expects: it POSTs only `{"transport": ...}`).
+Smallwebrtc is **pairing-only** (no `/credentials`), runs its bots as asyncio
+tasks inside the dispatcher process, and needs the device to reach the engine
+directly over UDP — LAN / self-hosted, not Railway.
 Body for `/admin/disconnect`: `{"room_key": "<room>"}` (the room name from the
 payload). `/admin/ring` rings via APNs VoIP push (`scripts/ring.py` wraps it;
 needs the `APNS_*` vars) — full setup in the docs site's **Inbound calls** guide.
@@ -288,5 +296,5 @@ Full deploy + webhook details: **[docs/direct-mode.md](./docs/direct-mode.md)**.
 
 ## Design & scope
 
-**Out of scope (fast-follows):** SmallWebRTC/TURN, native `livekit-agents`
-token-encoded dispatch, freezing the public connection spec.
+**Out of scope (fast-follows):** TURN for smallwebrtc across NATs, native
+`livekit-agents` token-encoded dispatch, freezing the public connection spec.

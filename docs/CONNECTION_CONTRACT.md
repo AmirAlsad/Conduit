@@ -29,16 +29,16 @@ POST <your pairing endpoint>
 Content-Type: application/json
 Authorization: Bearer <API key>      # the key the user entered; omitted if blank
 
-{ "transport": "daily" }             # or "livekit"
+{ "transport": "daily" }             # or "livekit" / "smallwebrtc"
 ```
 
 - **Method:** always `POST`.
 - **`Authorization`:** the user's API key as a bearer token. Sent only if the user
   provided a key; use it to authenticate the request however you like (validate it,
   rate-limit on it, ignore it for an open endpoint).
-- **Body:** a JSON object with a single `transport` field — `"daily"` or
-  `"livekit"` — telling you which WebRTC transport the user selected, so you can
-  provision the matching room.
+- **Body:** a JSON object with a single `transport` field — `"daily"`,
+  `"livekit"`, or `"smallwebrtc"` — telling you which WebRTC transport the user
+  selected, so you can provision the matching room (or offer endpoint).
 - **No agent identifier is sent.** *The endpoint identifies the agent* — one
   endpoint per agent (see [Multiple agents](#multiple-agents)). Conduit does not
   send an `agent_id`.
@@ -86,6 +86,12 @@ Per transport:
   URL `url` — Conduit reads that as a fallback, so a default LiveKit token-server
   response usually works unmodified. `room_url` stays the canonical key; a
   `serverUrl` key is **not** read — map that one.
+- **SmallWebRTC:** there is no room and no cloud — your server terminates WebRTC
+  itself. `room_url` is the **offer endpoint** on your server (e.g.
+  `http://192.168.1.50:8000/webrtc/jarvis/offer`) and `token` is a bearer for it
+  (mint a short-lived one per pairing; the user's API key then never rides the
+  offer leg). See [SmallWebRTC offer leg](#smallwebrtc-offer-leg) for what Conduit
+  sends there.
 
 ### Errors
 
@@ -145,6 +151,35 @@ async def connect(req: PairRequest, authorization: str | None = Header(default=N
 > dispatch/join the agent to that room when you mint the token. If no agent joins, the
 > call sits at "connecting." (On Daily the same principle holds via the Pipecat bot.)
 
+### SmallWebRTC offer leg
+
+For `"smallwebrtc"`, after pairing Conduit speaks plain WebRTC signaling to the
+offer endpoint your pairing response named, sending the same bearer on both
+requests:
+
+```
+POST <offer endpoint>                    # body: { "sdp": "...", "type": "offer", "pc_id": null }
+  → 200 { "sdp": "...", "type": "answer", "pc_id": "<id>" }
+
+PATCH <offer endpoint>                   # trickle ICE, possibly several times
+  body: { "pc_id": "<id>", "candidates": [ { "candidate": "...", "sdp_mid": "0", "sdp_mline_index": 0 } ] }
+```
+
+Your server accepts the offer, spawns/attaches the agent for that peer
+connection, and returns the SDP answer; audio then flows peer-to-peer between the
+device and your server, and RTVI (including the `end-call` message below) rides a
+data channel. Pipecat ships this server side as `SmallWebRTCTransport` +
+`SmallWebRTCRequestHandler`; the reference engine wires it at
+`POST/PATCH /webrtc/{agent_id}/offer`.
+
+**Reachability is the constraint.** Media is UDP straight to your server, so this
+transport works where the device can reach the machine directly — the same Wi-Fi /
+LAN, a tailnet, or a self-hosted box with UDP open. It cannot work behind an
+HTTP-only ingress (e.g. Railway), and crossing NATs needs STUN/TURN you'd
+configure yourself. It is the zero-cloud option: no Daily or LiveKit account at
+all. On first connection to a LAN address, iOS asks the user for **local
+network** permission — a one-time prompt.
+
 ---
 
 ## 2. Direct room (advanced)
@@ -200,12 +235,13 @@ need opposite responses:
   { "id": "<8 chars>", "label": "rtvi-ai", "type": "client-message", "data": { "t": "end-call" } }
   ```
 
-  How it arrives depends on the transport. On **Daily** it comes through the
-  Pipecat app-message channel — a Pipecat server sees it in the RTVI processor's
-  `on_client_message` (with `message.type == "end-call"`). On **LiveKit** Conduit
-  publishes the same envelope on the room's **data channel**; note that current
-  Pipecat versions do *not* deliver client RTVI messages from LiveKit to the RTVI
-  processor, so parse it from the transport's raw `on_data_received` event — see
+  How it arrives depends on the transport. On **Daily** and **SmallWebRTC** it
+  comes through the Pipecat app-message channel — a Pipecat server sees it in the
+  RTVI processor's `on_client_message` (with `message.type == "end-call"`). On
+  **LiveKit** Conduit publishes the same envelope on the room's **data channel**;
+  note that current Pipecat versions do *not* deliver client RTVI messages from
+  LiveKit to the RTVI processor, so parse it from the transport's raw
+  `on_data_received` event — see
   [`bot/runtime.py`](https://github.com/AmirAlsad/Conduit/blob/main/example-backend/bot/runtime.py)
   in the reference engine for a working implementation of both paths.
 
@@ -221,7 +257,9 @@ need opposite responses:
   as part of (or right after) handling the pairing request — don't make the user
   wait in an empty room.
 - **Use HTTPS.** The API key travels as a bearer token. Conduit stores it only in
-  the device Keychain and never logs it, but the endpoint must be HTTPS.
+  the device Keychain and never logs it, but the endpoint must be HTTPS. (The one
+  sanctioned exception is SmallWebRTC on a private network — plain `http://` to a
+  LAN address is normal for local development.)
 - **The `transport` field is authoritative for this call.** Provision the room for
   the transport Conduit asks for; don't assume one.
 - **Keep credentials short-lived.** Per-call rooms/tokens are the design intent —
