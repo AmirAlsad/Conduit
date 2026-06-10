@@ -11,6 +11,7 @@ import SwiftUI
 
 struct RootTabView: View {
     @Environment(AppEnvironment.self) private var environment
+    @Environment(\.scenePhase) private var scenePhase
 
     private enum RootTab: Hashable {
         case recents, contacts, settings
@@ -42,9 +43,28 @@ struct RootTabView: View {
         .onChange(of: environment.pendingAgentLink) { _, link in
             if link != nil { selection = .contacts }
         }
+        // A Siri-requested call dials only once the scene is .active —
+        // CXStartCallAction from a not-yet-foregrounded app is rejected.
+        .onChange(of: environment.pendingSiriCall) { _, _ in consumePendingSiriCall() }
+        .onChange(of: scenePhase) { _, _ in consumePendingSiriCall() }
         .onAppear {
             if environment.pendingAgentLink != nil { selection = .contacts }
+            consumePendingSiriCall()
         }
+    }
+
+    private func consumePendingSiriCall() {
+        guard scenePhase == .active, let id = environment.pendingSiriCall else { return }
+        environment.pendingSiriCall = nil
+        guard !environment.callSession.state.isActive else {
+            Log.info(.call, "Siri dial dropped — a call is already active")
+            return
+        }
+        guard let agent = try? environment.agentRepository.fetch(id: id) else {
+            Log.warning(.call, "Siri dial dropped — unknown agent id")
+            return
+        }
+        Task { await environment.callSession.placeCall(agent) }
     }
 
     /// Drives the in-call cover from the coordinator. Programmatic dismissal calls

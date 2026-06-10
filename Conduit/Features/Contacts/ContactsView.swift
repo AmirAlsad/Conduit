@@ -116,6 +116,7 @@ struct ContactsView: View {
         try? environment.keychain.deleteToken(for: KeychainTokenRef(directTokenForAgentID: agent.id))
         environment.agentRepository.delete(agent)
         try? environment.agentRepository.save()
+        ConduitAppShortcuts.refreshParameters()
         if let inboundEndpoint {
             Task { await PushTokenRegistrar.unregister(endpoint: inboundEndpoint, apiKey: apiKey ?? "") }
         }

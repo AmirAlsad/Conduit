@@ -29,6 +29,10 @@ struct ConduitApp: App {
                         Log.warning(.app, "Ignoring deep link: \(error)")
                     }
                 }
+                // Parameterized Siri phrases only resolve after the system has
+                // fetched the agent names; refresh at launch and on every
+                // agent mutation (save/delete hooks).
+                .task { ConduitAppShortcuts.refreshParameters() }
                 #if DEBUG
                 .task {
                     DebugSeed.runIfRequested(environment)

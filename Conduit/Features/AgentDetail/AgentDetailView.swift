@@ -212,6 +212,7 @@ struct AgentDetailView: View {
         )
         environment.agentRepository.delete(agent)
         try? environment.agentRepository.save()
+        ConduitAppShortcuts.refreshParameters()
         if let inboundEndpoint {
             Task { await PushTokenRegistrar.unregister(endpoint: inboundEndpoint, apiKey: apiKey ?? "") }
         }

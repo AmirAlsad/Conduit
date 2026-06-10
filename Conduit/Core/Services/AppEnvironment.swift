@@ -35,6 +35,11 @@ final class AppEnvironment {
     /// at the app root; consumed by ContactsView when it can present the sheet
     /// (deferred while another sheet or a call is up).
     var pendingAgentLink: AgentDeepLink?
+    /// An agent id awaiting a Siri-initiated call. Set by CallAgentIntent /
+    /// the SiriKit handler; consumed by RootTabView only once the scene is
+    /// .active — dialing earlier makes CallKit reject the CXStartCallAction
+    /// (the cold-launch-from-Siri race).
+    var pendingSiriCall: UUID?
 
     init(
         modelContainer: ModelContainer,

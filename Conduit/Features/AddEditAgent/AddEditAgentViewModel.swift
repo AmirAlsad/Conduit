@@ -179,6 +179,7 @@ final class AddEditAgentViewModel {
         try persistSecret(directToken, to: KeychainTokenRef(directTokenForAgentID: agent.id))
 
         try repository.save()
+        ConduitAppShortcuts.refreshParameters()
 
         // Register the VoIP token now (not just on the next launch) so inbound works
         // the moment the toggle is saved. Fire-and-forget: a slow endpoint must not
