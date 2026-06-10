@@ -52,14 +52,25 @@ final class SiriCallHandler: NSObject, INStartCallIntentHandling {
         }
     }
 
+    static let agentIDUserInfoKey = "conduitAgentID"
+
     func handle(
         intent: INStartCallIntent,
         completion: @escaping (INStartCallIntentResponse) -> Void
     ) {
-        // .continueInApp foregrounds the app and delivers this activity (with the
-        // INInteraction attached) to onContinueUserActivity in ConduitApp, which
-        // sets pendingSiriCall — the dial itself waits for the .active scene.
+        // .continueInApp foregrounds the app and delivers this activity to
+        // onContinueUserActivity in ConduitApp, which sets pendingSiriCall —
+        // the dial itself waits for the .active scene. The agent id rides in
+        // userInfo: with in-app handling the system doesn't reliably attach
+        // the INInteraction to the delivered activity, so the interaction is
+        // only a fallback on the receiving side.
         let activity = NSUserActivity(activityType: NSStringFromClass(INStartCallIntent.self))
+        if let id = intent.contacts?.first?.customIdentifier {
+            activity.userInfo = [Self.agentIDUserInfoKey: id]
+            Log.info(.call, "SiriKit handle: continuing with resolved agent")
+        } else {
+            Log.warning(.call, "SiriKit handle: intent carried no resolved agent identifier")
+        }
         completion(INStartCallIntentResponse(code: .continueInApp, userActivity: activity))
     }
 

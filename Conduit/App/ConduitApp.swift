@@ -31,15 +31,20 @@ struct ConduitApp: App {
                     }
                 }
                 // SiriKit "call <agent>" lands here after SiriCallHandler
-                // responds .continueInApp; same funnel as the App Intent.
+                // responds .continueInApp; same funnel as the App Intent. The
+                // agent id rides in userInfo (the handler put it there);
+                // activity.interaction is only a fallback because in-app
+                // handling doesn't reliably attach it.
                 .onContinueUserActivity(NSStringFromClass(INStartCallIntent.self)) { activity in
-                    guard let intent = activity.interaction?.intent as? INStartCallIntent,
-                          let idString = intent.contacts?.first?.customIdentifier,
+                    let fromUserInfo = activity.userInfo?[SiriCallHandler.agentIDUserInfoKey] as? String
+                    let fromInteraction = (activity.interaction?.intent as? INStartCallIntent)?
+                        .contacts?.first?.customIdentifier
+                    guard let idString = fromUserInfo ?? fromInteraction,
                           let id = UUID(uuidString: idString) else {
-                        Log.warning(.call, "SiriKit activity missing agent identifier")
+                        Log.warning(.call, "SiriKit activity missing agent id (userInfo: \(activity.userInfo != nil), interaction: \(activity.interaction != nil))")
                         return
                     }
-                    Log.info(.call, "SiriKit dial continued in app")
+                    Log.info(.call, "SiriKit dial continued in app (via \(fromUserInfo != nil ? "userInfo" : "interaction"))")
                     environment.pendingSiriCall = id
                 }
                 // Parameterized Siri phrases only resolve after the system has

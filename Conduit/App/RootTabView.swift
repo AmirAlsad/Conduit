@@ -64,6 +64,7 @@ struct RootTabView: View {
             Log.warning(.call, "Siri dial dropped — unknown agent id")
             return
         }
+        Log.info(.call, "Siri dial: placing call")
         Task { await environment.callSession.placeCall(agent) }
     }
 

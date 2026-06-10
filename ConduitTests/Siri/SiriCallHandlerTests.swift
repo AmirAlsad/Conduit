@@ -101,4 +101,24 @@ struct SiriCallHandlerTests {
         #expect(response.code == .continueInApp)
         #expect(response.userActivity?.activityType == NSStringFromClass(INStartCallIntent.self))
     }
+
+    @Test func handleCarriesAgentIDInUserInfo() async throws {
+        let (environment, agents) = try makeEnvironment(agentNames: ["Marvin"])
+        let handler = SiriCallHandler(environment: environment)
+        // A post-resolution intent: the contact is OUR person, identifier set.
+        let resolved = INStartCallIntent(
+            callRecordFilter: nil,
+            callRecordToCallBack: nil,
+            audioRoute: .unknown,
+            destinationType: .normal,
+            contacts: [SiriCallHandler.person(for: agents[0])],
+            callCapability: .audioCall
+        )
+
+        let response: INStartCallIntentResponse = await withCheckedContinuation { continuation in
+            handler.handle(intent: resolved) { continuation.resume(returning: $0) }
+        }
+        let stored = response.userActivity?.userInfo?[SiriCallHandler.agentIDUserInfoKey] as? String
+        #expect(stored == agents[0].id.uuidString)
+    }
 }
