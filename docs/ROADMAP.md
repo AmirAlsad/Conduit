@@ -60,8 +60,11 @@ bug-fix, not new surface.
   decline → Recents, inline credentials, Focus/DND-filtered rings logged as missed
   with a quiet local notification, busy pushes report-then-end (silently ignoring a
   VoIP push gets the app killed — `bugs.md`), and rings surviving a backend redeploy
-  (volume-backed registry). Still to check: the answer path over a **Daily** agent,
-  and unknown-agent graceful end.
+  (volume-backed registry). The remaining gaps closed days later: the answer path
+  over a **Daily** agent (cold ring → answer → echo → immediate end-call teardown),
+  unknown-agent graceful end (brief ring, self-ends, app healthy), registration at
+  toggle-save (no relaunch), and **ring-status receipts** (`answered` /
+  `suppressed_by_focus` observed live on both transports).
 - **Interruptions & ducking, real audio** — Siri mid-call (pause + clean resume), an
   incoming PSTN call (yield the route), and **nav/GPS prompts ducking/mixing over the
   call** in the car (AirPods / CarPlay). Verify on both transports.
