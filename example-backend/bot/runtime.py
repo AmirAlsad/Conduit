@@ -8,6 +8,8 @@ not know or care whether a pairing call, a webhook, or a dev script launched it.
 
 from __future__ import annotations
 
+import json
+
 from pipecat.workers.runner import WorkerRunner
 
 from app.config import settings
@@ -43,7 +45,8 @@ def _client_id(client) -> str:
 
 
 def _wire_presence(transport, transport_type: str, controller: TeardownController, log) -> None:
-    """Funnel transport-specific join/leave events into the neutral controller.
+    """Funnel transport-specific join/leave (and, where the RTVI input path can't
+    carry it, end-call) events into the neutral controller.
 
     The events differ by transport (the seam), but the policy is identical.
     """
@@ -66,6 +69,24 @@ def _wire_presence(transport, transport_type: str, controller: TeardownControlle
         @transport.event_handler("on_participant_left")
         async def _on_left(transport, participant_id, reason):  # noqa: ANN001
             controller.human_left(participant_id)
+
+        # Pipecat's LiveKit input path re-wraps incoming data-channel messages as
+        # OUTPUT frames, so client RTVI messages never reach the RTVI processor —
+        # parse the explicit end-call signal from the raw data event instead.
+        @transport.event_handler("on_data_received")
+        async def _on_data(transport, data, participant_id):  # noqa: ANN001
+            try:
+                msg = json.loads(data)
+            except (ValueError, TypeError):
+                return
+            if (
+                isinstance(msg, dict)
+                and msg.get("label") == "rtvi-ai"
+                and msg.get("type") == "client-message"
+                and (msg.get("data") or {}).get("t") == "end-call"
+            ):
+                event(log, "bot.end_call_signal", via="livekit-data")
+                await controller.end_now("client-end-call")
 
     else:  # webrtc (dev runner): client-level events are the available signal
         @transport.event_handler("on_client_connected")

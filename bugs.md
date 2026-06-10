@@ -133,3 +133,44 @@ invariant family as "report even for unknown agents."
 **Why it's missed:** The PushKit termination rule is invisible in the simulator
 (PushKit doesn't deliver there) and in unit tests (no OS watchdog in fakes);
 it only manifests as a mysterious mid-call death on hardware.
+
+### LiveKit connect() stomped an already-arrived CallKit activation (dead first-call mic)
+First seen: 2026-06-09 (reported twice on device; root-caused 2026-06-10)
+
+**Pattern:** `LiveKitTransport.connect()` set `setEngineAvailability(.none)`
+AFTER the pairing fetch. On a cold launch the fetch is slow (cold DNS/TLS), so
+CallKit's audio activation landed mid-fetch: `attachAudioSession()` set the
+engine `.default`, then connect's late `.none` stomped it — the room joined with
+the engine forbidden, so the mic never published (no orange dot). Warm-launch
+calls reordered benignly, which is why only the FIRST call after a fresh launch
+failed. The same stomp would kill audio on a coordinator-driven mid-call
+reconnect (`retryConnect` re-enters `connect()` while the session is active).
+
+**Rule:** Activation (`attach`/`detach`) and `connect()` are unordered edges —
+the third instance of the potential_skills/callkit.md pattern. The transport
+tracks `isSessionAttached` and `connect()` asserts the CURRENT desired state
+(`isSessionAttached ? .default : .none`), never an unconditional reset.
+
+**Why it's missed:** Sim/unit tests never run LiveKit's AudioManager, and on a
+warm process the pairing fetch usually wins the race. Device-only, timing-only.
+
+### Every hangup waited out the 60s grace window — the end-call signal was never sent
+First seen: 2026-06-09 (grace_expired in Railway logs after clean hangups; fixed 2026-06-10)
+
+**Pattern:** The engine's teardown design (§2.5) reserves the human-absent grace
+window for genuine drops and ends immediately on an explicit RTVI `end-call`
+client message — but the app never sent one, on either transport, so every
+deliberate hangup billed the bot for the full `HUMAN_ABSENT_GRACE_SECS`. Worse,
+on LiveKit it *couldn't* have worked: Pipecat's LiveKit input transport re-wraps
+incoming data-channel messages as OUTPUT frames, so client RTVI messages never
+reach the RTVI processor at all.
+
+**Rule:** Deliberate hangup = `Transport.disconnect()`; each adapter sends the
+end signal there (Daily: `sendClientMessage("end-call")` + a 200 ms flush pause;
+LiveKit: publish the RTVI client-message envelope on the data channel). The
+engine listens on Daily via `on_client_message` and on LiveKit via the raw
+`on_data_received` event. Verify in logs: `teardown.end_now reason=client-end-call`
+(not `teardown.grace_expired`) after a clean hangup.
+
+**Why it's missed:** Nothing fails — the call ends normally for the user and the
+grace timer cleans up server-side. Only the engine logs (and the bill) show it.

@@ -212,9 +212,13 @@ and reconnects with backoff while CallKit still shows the call up. So:
 - On the human leaving, a **`HUMAN_ABSENT_GRACE_SECS`** timer starts; teardown only
   fires if no human rejoins. The agent stays, so the room is non-empty and a
   reconnecting caller resumes mid-conversation.
-- An **explicit end signal** ends a real hangup at once: the client sends RTVI
-  `{"type": "end-call"}` (handled via `on_client_message`), or hits
-  `POST /admin/disconnect`. Without it, every hangup harmlessly waits out the window.
+- An **explicit end signal** ends a real hangup at once: the client sends the RTVI
+  client message `end-call`, or you hit `POST /admin/disconnect`. Without it, every
+  hangup harmlessly waits out the window (as a billed participant). On Daily the
+  signal arrives through the RTVI processor (`on_client_message`); on LiveKit,
+  Pipecat's input path doesn't deliver client RTVI messages, so the engine parses
+  the same message from the raw `on_data_received` event (`bot/runtime.py`). The
+  Conduit app sends it on every deliberate hangup, on both transports.
 
 > **`HUMAN_ABSENT_GRACE_SECS` is a shared constant with the client team** — it must
 > be ≥ the client's total reconnect-with-backoff budget, and no longer (your agent

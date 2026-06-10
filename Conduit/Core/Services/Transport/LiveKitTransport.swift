@@ -26,6 +26,12 @@ final class LiveKitTransport: NSObject, Conduit.Transport {
     private var gate = LiveKitConnectGate()
     private var wasBotSpeaking = false
     private var routeObserver: NSObjectProtocol?
+    /// Whether CallKit has activated the audio session (attach/detach edges).
+    /// Activation and connect are unordered (see potential_skills/callkit.md):
+    /// on a cold launch the pairing fetch is slow enough that activation lands
+    /// mid-connect, and an unconditional `.none` there would stomp it — the
+    /// engine then never starts and the call has no mic.
+    private var isSessionAttached = false
 
     override init() {
         let (stream, continuation) = AsyncStream.makeStream(of: TransportEvent.self)
@@ -71,7 +77,9 @@ final class LiveKitTransport: NSObject, Conduit.Transport {
             } else {
                 throw TransportError.connectionFailed("No room URL or pairing endpoint")
             }
-            try AudioManager.shared.setEngineAvailability(.none)
+            // Engine off until CallKit activates — unless activation already
+            // happened (also keeps the engine alive across a mid-call reconnect).
+            try AudioManager.shared.setEngineAvailability(isSessionAttached ? .default : .none)
             try await room.connect(url: roomURL, token: token)
         } catch let error as PairingError {
             Log.error(.transport, "Pairing failed: \(error)")
@@ -87,7 +95,26 @@ final class LiveKitTransport: NSObject, Conduit.Transport {
 
     func disconnect() async {
         gate.userRequestedDisconnect = true
+        await sendEndCallSignal()
         await room.disconnect()
+    }
+
+    /// Deliberate hangup: tell the engine to end NOW instead of burning its
+    /// human-absent grace window (which exists for genuine drops — design §2.5).
+    /// RTVI client-message shape over the data channel; the reference engine
+    /// listens on the raw data event because Pipecat's LiveKit input path doesn't
+    /// deliver client RTVI messages to its RTVI processor.
+    private func sendEndCallSignal() async {
+        guard room.connectionState == .connected else { return }
+        let message: [String: Any] = [
+            "id": String(UUID().uuidString.prefix(8)),
+            "label": "rtvi-ai",
+            "type": "client-message",
+            "data": ["t": "end-call"],
+        ]
+        guard let payload = try? JSONSerialization.data(withJSONObject: message) else { return }
+        do { try await room.localParticipant.publish(data: payload) }
+        catch { Log.warning(.transport, "end-call signal publish failed: \(error)") }
     }
 
     func setMicEnabled(_ enabled: Bool) async {
@@ -113,11 +140,13 @@ final class LiveKitTransport: NSObject, Conduit.Transport {
 
     func attachAudioSession() async {
         // CallKit activated the session — let LiveKit's engine run now.
+        isSessionAttached = true
         do { try AudioManager.shared.setEngineAvailability(.default) }
         catch { Log.error(.audio, "LiveKit setEngineAvailability(.default) error: \(error)") }
     }
 
     func detachAudioSession() async {
+        isSessionAttached = false
         do { try AudioManager.shared.setEngineAvailability(.none) }
         catch { Log.error(.audio, "LiveKit setEngineAvailability(.none) error: \(error)") }
     }

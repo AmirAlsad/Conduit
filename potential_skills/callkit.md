@@ -8,15 +8,18 @@ or a `Transport` adapter's connect/audio path.
 
 ### System callbacks fire more than once and out of order vs. your code
 First seen: 2026-06-07
-Last seen: 2026-06-08
-Occurrences: 2
+Last seen: 2026-06-10
+Occurrences: 3
 
 **Pattern:** Logic that assumes a single, ordered sequence breaks when CallKit
 re-enters or reorders. (1) Ending a call by requesting the system end AND driving the
 terminal transition double-fired, because the real `CXEndCallAction` round-trips back
 through `providerPerformEndCall` (two call-log rows). (2) `providerDidActivate` fired
 BEFORE the transport finished connecting (a slow pairing fetch), so a one-shot
-`setMicEnabled` no-op'd on a not-yet-joined client (dead mic).
+`setMicEnabled` no-op'd on a not-yet-joined client (dead mic). (3) `LiveKitTransport.connect()`
+unconditionally reset `setEngineAvailability(.none)` after its pairing fetch, stomping
+an activation that had already attached (`.default`) mid-fetch — dead mic on the first
+call after a cold launch, where the fetch is slowest.
 
 **Rule:**
 - Make every terminal transition idempotent (`guard !state.isTerminal`) and clear

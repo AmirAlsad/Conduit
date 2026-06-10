@@ -90,6 +90,13 @@ final class PipecatDailyTransport: Conduit.Transport, PipecatClientDelegate {
 
     func disconnect() async {
         userRequestedDisconnect = true
+        // Deliberate hangup: explicit end signal so the engine ends at once
+        // instead of waiting out its human-absent grace window (design §2.5).
+        // Throws when the bot was never ready — exactly when there's no one to
+        // tell. The brief sleep lets the app message flush before the leave.
+        if (try? client.sendClientMessage(msgType: "end-call")) != nil {
+            try? await Task.sleep(for: .milliseconds(200))
+        }
         do { try await client.disconnect() }
         catch { Log.error(.transport, "Daily disconnect error: \(error)") }
     }

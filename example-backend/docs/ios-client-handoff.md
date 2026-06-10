@@ -149,7 +149,11 @@ This is the contract that makes a Conduit call survive a tunnel/dead-zone.
 
   Without it, a real hangup just waits out the grace window — harmless, but the bot
   bills as a participant until the timer fires. So send `end-call` on
-  user-initiated hangup.
+  user-initiated hangup. On Daily, send it through the Pipecat client
+  (`sendClientMessage(msgType: "end-call")`). On LiveKit, publish the full RTVI
+  client-message envelope on the data channel — Pipecat's LiveKit input path
+  doesn't deliver client RTVI messages to the RTVI processor, so the engine parses
+  it from the raw data event (`bot/runtime.py`).
 
 ---
 
