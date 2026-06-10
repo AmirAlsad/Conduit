@@ -85,9 +85,12 @@ because breaking one fails in ways that are easy to misdiagnose:
    dead-zones and reconnects with backoff while CallKit still shows the call up.
    Don't exit when the human leaves — stay for a grace window
    (`HUMAN_ABSENT_GRACE_SECS`) so a reconnecting caller resumes mid-conversation,
-   and end immediately only on an explicit hangup (RTVI `{"type":"end-call"}` or
-   `POST /admin/disconnect`). `bot/runtime.py` + `bot/teardown.py` implement this
-   for every registered agent.
+   and end immediately only on an explicit hangup. The app sends an RTVI
+   `end-call` client message on every deliberate hangup, on both transports —
+   and `bot/runtime.py` + `bot/teardown.py` handle both arrival paths for every
+   registered agent (on LiveKit the message rides the raw data channel, because
+   Pipecat's LiveKit input path doesn't deliver client RTVI messages to the RTVI
+   processor). `POST /admin/disconnect` is the manual equivalent.
 
 A **greeting** (`on_ready`) is optional but recommended — immediate downlink audio
 confirms the call connected.

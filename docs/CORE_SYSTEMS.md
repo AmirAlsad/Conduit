@@ -52,11 +52,23 @@ URL). The decisive difference from Daily is **manual audio**: at init it sets
 `AudioManager.shared.audioSession.isAutomaticConfigurationEnabled = false`, and it
 gates LiveKit's audio engine on CallKit via the `attachAudioSession`/`detachAudioSession`
 seam (`setEngineAvailability(.default/.none)` in `providerDidActivate`/`Deactivate`).
+Activation and `connect()` are **unordered edges**: the transport tracks
+`isSessionAttached`, and `connect()` asserts the *current* attach state rather than
+unconditionally resetting to `.none` — an unconditional reset stomped a mid-fetch
+activation and killed the mic on cold-launch first calls (`bugs.md`,
+`potential_skills/callkit.md`).
 Because CallKit then truly owns the `AVAudioSession`, **the native call-screen route
 button moves the audio** (Daily can't — see `bugs.md`), and the in-app picker routes
 through `AVAudioSession` directly (`LiveKitAudioRouter`) instead of the SDK. Like
 Daily, it's **device-only** (WebRTC audio aborts in the sim), so `live()` uses
 `FakeTransport` in the simulator; the only sim-tested logic is `LiveKitConnectGate`.
+
+Both adapters send the engine's **`end-call` signal** in `disconnect()` — a
+deliberate hangup ends the bot at once instead of burning its human-absent grace
+window (Daily: `sendClientMessage("end-call")` over the Pipecat channel; LiveKit:
+the RTVI envelope published on the data channel, because Pipecat's LiveKit input
+path doesn't deliver client RTVI messages — see `bugs.md`). Reconnects never call
+`disconnect()`, so a genuine drop still gets the grace window.
 
 ## AppEnvironment (composition root)
 
@@ -183,9 +195,17 @@ Key behaviors:
   `incomingRinging`. On `providerPerformAnswerCall` → `answer()` reuses the shared
   `connectTransport(for:inlineCreds:)` — hybrid credentials: inline push room/token if
   present, else `PairingClient.resolve`. Decline while ringing logs `.declined`; the call
-  log records `direction` (`.incoming`/`.outgoing`). Push/CallKit-incoming/entitlement are
-  device-only; the coordinator path + payload parsing are unit-tested. See
-  [INBOUND_CALLS](./INBOUND_CALLS.md).
+  log records `direction` (`.incoming`/`.outgoing`). Edge paths are first-class: a push
+  mid-call **reports then immediately ends** under the push's own id (iOS kills the app
+  for an unreported VoIP push — `bugs.md`); a Focus/DND-filtered ring logs as missed and
+  returns to `.idle`; both post a quiet local notification (`MissedCallNotifying`,
+  provisional auth). If the push carried a `status_url`, the coordinator reports the
+  ring's terminal status back (`RingStatusReporting`: answered / declined / busy /
+  suppressed_by_focus). Token registration fires on app launch (`VoIPPushService`) *and*
+  at agent save (`InboundRegistering`); deleting an agent best-effort **unregisters**
+  (DELETE on the registration endpoint, `PushTokenRegistrar.unregister`).
+  Push/CallKit-incoming/entitlement are device-only; the coordinator paths + payload
+  parsing are unit-tested. See [INBOUND_CALLS](./INBOUND_CALLS.md).
 
 ## Reconnection + spoken state
 

@@ -181,6 +181,39 @@ defaulting to its `loopback` agent (see the [quickstart](backend/quickstart.md))
 
 ---
 
+## Call lifecycle: drops, hangups, and the end-call signal
+
+Two events look identical from your side — the user's media vanishing — but they
+need opposite responses:
+
+- **A drop is not a hangup.** Conduit is built for cars and dead-zones: when media
+  drops, the app reconnects with backoff **into the same room** while CallKit still
+  shows the call as up. If your agent exits the moment the human leaves, the user
+  reconnects into an empty room and the call dies. Hold the room for a grace window
+  (the reference engine defaults to 60 s) and tear down only if nobody returns.
+- **A real hangup says so explicitly.** When the user deliberately ends the call,
+  Conduit sends an RTVI **`end-call` client message** before leaving, so you can
+  tear down immediately instead of waiting out the grace window (your agent is a
+  billed participant while it waits):
+
+  ```json
+  { "id": "<8 chars>", "label": "rtvi-ai", "type": "client-message", "data": { "t": "end-call" } }
+  ```
+
+  How it arrives depends on the transport. On **Daily** it comes through the
+  Pipecat app-message channel — a Pipecat server sees it in the RTVI processor's
+  `on_client_message` (with `message.type == "end-call"`). On **LiveKit** Conduit
+  publishes the same envelope on the room's **data channel**; note that current
+  Pipecat versions do *not* deliver client RTVI messages from LiveKit to the RTVI
+  processor, so parse it from the transport's raw `on_data_received` event — see
+  [`bot/runtime.py`](https://github.com/AmirAlsad/Conduit/blob/main/example-backend/bot/runtime.py)
+  in the reference engine for a working implementation of both paths.
+
+  The signal is best-effort: a connection that dies mid-drop never sends one, which
+  is exactly when the grace window should apply.
+
+---
+
 ## Notes for backend authors
 
 - **Have the agent ready when you return credentials.** Conduit reports the call as

@@ -55,5 +55,7 @@ and keep everything else — see
 ## The reverse direction
 
 Your agent's server can ring **you** — a real incoming call on the lock screen and
-in CarPlay — by registering a push token and sending a VoIP push. That contract
-lives in [Inbound calls](INBOUND_CALLS.md).
+in CarPlay — by registering a push token and sending a VoIP push, with optional
+**ring-status receipts** telling your server whether the ring was answered,
+declined, or never seen (Focus/DND). That contract lives in
+[Inbound calls](INBOUND_CALLS.md).
