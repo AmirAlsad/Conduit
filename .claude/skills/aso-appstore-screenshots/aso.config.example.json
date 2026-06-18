@@ -1,0 +1,20 @@
+{
+  "_comment": "Copy this to aso.config.json in your app project root to set defaults so the skill stops re-asking. All fields are optional.",
+
+  "font": "inter",
+  "_font": "Bundled headline font key: inter | montserrat | poppins | oswald | bebas | archivo | playfair. The skill auto-picks one if omitted.",
+
+  "brandColour": {
+    "name": "Electric Blue",
+    "hex": "#2563EB"
+  },
+
+  "targetSizes": ["1290x2796"],
+  "_targetSizes": "App Store Connect display sizes to export. 1242x2688 (6.5\"), 1290x2796 (6.7\", default), 1320x2868 (6.9\").",
+
+  "languages": ["en"],
+  "_languages": "Locales to generate headline sets for. More than one triggers localized output under screenshots/final/<lang>/.",
+
+  "showcaseHandle": "github.com/yourname",
+  "_showcaseHandle": "Footer text on the showcase image. Leave empty to omit."
+}

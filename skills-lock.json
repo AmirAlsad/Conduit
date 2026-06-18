@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "aso-appstore-screenshots": {
+      "source": "AmirAlsad/app-store-screenshots-skill",
+      "sourceType": "github",
+      "skillPath": "skills/aso-appstore-screenshots/SKILL.md",
+      "computedHash": "7c17558655114acc217377764c4ac7a7ace6a4b4c0c71985627bbcf1e25a9ff3"
+    },
     "swift-architecture-skill": {
       "source": "efremidze/swift-architecture-skill",
       "sourceType": "github",

@@ -1,0 +1,49 @@
+ASO App Store Screenshots skill
+================================
+
+This project is a modified fork of:
+
+    claude-skill-aso-appstore-screenshots
+    Copyright (c) 2026 Adam Lyttle
+    https://github.com/adamlyttleapps/claude-skill-aso-appstore-screenshots
+    Licensed under the MIT License.
+
+Many thanks to Adam Lyttle for the original skill, which this builds on by adding
+AI image enhancement via OpenAI gpt-image-2, a bundled font library, and full
+cross-tool / cross-OS portability.
+
+
+Adapted image-generation script
+-------------------------------
+
+The AI-enhancement script (skills/aso-appstore-screenshots/scripts/edit.py) is
+adapted from:
+
+    gpt-image-2-skill
+    Copyright (c) dshark3y
+    https://github.com/dshark3y/gpt-image-2-skill
+    Licensed under the MIT License.
+
+Thanks to dshark3y, whose gpt-image-2 CLI script edit.py is the basis for the
+OpenAI SDK call, the .env loader, and the gpt-image-2 size validation used here.
+
+
+Bundled fonts
+-------------
+
+The fonts in skills/aso-appstore-screenshots/assets/fonts/ are redistributed under the
+SIL Open Font License, Version 1.1. Full license texts are in the OFL/ subdirectory.
+
+  - Inter            (c) The Inter Project Authors — https://github.com/rsms/inter
+  - Montserrat       (c) The Montserrat Project Authors — Julieta Ulanovsky et al.
+  - Poppins          (c) The Poppins Project Authors — Indian Type Foundry, Jonny Pinhorn
+  - Oswald           (c) The Oswald Project Authors — Vernon Adams et al.
+  - Bebas Neue       (c) The Bebas Neue Project Authors — Ryoichi Tsunekawa, Dharma Type
+  - Archivo Black    (c) The Archivo Black Project Authors — Omnibus-Type
+  - Playfair Display (c) The Playfair Display Project Authors — Claus Eggers Sørensen
+
+Each family's full copyright/reserved-font-name notice is in its OFL.txt under
+skills/aso-appstore-screenshots/assets/fonts/OFL/.
+
+Apple's "SF Pro Display" is NOT bundled — it is proprietary and not redistributable.
+The scripts use it only as an optional convenience fallback when already installed locally.

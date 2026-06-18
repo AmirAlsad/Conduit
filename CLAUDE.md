@@ -46,6 +46,7 @@ Vendored and hash-pinned in `skills-lock.json` under `.claude/skills/`. Load the
 - **`swiftui-pro`** — before reading/writing/reviewing SwiftUI views.
 - **`swift-testing-pro`** — before working on tests under `ConduitTests/`.
 - **`swift-architecture-skill`** — before introducing/refactoring architecture (state ownership, the CallKit/transport protocol boundaries).
+- **`aso-appstore-screenshots`** — user-invocable (`/aso-appstore-screenshots`); generates App Store / Play Store marketing screenshots from benefit discovery → scaffold → AI enhancement. Needs Python `Pillow` + `openai` (`pip install -r` the skill's `requirements.txt`) and an `OPENAI_API_KEY` for the enhancement step. Writes `screenshots/` + `.aso/state.md` to the project root — both gitignored; never commit generated images or the key.
 
 ## Architecture (at a glance)
 

@@ -1,0 +1,5 @@
+# Python dependencies for the ASO App Store Screenshots skill scripts.
+# compose.py / crop.py / showcase.py / generate_frame.py need Pillow.
+# scripts/edit.py (AI enhancement via OpenAI gpt-image-2) needs openai.
+Pillow>=9.0
+openai>=1.40.0

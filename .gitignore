@@ -111,3 +111,7 @@ playground.xcworkspace
 
 # MkDocs build output (CI builds and deploys it; never commit)
 site/
+
+# aso-appstore-screenshots skill — generated output (never commit marketing images / state)
+/screenshots/
+/.aso/
