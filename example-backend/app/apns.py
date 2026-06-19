@@ -23,11 +23,17 @@ _log = get_logger("apns")
 # Apple requires provider tokens be refreshed every 20–60 minutes; re-mint at 50.
 _JWT_MAX_AGE_SECS = 50 * 60
 
+# APNs has two separate environments with separate token namespaces. The same .p8
+# provider key authenticates to both; only the host — and which one the token is
+# bound to — differ.
+_PRODUCTION_HOST = "api.push.apple.com"
+_SANDBOX_HOST = "api.sandbox.push.apple.com"
+
 # Hints keyed on APNs' `reason` string, surfaced to the operator via /admin/ring.
 REASON_HINTS = {
     "BadDeviceToken": (
-        "The token doesn't match this APNs environment — check APNS_USE_SANDBOX "
-        "against how the app was signed (Xcode dev builds → sandbox)."
+        "The token was rejected by both APNs environments — it's stale or malformed "
+        "(e.g. the app was reinstalled). Re-enable inbound in the app to re-register."
     ),
     "Unregistered": (
         "The device token is no longer valid (app reinstalled/removed). The stale "
@@ -86,9 +92,7 @@ class ApnsSender:
             self._jwt_issued_at = now
         return self._jwt
 
-    async def send_voip_push(self, *, voip_token: str, bundle_id: str, payload: dict) -> ApnsResult:
-        host = "api.sandbox.push.apple.com" if settings.apns_use_sandbox else "api.push.apple.com"
-        topic = settings.apns_topic or f"{bundle_id}.voip"
+    async def _post(self, *, host: str, voip_token: str, topic: str, payload: dict) -> ApnsResult:
         resp = await self._client.post(
             f"https://{host}/3/device/{voip_token}",
             json=payload,
@@ -109,7 +113,24 @@ class ApnsSender:
                 reason = resp.text or None
             if reason in ("ExpiredProviderToken", "InvalidProviderToken"):
                 self._jwt = None  # re-mint on the next attempt
-        event(_log, "apns.push_sent", status=resp.status_code, reason=reason, topic=topic)
+        event(_log, "apns.push_sent", status=resp.status_code, reason=reason, topic=topic, host=host)
         return ApnsResult(
             status=resp.status_code, reason=reason, apns_id=resp.headers.get("apns-id")
         )
+
+    async def send_voip_push(self, *, voip_token: str, bundle_id: str, payload: dict) -> ApnsResult:
+        topic = settings.apns_topic or f"{bundle_id}.voip"
+        # A VoIP token is valid on exactly one APNs environment (sandbox for dev-signed
+        # builds, production for TestFlight/App Store) and doesn't reveal which, so try
+        # the preferred host and fall back to the other on BadDeviceToken — the same
+        # engine then rings both build types without reconfiguration. apns_use_sandbox
+        # only picks which host is tried first; a matched first try skips the fallback.
+        hosts = (
+            (_SANDBOX_HOST, _PRODUCTION_HOST)
+            if settings.apns_use_sandbox
+            else (_PRODUCTION_HOST, _SANDBOX_HOST)
+        )
+        result = await self._post(host=hosts[0], voip_token=voip_token, topic=topic, payload=payload)
+        if result.reason == "BadDeviceToken":
+            result = await self._post(host=hosts[1], voip_token=voip_token, topic=topic, payload=payload)
+        return result

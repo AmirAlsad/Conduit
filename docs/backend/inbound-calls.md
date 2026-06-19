@@ -45,11 +45,23 @@ paste its contents into a log or chat.
 | `APNS_KEY_BASE64` | …or the key's contents, base64-encoded (hosted platforms): `base64 -i AuthKey_XXXXXXXXXX.p8 \| tr -d '\n'` |
 | `APNS_KEY_ID` | The key's ID from the portal |
 | `APNS_TEAM_ID` | Your Apple Developer Team ID |
-| `APNS_USE_SANDBOX` | Default `true` — correct for Xcode (dev-signed) builds. Set `false` only for TestFlight / App Store distribution signing |
+| `APNS_USE_SANDBOX` | Optional. The engine rings both APNs environments and falls back automatically, so you rarely set this — it only picks which host is tried *first*. Leave unset/`false` for **production** (App Store / TestFlight, the normal case); set `true` to try **sandbox** first while iterating on a dev-signed Xcode build (skips one round-trip) |
 | `APNS_TOPIC` | Optional override; normally derived as `<registered bundle id>.voip` |
 
 Set either `APNS_KEY_PATH` or `APNS_KEY_BASE64`; the engine validates these at the
 moment you ring, not at boot, so the rest of the engine runs fine without them.
+
+!!! note "Which APNs environment? (production vs. sandbox)"
+    A VoIP device token is valid on only **one** APNs environment, decided by how the
+    **app** was signed — and the token doesn't reveal which, so the engine tries one
+    host and automatically falls back to the other. You normally don't configure this:
+
+    - **Production — the normal route.** A Conduit build installed from **TestFlight or
+      the App Store** registers a production token. This is the default; ring it as-is.
+    - **Sandbox — only if you fork the app.** A build you run from **Xcode onto your own
+      device** is dev-signed and registers a sandbox token. It still rings via the
+      fallback, but set `APNS_USE_SANDBOX=true` to try sandbox first and skip a wasted
+      round-trip while you develop.
 
 ## Persistence: the registry and the (optional) volume
 
@@ -152,7 +164,7 @@ commands. A status receipt also reveals the user's busy/Focus state — fine her
 | Symptom | Likely cause |
 |---|---|
 | `404` from `/admin/ring` | No registration yet — is the toggle on, and does the registration URL end in `/inbound/register/<agent_id>`? |
-| `502` · `BadDeviceToken` | APNs environment mismatch — `APNS_USE_SANDBOX` must match the app's signing (Xcode build → sandbox/`true`) |
+| `502` · `BadDeviceToken` | The token was rejected by **both** APNs environments, so it's stale or malformed (e.g. the app was reinstalled) — re-enable inbound in the app to re-register |
 | `502` · `InvalidProviderToken` | Wrong `APNS_KEY_ID`, `APNS_TEAM_ID`, or key contents |
 | `502` · `TopicDisallowed` | Push Notifications not enabled on the App ID, or the topic doesn't match `<bundle id>.voip` |
 | `502` · `Unregistered` | The token is stale (app reinstalled); the engine evicted it — re-enable inbound in the app |

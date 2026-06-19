@@ -115,8 +115,9 @@ class Settings(BaseSettings):
     # --- Inbound calls (APNs VoIP push) ---
     # The .p8 auth key: a file path locally, or the base64 of its contents where a
     # file is awkward (e.g. a Railway variable). Key ID + Team ID come from the
-    # Apple Developer portal. Sandbox is correct for dev-signed (Xcode) builds;
-    # flip to false only for TestFlight/App Store distribution signing.
+    # Apple Developer portal. The engine rings BOTH APNs environments automatically
+    # (it falls back on BadDeviceToken), so apns_use_sandbox below only selects which
+    # host is tried first.
     apns_key_path: str | None = None
     apns_key_base64: str | None = None
     apns_key_id: str | None = None
@@ -124,7 +125,10 @@ class Settings(BaseSettings):
     # Normally derived from the registered bundle_id + ".voip"; override only if
     # your topic differs from the app's bundle id.
     apns_topic: str | None = None
-    apns_use_sandbox: bool = True
+    # Which APNs host to try first (the other is the automatic fallback): false →
+    # production first (App Store/TestFlight, the normal case); true → sandbox first
+    # (set this only when iterating on dev-signed Xcode builds, to skip a round-trip).
+    apns_use_sandbox: bool = False
 
     # --- Deployment / ops ---
     public_base_url: str | None = None  # for webhook registration at deploy time

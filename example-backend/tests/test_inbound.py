@@ -130,8 +130,9 @@ def test_ring_apns_bad_token_surfaces_reason_and_hint():
         assert r.status_code == 502, r.text
         detail = r.json()["detail"]
         assert detail["reason"] == "BadDeviceToken"
-        assert "APNS_USE_SANDBOX" in detail["hint"]
-        # Only 410 evicts; a sandbox/prod mismatch keeps the registration.
+        assert "both" in detail["hint"].lower()
+        # Only 410 evicts; a BadDeviceToken (now: rejected by both environments) keeps
+        # the registration.
         assert app.state.registry._get_voip("loopback") is not None
 
 
