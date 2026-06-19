@@ -57,6 +57,23 @@ Because the call action is a system **App Intent**, it also appears in the
 automations (for example: when my phone connects to the car's Bluetooth, call
 my agent).
 
+## Calls from your agent
+
+If your agent's backend supports it, your agent can **call you** — the app rings as
+a normal incoming call, even from the lock screen, showing the agent's name and
+photo (once you've added it to Contacts). Turn it on per agent with **"Let this
+agent call me"** in the agent's settings, which registers your device with your
+backend.
+
+!!! warning "Not ringing? Check Focus / Do Not Disturb"
+    iOS silences incoming calls while a **Focus** or **Do Not Disturb** is on. The
+    call still arrives — it just won't ring or light up the lock screen, and even the
+    quiet missed-call notification is filtered. You'll still find it in the **Recents**
+    tab, marked as missed. To let your agent ring through, turn off Focus/DND, or
+    allow calls from the agent's contact in your Focus settings. (If it's missing from
+    Recents entirely, inbound isn't registered — re-toggle "Let this agent call me",
+    and make sure you're testing on a real device, not the simulator.)
+
 ## Add to Contacts
 
 **Add to Contacts** (Agent Detail) saves the agent as a regular iOS contact —

@@ -169,4 +169,4 @@ commands. A status receipt also reveals the user's busy/Focus state — fine her
 | `502` · `TopicDisallowed` | Push Notifications not enabled on the App ID, or the topic doesn't match `<bundle id>.voip` |
 | `502` · `Unregistered` | The token is stale (app reinstalled); the engine evicted it — re-enable inbound in the app |
 | `503` | APNs vars not set on the engine (or, for `--inline`, the transport/model keys are missing) |
-| APNs `200` but no ring | The app must be on a real device; one call at a time (a ring during an active call is logged as missed, never breaks through); an unknown agent UUID in the app ends the call gracefully |
+| APNs `200` but no ring | **Most often Focus / Do Not Disturb** — iOS filters the call, so it doesn't ring or alert the lock screen but **is logged in the app's Recents as a missed call** (the status receipt reads `suppressed_by_focus`). Other causes: the app must be on a real device; one call at a time (a ring during an active call is logged as missed, never breaks through); an unknown agent UUID in the app ends the call gracefully |

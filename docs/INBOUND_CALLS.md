@@ -150,7 +150,7 @@ Authorization: Bearer <API key>
 | `answered` | The user answered (sent at answer, before the transport connects) |
 | `declined` | The user declined the ring |
 | `busy` | The push arrived during another Conduit call (logged as missed) |
-| `suppressed_by_focus` | Focus/DND filtered the ring — the phone never rang |
+| `suppressed_by_focus` | Focus/DND filtered the ring — the phone never rang (the call is still logged in the app's Recents as missed) |
 
 One receipt per ring, describing the *ring*: a normal hang-up after an answered call
 sends nothing further. Omit `status_url` and the app sends nothing. Return any 2xx;
