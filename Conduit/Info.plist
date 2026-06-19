@@ -45,6 +45,12 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Conduit uses the microphone to carry your voice to your agent during a call.</string>
+	<!-- Conduit makes voice-only calls and never opens the camera. Apple's static
+	     analysis still requires this string because the real-time calling SDKs
+	     (WebRTC/LiveKit/Daily) reference camera APIs for their video features. The
+	     prompt is never triggered at runtime. (ITMS-90683) -->
+	<key>NSCameraUsageDescription</key>
+	<string>Conduit places voice-only calls and does not use the camera. This permission appears only because Conduit's real-time calling framework includes camera support.</string>
 	<!-- SmallWebRTC agents run on the user's own machine; the first connection to a
 	     LAN address triggers iOS's local-network consent prompt. -->
 	<key>NSLocalNetworkUsageDescription</key>
