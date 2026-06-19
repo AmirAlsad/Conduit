@@ -79,7 +79,7 @@ struct ContactsView: View {
                 Button("Add Agent") { sheetRequest = AgentSheetRequest(editing: nil, prefill: nil) }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier(AccessibilityID.Contacts.emptyAddButton)
-                Link("Learn how to connect your agent", destination: ExternalLinks.connectYourAgent)
+                Link("Learn how to connect your agent.", destination: ExternalLinks.connectYourAgent)
                     .font(.footnote)
                     .accessibilityIdentifier(AccessibilityID.Contacts.emptySetupLink)
             }
