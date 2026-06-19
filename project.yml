@@ -57,6 +57,10 @@ settings:
     SWIFT_VERSION: "5.0"
   configs:
     Debug:
+      # Sandbox APNs for development device builds; the Release value (production)
+      # is what App Store / TestFlight inbound VoIP push registers against. Consumed
+      # by Conduit.entitlements via $(APS_ENVIRONMENT).
+      APS_ENVIRONMENT: development
       COPY_PHASE_STRIP: false
       DEBUG_INFORMATION_FORMAT: dwarf
       ENABLE_TESTABILITY: true
@@ -70,6 +74,7 @@ settings:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG $(inherited)
       SWIFT_OPTIMIZATION_LEVEL: "-Onone"
     Release:
+      APS_ENVIRONMENT: production
       COPY_PHASE_STRIP: false
       DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
       ENABLE_NS_ASSERTIONS: false
@@ -120,8 +125,10 @@ targets:
       properties:
         # VoIP push for inbound, agent-initiated calls. Device builds need the Push
         # Notifications capability enabled on the App ID (a paid Apple Developer
-        # account); the simulator ignores it. See docs/INBOUND_CALLS.md.
-        aps-environment: development
+        # account); the simulator ignores it. The environment is config-driven
+        # (Debug=development sandbox, Release=production) so App Store / TestFlight
+        # builds register against production APNs. See docs/INBOUND_CALLS.md.
+        aps-environment: $(APS_ENVIRONMENT)
         # SiriKit calling domain (in-app INStartCallIntent handling). Standard
         # free capability; automatic signing adds it to the App ID.
         com.apple.developer.siri: true

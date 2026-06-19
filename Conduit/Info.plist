@@ -20,6 +20,11 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Conduit only uses exempt encryption (TLS/HTTPS and WebRTC's standard media
+	     encryption), so it qualifies for the export-compliance exemption. Declaring
+	     this skips the per-upload encryption questionnaire in App Store Connect. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchScreen</key>
