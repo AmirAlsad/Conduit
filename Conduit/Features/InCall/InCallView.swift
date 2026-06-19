@@ -12,11 +12,27 @@ import SwiftUI
 
 struct InCallView: View {
     @Environment(AppEnvironment.self) private var environment
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage(SettingsStore.pushToTalkKey) private var pushToTalk = false
     @State private var isHolding = false
     @State private var activeRouteKind: AudioRouteKind = .other
 
     private var coordinator: CallSessionCoordinator { environment.callSession }
+
+    // MARK: - Adaptive call surface
+    // The call screen follows the system appearance: white-on-dark in dark mode,
+    // dark-on-light in light mode. The agent color stays vivid (dark-resolved) in
+    // both, so an agent keeps its identity; `onSurface`/`surfaceBase` keep every
+    // label and control legible whichever way the gradient fades.
+
+    /// The primary foreground for the name, status, and control glyphs.
+    private var onSurface: Color { colorScheme == .dark ? .white : .black }
+    /// The color the background gradient fades to (and the opaque base behind it).
+    private var surfaceBase: Color { colorScheme == .dark ? .black : .white }
+    /// The unfilled control-circle fill — a faint wash of the surface's opposite.
+    private var controlFill: Color {
+        colorScheme == .dark ? .white.opacity(0.15) : .black.opacity(0.06)
+    }
 
     var body: some View {
         let state = coordinator.state
@@ -25,6 +41,7 @@ struct InCallView: View {
             background
 
             VStack(spacing: 0) {
+                topBar(state: state)
                 header(state: state)
                 Spacer()
                 avatar
@@ -34,16 +51,8 @@ struct InCallView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 32)
         }
-        .tint(.white)
-        .preferredColorScheme(.dark)
+        .tint(onSurface)
         .accessibilityIdentifier(AccessibilityID.InCall.screen)
-        .onChange(of: state.isTerminal) { _, isTerminal in
-            guard isTerminal else { return }
-            Task {
-                try? await Task.sleep(for: .seconds(2))
-                coordinator.reset()
-            }
-        }
         .onAppear { activeRouteKind = .active }
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
             activeRouteKind = .active
@@ -82,13 +91,65 @@ struct InCallView: View {
 
     // MARK: - Background
 
+    /// The active agent's identity color (name-derived placeholder when there's no
+    /// agent yet). Resolved dark, matching `AgentColor`, so it's stable.
+    private var agentColor: Color {
+        (coordinator.activeAgent?.paletteColor ?? .derived(forName: "Agent")).color
+    }
+
     private var background: some View {
-        LinearGradient(
-            colors: [Color(white: 0.10), .black],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        ZStack(alignment: .top) {
+            // Opaque base — the wash below uses agent-color opacity, so without this
+            // the screen (an overlay, not a modal cover) would show the tabs through it.
+            surfaceBase
+            // A top-down wash in the agent's color — a quieter echo of the avatar,
+            // fading to the surface base where the controls sit.
+            LinearGradient(
+                stops: [
+                    .init(color: agentColor.opacity(0.55), location: 0),
+                    .init(color: agentColor.opacity(0.18), location: 0.35),
+                    .init(color: surfaceBase, location: 0.72),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            // Dark mode only: a thin top scrim so the white name/status stay legible
+            // on lighter palette colors (orange/teal). In light mode the labels are
+            // dark, so the scrim would only muddy the wash.
+            if colorScheme == .dark {
+                LinearGradient(
+                    colors: [.black.opacity(0.35), .clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 300)
+                .frame(maxWidth: .infinity)
+            }
+        }
         .ignoresSafeArea()
+    }
+
+    // MARK: - Top bar (minimize)
+
+    @ViewBuilder
+    private func topBar(state: CallState) -> some View {
+        HStack {
+            if !state.isTerminal {
+                Button {
+                    environment.isCallScreenMinimized = true
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(onSurface)
+                        .frame(width: 44, height: 44)
+                        .background(controlFill, in: .circle)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Minimize")
+                .accessibilityIdentifier(AccessibilityID.InCall.closeButton)
+            }
+            Spacer()
+        }
     }
 
     // MARK: - Header
@@ -97,7 +158,7 @@ struct InCallView: View {
         VStack(spacing: 8) {
             Text(coordinator.activeAgent?.name ?? "Agent")
                 .font(.largeTitle.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(onSurface)
                 .multilineTextAlignment(.center)
                 .accessibilityIdentifier(AccessibilityID.InCall.agentName)
 
@@ -106,7 +167,7 @@ struct InCallView: View {
             if case .failed(let reason) = state {
                 Text(reason.hint)
                     .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(onSurface.opacity(0.55))
                     .multilineTextAlignment(.center)
                     .accessibilityIdentifier(AccessibilityID.InCall.failureHint)
             }
@@ -119,16 +180,21 @@ struct InCallView: View {
             if coordinator.isInterrupted {
                 Text("Paused")
             } else if case .connected(let since) = state {
-                Text(since, style: .timer)
-                    .monospacedDigit()
-            } else if let text = InCallStatus.text(for: state) {
+                HStack(spacing: 4) {
+                    if let transport = coordinator.activeAgent?.transportKind.displayName {
+                        Text("\(transport) ·")
+                    }
+                    Text(since, style: .timer)
+                        .monospacedDigit()
+                }
+            } else if !coordinator.endedByUser, let text = InCallStatus.text(for: state) {
                 Text(text)
             } else {
                 Text(" ")
             }
         }
         .font(.title3)
-        .foregroundStyle(.white.opacity(0.7))
+        .foregroundStyle(onSurface.opacity(0.7))
         .contentTransition(.identity)
         .accessibilityIdentifier(AccessibilityID.InCall.statusLabel)
     }
@@ -139,16 +205,20 @@ struct InCallView: View {
         AgentAvatarView(
             name: coordinator.activeAgent?.name ?? "Agent",
             imageData: coordinator.activeAgent?.avatarData,
-            size: 140
+            color: coordinator.activeAgent?.paletteColor,
+            size: 180
         )
-        .speakingGlow(isActive: coordinator.isBotSpeaking, level: coordinator.remoteAudioLevel)
+        .activeSpeakerRing(isActive: coordinator.isBotSpeaking, color: agentColor)
     }
 
     // MARK: - Controls
 
     @ViewBuilder
     private func controls(state: CallState) -> some View {
-        if state.isTerminal {
+        // A user-ended call is dismissed immediately by RootTabView; keep the active
+        // controls during the slide-away so no "Call Ended" page flashes. Remote
+        // hangups / failures (endedByUser == false) show their terminal page + Close.
+        if state.isTerminal && !coordinator.endedByUser {
             terminalControls
         } else {
             activeControls
@@ -156,12 +226,21 @@ struct InCallView: View {
     }
 
     private var activeControls: some View {
-        VStack(spacing: 40) {
-            HStack(spacing: 56) {
+        VStack(spacing: 12) {
+            HStack(spacing: 24) {
                 micControl
                 routeButton
+                endButton
             }
-            endButton
+            .padding(.horizontal, 22)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: .capsule)
+
+            if pushToTalk {
+                Text("Hold to Talk")
+                    .font(.caption)
+                    .foregroundStyle(onSurface.opacity(0.7))
+            }
         }
     }
 
@@ -170,10 +249,10 @@ struct InCallView: View {
             coordinator.reset()
         }
         .font(.title3.weight(.semibold))
-        .foregroundStyle(.white)
+        .foregroundStyle(onSurface)
         .padding(.horizontal, 40)
         .padding(.vertical, 14)
-        .background(.white.opacity(0.15), in: .capsule)
+        .background(controlFill, in: .capsule)
         .accessibilityIdentifier(AccessibilityID.InCall.closeButton)
     }
 
@@ -205,13 +284,6 @@ struct InCallView: View {
 
     private var pushToTalkButton: some View {
         controlCircle(systemImage: "waveform", filled: isHolding)
-            .overlay(alignment: .bottom) {
-                Text("Hold to Talk")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .fixedSize()
-                    .offset(y: 22)
-            }
             .contentShape(.circle)
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -289,12 +361,15 @@ struct InCallView: View {
 
     private var endButton: some View {
         Button {
+            // Mark the user-end so RootTabView dismisses the cover instantly (no
+            // slide-down), then tear the call down.
+            coordinator.markEndedByUser()
             Task { await coordinator.endCall() }
         } label: {
             Image(systemName: "phone.down.fill")
-                .font(.system(size: 30, weight: .medium))
+                .font(.system(size: 24, weight: .medium))
                 .foregroundStyle(.white)
-                .frame(width: 72, height: 72)
+                .frame(width: 60, height: 60)
                 .background(.red, in: .circle)
         }
         .buttonStyle(.plain)
@@ -306,10 +381,10 @@ struct InCallView: View {
 
     private func controlCircle(systemImage: String, filled: Bool) -> some View {
         Image(systemName: systemImage)
-            .font(.system(size: 26, weight: .medium))
-            .foregroundStyle(filled ? .black : .white)
-            .frame(width: 64, height: 64)
-            .background(filled ? AnyShapeStyle(.white) : AnyShapeStyle(.white.opacity(0.15)), in: .circle)
+            .font(.system(size: 24, weight: .medium))
+            .foregroundStyle(filled ? surfaceBase : onSurface)
+            .frame(width: 60, height: 60)
+            .background(filled ? AnyShapeStyle(onSurface) : AnyShapeStyle(controlFill), in: .circle)
     }
 }
 

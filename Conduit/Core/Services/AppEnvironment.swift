@@ -41,6 +41,10 @@ final class AppEnvironment {
     /// cold-launch-from-Siri race). Expires after 30s so a never-consumed
     /// request (locked-phone attempt) can't resurface as a phantom call.
     var pendingSiriCall: PendingSiriCall?
+    /// Whether the user minimized the in-call surface (the call stays fully alive;
+    /// only the projection is dismissed). RootTabView gates the in-call cover on
+    /// this and clears it to re-present on return. Never touches the coordinator.
+    var isCallScreenMinimized: Bool = false
 
     init(
         modelContainer: ModelContainer,

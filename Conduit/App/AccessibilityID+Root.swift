@@ -17,5 +17,8 @@ extension AccessibilityID {
         /// Identifier for an indexed tab's root content.
         /// - Parameter index: Zero-based tab position (0 Recents, 1 Contacts, 2 Settings).
         static func tab(_ index: Int) -> String { "Root_Tab_\(index)" }
+
+        /// The in-app "return to the minimized call" affordance.
+        static let returnToCall = "Root_ReturnToCall"
     }
 }

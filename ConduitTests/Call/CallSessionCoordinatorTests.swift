@@ -311,6 +311,29 @@ struct CallSessionCoordinatorTests {
         #expect(h.coordinator.activeAgent == nil)
     }
 
+    @Test func lateConnectFailureAfterResetDoesNotReFail() async throws {
+        let h = try CoordinatorHarness()
+        h.transport.suspendConnect = true
+        h.transport.connectError = .authenticationFailed
+
+        // placeCall → connectTransport → connect() is entered and suspends.
+        let place = Task { await h.coordinator.placeCall(h.agent) }
+        await waitUntil { h.transport.connectCount == 1 }
+
+        // An event fails the call (as the real transport would), then the user closes it.
+        h.coordinator.handle(.disconnected(reason: .authFailed))
+        #expect(h.coordinator.state.failureReason == .badToken)
+        h.coordinator.reset()
+        #expect(h.coordinator.state == .idle)
+
+        // connect() now resolves LATE and throws. The stale failure must be ignored —
+        // re-failing would re-present the call screen after it was dismissed.
+        h.transport.releaseConnect()
+        await place.value
+
+        #expect(h.coordinator.state == .idle)
+    }
+
     // MARK: - Speaking indicators
 
     @Test func botSpeakingEventsTrackState() async throws {

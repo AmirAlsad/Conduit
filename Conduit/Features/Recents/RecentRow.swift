@@ -14,7 +14,7 @@ struct RecentRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AgentAvatarView(name: agentName, imageData: entry.agent?.avatarData)
+            AgentAvatarView(name: agentName, imageData: entry.agent?.avatarData, color: entry.agent?.paletteColor)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(agentName)

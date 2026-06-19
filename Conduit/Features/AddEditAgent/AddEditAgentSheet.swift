@@ -72,6 +72,7 @@ struct AddEditAgentSheet: View {
     private var identitySection: some View {
         Section("Identity") {
             avatarPicker
+            colorRow
             TextField("Name", text: $viewModel.name)
                 .accessibilityIdentifier(AccessibilityID.AddAgent.nameField)
             TextField("Label (optional)", text: $viewModel.detail)
@@ -79,10 +80,36 @@ struct AddEditAgentSheet: View {
         }
     }
 
+    private var colorRow: some View {
+        HStack(spacing: 8) {
+            ForEach(AgentColor.allCases, id: \.self) { swatch in
+                let isSelected = swatch == viewModel.effectiveColor
+                Button {
+                    viewModel.selectedColor = swatch
+                } label: {
+                    Circle()
+                        .fill(swatch.color)
+                        .frame(width: 26, height: 26)
+                        .padding(3)
+                        .overlay {
+                            Circle()
+                                .strokeBorder(isSelected ? Color.primary : .clear, lineWidth: 2)
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(swatch.rawValue.capitalized)
+                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+                .accessibilityIdentifier(AccessibilityID.AddAgent.colorSwatch(swatch))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .listRowBackground(Color.clear)
+    }
+
     private var avatarPicker: some View {
         let hasPhoto = viewModel.avatarData != nil
         return VStack(spacing: 12) {
-            AgentAvatarView(name: viewModel.name, imageData: viewModel.avatarData, size: 88)
+            AgentAvatarView(name: viewModel.name, imageData: viewModel.avatarData, color: viewModel.effectiveColor, size: 88)
 
             PhotosPicker(
                 selection: $photoItem,

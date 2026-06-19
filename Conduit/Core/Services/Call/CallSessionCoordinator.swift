@@ -34,6 +34,10 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     /// Available audio routes and the active one, for the in-call route picker.
     private(set) var audioDevices: [AudioDeviceInfo] = []
     private(set) var selectedAudioDeviceID: String?
+    /// Set when the local user taps End (vs a remote hangup or a failure). The UI
+    /// dismisses a user-ended call immediately with no terminal page; remote/failed
+    /// terminals keep their page until Close. Cleared on reset.
+    private(set) var endedByUser = false
 
     // MARK: - Dependencies
 
@@ -279,6 +283,11 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
             try await transport.connect(config)
         } catch {
             Log.error(.transport, "connect failed: \(error)")
+            // `connect` can resolve LATE — after an event already failed this call and
+            // the user reset to idle (or started another call). Failing again would
+            // re-enter `.failed` and re-present the call screen. Ignore unless this is
+            // still the live transport.
+            guard self.transport === transport else { return }
             fail((error as? TransportError) == .authenticationFailed ? .badToken : .transportError)
         }
     }
@@ -529,6 +538,9 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
 
     func providerPerformEndCall(_ id: UUID) {
         Log.info(.callkit, "System requested end call")
+        // Idempotent against our own End path, which already finished and reset (so
+        // `activeCallID` is nil): only act while this id is still the live call.
+        guard activeCallID == id else { return }
         finishEnded()
     }
 
@@ -568,12 +580,27 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
 
     // MARK: - User-initiated controls
 
+    /// Flip the user-ended flag synchronously so the UI can dismiss the in-call
+    /// cover in the SAME (animation-disabled) transaction as the tap — no slide-down
+    /// reveal. `endCall()` then does the actual teardown asynchronously.
+    func markEndedByUser() {
+        guard state.isActive, !state.isTerminal else { return }
+        endedByUser = true
+    }
+
     func endCall() async {
         guard state.isActive, !state.isTerminal else { return }
-        // Request the system end; the real provider round-trips through
-        // providerPerformEndCall, which the terminal guard makes idempotent.
-        if let id = activeCallID { await callProvider.endCall(id) }
+        // Mark this as a local user-end: the UI dismisses immediately with no
+        // "Call Ended" page (presentation lives in RootTabView), while the state
+        // still goes `.ended` (logged) per the coordinator contract. Going terminal
+        // BEFORE the system round-trip also avoids the mid-`.connecting` race where a
+        // teardown disconnect would be misread as `.failed`. `finishEnded` nils
+        // `activeCallID`, so capture it first; the round-trip then no-ops on the
+        // stale id (see `providerPerformEndCall`).
+        endedByUser = true
+        let id = activeCallID
         finishEnded()
+        if let id { await callProvider.endCall(id) }
     }
 
     func setMuted(_ muted: Bool) async {
@@ -612,6 +639,18 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         guard state.isTerminal else { return }
         resetState()
     }
+
+    #if DEBUG
+    /// Project a connected call onto the in-call surface without a real transport,
+    /// so its look can be screenshotted in the simulator. Drives only the observed
+    /// state the view reads — no CallKit, no media.
+    func debugPresentConnected(agent: Agent, secondsElapsed: TimeInterval = 154, botSpeaking: Bool = true) {
+        activeAgent = agent
+        callDirection = .outgoing
+        state = .connected(since: now().addingTimeInterval(-secondsElapsed))
+        isBotSpeaking = botSpeaking
+    }
+    #endif
 
     private var micShouldBeOn: Bool {
         !isMuted && !isPushToTalkEnabled()
@@ -693,6 +732,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         audioDevices = []
         selectedAudioDeviceID = nil
         didApplyHandsFreeDefault = false
+        endedByUser = false
     }
 
     private func writeLog(outcome: CallOutcome, failureReason: CallFailureReason? = nil) {

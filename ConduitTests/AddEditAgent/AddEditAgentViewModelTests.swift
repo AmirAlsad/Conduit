@@ -151,6 +151,61 @@ struct AddEditAgentViewModelTests {
         #expect(try repo.fetchAll().count == 1)
     }
 
+    // MARK: - Color selection
+
+    @Test func newAgentColorFollowsTheNameUntilTouched() throws {
+        let vm = makeViewModel(repository: try makeRepository())
+        vm.name = "Jarvis"
+        #expect(vm.selectedColor == nil) // untouched
+        #expect(vm.effectiveColor == .derived(forName: "Jarvis"))
+        vm.name = "Vision"
+        #expect(vm.effectiveColor == .derived(forName: "Vision")) // tracks the name
+    }
+
+    @Test func savingNewAgentStampsTheEffectiveColor() async throws {
+        let repo = try makeRepository()
+        let vm = makeViewModel(repository: repo)
+        vm.name = "Jarvis"
+        vm.connectionURLText = "https://x.daily.co/room"
+
+        try await vm.save()
+
+        let agent = try #require(try repo.fetchAll().first)
+        #expect(agent.paletteColor == .derived(forName: "Jarvis"))
+    }
+
+    @Test func tappingASwatchOverridesTheNameColor() async throws {
+        let repo = try makeRepository()
+        let vm = makeViewModel(repository: repo)
+        vm.name = "Jarvis"
+        vm.connectionURLText = "https://x.daily.co/room"
+        vm.selectedColor = .pink // user tapped a swatch
+
+        #expect(vm.effectiveColor == .pink)
+        try await vm.save()
+
+        let agent = try #require(try repo.fetchAll().first)
+        #expect(agent.paletteColor == .pink)
+    }
+
+    @Test func editingLoadsTheStoredColorAndFreezesItOnRename() async throws {
+        let repo = try makeRepository()
+        let agent = Agent(
+            name: "Jarvis", colorToken: .indigo, transportKind: .daily,
+            connectionURL: URL(string: "https://a.daily.co/r")!
+        )
+        repo.insert(agent)
+        try repo.save()
+
+        let vm = makeViewModel(editing: agent, repository: repo)
+        #expect(vm.selectedColor == .indigo) // loaded as a concrete value
+        vm.name = "Vision"
+        #expect(vm.effectiveColor == .indigo) // frozen — a rename doesn't re-roll
+
+        try await vm.save()
+        #expect(agent.paletteColor == .indigo)
+    }
+
     // MARK: - Deep-link prefill
 
     @Test func applyingALinkPrefillsTheForm() throws {

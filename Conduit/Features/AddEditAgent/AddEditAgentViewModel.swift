@@ -28,6 +28,13 @@ final class AddEditAgentViewModel {
     var inboundEnabled: Bool
     var inboundRegistrationURLText: String
     var avatarData: Data? = nil
+    /// The user's explicit color pick, or `nil` while it should track the typed
+    /// name (a fresh add, untouched). Frozen on edit — loaded as a concrete value
+    /// so renaming an existing agent never re-rolls its color.
+    var selectedColor: AgentColor? = nil
+
+    /// The color shown and saved: the explicit pick, else the name-derived slot.
+    var effectiveColor: AgentColor { selectedColor ?? .derived(forName: name) }
 
     enum TestState: Equatable {
         case idle
@@ -76,6 +83,7 @@ final class AddEditAgentViewModel {
             self.inboundEnabled = agent.inboundRegistrationURL != nil
             self.inboundRegistrationURLText = agent.inboundRegistrationURL?.absoluteString ?? ""
             self.avatarData = agent.avatarData
+            self.selectedColor = agent.paletteColor
             self.apiKey = (try? keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef))).flatMap { $0 } ?? ""
             self.directToken = (try? keychain.token(for: KeychainTokenRef(directTokenForAgentID: agent.id))).flatMap { $0 } ?? ""
         } else {
@@ -158,6 +166,7 @@ final class AddEditAgentViewModel {
             agent.name = name.trimmed
             agent.detail = detail.trimmed
             agent.avatarData = avatarData
+            agent.colorTokenRaw = effectiveColor.rawValue
             agent.transportKindRaw = transportKind.rawValue
             agent.connectionURL = connectionURL
             agent.pairingEndpoint = pairingEndpoint
@@ -167,6 +176,7 @@ final class AddEditAgentViewModel {
                 name: name.trimmed,
                 detail: detail.trimmed,
                 avatarData: avatarData,
+                colorToken: effectiveColor,
                 transportKind: transportKind,
                 connectionURL: connectionURL,
                 pairingEndpoint: pairingEndpoint,

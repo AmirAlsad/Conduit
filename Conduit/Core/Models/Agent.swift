@@ -19,6 +19,11 @@ final class Agent {
     /// reserved name on reference types, so this is `detail`.
     var detail: String
     @Attribute(.externalStorage) var avatarData: Data?
+    /// The agent's identity color, stored as an `AgentColor` token (never RGBA).
+    /// Optional with no default so the migration is additive and CloudKit-safe;
+    /// `nil` only on agents that predate the field and resolves to the name-derived
+    /// color (see `paletteColor`). New agents always get a concrete token at init.
+    var colorTokenRaw: String?
     /// Stable synthetic `.invalid` email used as the call's email-type handle.
     var syntheticEmail: String
     var transportKindRaw: String
@@ -46,6 +51,7 @@ final class Agent {
         name: String,
         detail: String = "",
         avatarData: Data? = nil,
+        colorToken: AgentColor? = nil,
         transportKind: TransportKind,
         connectionURL: URL? = nil,
         pairingEndpoint: URL? = nil,
@@ -56,6 +62,9 @@ final class Agent {
         self.name = name
         self.detail = detail
         self.avatarData = avatarData
+        // Stamp a concrete color at creation (frozen on rename); fall back to the
+        // name-derived slot so every creation path — deep links included — gets one.
+        self.colorTokenRaw = (colorToken ?? .derived(forName: name)).rawValue
         self.syntheticEmail = Agent.makeSyntheticEmail(name: name)
         self.transportKindRaw = transportKind.rawValue
         self.connectionURL = connectionURL
@@ -69,5 +78,11 @@ final class Agent {
 
     var transportKind: TransportKind {
         TransportKind(rawValue: transportKindRaw) ?? .daily
+    }
+
+    /// The agent's identity color. Falls back to the name-derived slot for legacy
+    /// agents whose token predates the field (`nil`).
+    var paletteColor: AgentColor {
+        colorTokenRaw.flatMap(AgentColor.init(rawValue:)) ?? .derived(forName: name)
     }
 }

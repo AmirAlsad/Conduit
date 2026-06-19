@@ -24,6 +24,12 @@ final class FakeTransport: Transport, @unchecked Sendable {
     /// When set, the next `connect(_:)` throws this instead of succeeding.
     var connectError: TransportError?
 
+    /// When true, `connect(_:)` suspends until `releaseConnect()` — lets a test fail
+    /// and reset the call before `connect` resolves, exercising late-resolution races.
+    var suspendConnect = false
+    private var connectContinuation: CheckedContinuation<Void, Never>?
+    private var connectReleased = false
+
     init() {
         let (stream, continuation) = AsyncStream.makeStream(of: TransportEvent.self)
         self.events = stream
@@ -33,7 +39,23 @@ final class FakeTransport: Transport, @unchecked Sendable {
     func connect(_ config: TransportConfig) async throws {
         connectCount += 1
         lastConfig = config
+        if suspendConnect {
+            await withCheckedContinuation { cont in
+                if connectReleased { cont.resume() } else { connectContinuation = cont }
+            }
+        }
         if let connectError { throw connectError }
+    }
+
+    /// Resume a `connect(_:)` suspended by `suspendConnect` (resolves on the next call
+    /// if it hasn't suspended yet).
+    func releaseConnect() {
+        if let cont = connectContinuation {
+            connectContinuation = nil
+            cont.resume()
+        } else {
+            connectReleased = true
+        }
     }
 
     func disconnect() async {

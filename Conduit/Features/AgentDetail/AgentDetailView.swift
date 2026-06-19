@@ -71,7 +71,7 @@ struct AgentDetailView: View {
     private var header: some View {
         Section {
             VStack(spacing: 8) {
-                AgentAvatarView(name: agent.name, imageData: agent.avatarData, size: 88)
+                AgentAvatarView(name: agent.name, imageData: agent.avatarData, color: agent.paletteColor, size: 88)
 
                 Text(agent.name)
                     .font(.title2)

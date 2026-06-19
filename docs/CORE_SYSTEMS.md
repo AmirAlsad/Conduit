@@ -104,10 +104,13 @@ sim. `ConduitApp` injects the environment via `.environment(_:)` +
 `Core/Models/` holds two `@Model` types:
 
 - **`Agent`** — name, `detail` (`description` is reserved on reference types),
-  avatar, the synthetic email handle, transport kind, connection URL, optional
-  pairing endpoint, an optional `contactIdentifier` (set once the user adds the
-  agent to Contacts), and a `keychainTokenRef`. **The token is never stored here**
-  — only a deterministic ref into the Keychain (`agent.token.<uuid>`).
+  avatar, a per-agent identity color (`colorTokenRaw`, an `AgentColor` palette
+  token — see the in-call surface below), the synthetic email handle, transport
+  kind, connection URL, optional pairing endpoint, an optional `contactIdentifier`
+  (set once the user adds the agent to Contacts), and a `keychainTokenRef`. **The
+  token is never stored here** — only a deterministic ref into the Keychain
+  (`agent.token.<uuid>`). `colorTokenRaw` is optional with no default (`nil` ⇒
+  name-derived), so the field is an additive, CloudKit-safe migration.
 - **`CallLogEntry`** — direction, start, duration, outcome (`completed` / `failed`
   / `declined` / `noAnswer` / `canceled`), transport kind.
 
@@ -220,6 +223,41 @@ Key behaviors:
   (DELETE on the registration endpoint, `PushTokenRegistrar.unregister`).
   Push/CallKit-incoming/entitlement are device-only; the coordinator paths + payload
   parsing are unit-tested. See [INBOUND_CALLS](./INBOUND_CALLS.md).
+
+## In-call surface — `InCallView`
+
+`Features/InCall/InCallView.swift` is a pure projection of `CallSessionCoordinator`
+— it owns no call logic; every control forwards intent to the coordinator. It
+presents as a `.fullScreenCover` from `RootTabView`, gated on
+`state.isActive && !environment.isCallScreenMinimized`.
+
+- **Per-agent color.** The screen takes its identity from the agent, not the app:
+  a top-down wash in the agent's `AgentColor` (saturated avatar up top, fading to
+  near-black where the controls sit) under a thin scrim so white name/status stay
+  legible on the lighter palette colors. `AgentColor` (`Core/Models/AgentColor.swift`)
+  is a curated set of eight iOS system colors, resolved against a fixed **dark**
+  trait so an agent looks identical in light or dark mode. The slot is stamped
+  concrete at creation (frozen on rename) into `Agent.colorTokenRaw`; the shared
+  `AgentAvatarView` draws a `person.fill` glyph on that color when there's no photo,
+  so the same color flows through Recents / Contacts / AgentDetail / in-call for
+  free. The Add/Edit sheet's swatch row pre-selects the name-derived slot.
+- **Status line.** Mirrors `CallState` (and so agrees with the spoken announcer):
+  `Connecting…`, `Reconnecting…`, the failure hint, or — once connected — the live
+  timer prefixed with the transport (`LiveKit · 1:23`). `Paused` while interrupted.
+- **Controls** group into one frosted pill: Mute (or Push-to-Talk when always-on
+  listening is off), the Daily-backed route menu, and the red End; the PTT caption
+  sits below the pill.
+- **Active-speaker ring.** A subtle ring around the avatar while the agent speaks
+  (`ActiveSpeakerRingModifier`, binary on `isBotSpeaking`) — the group-FaceTime
+  "active tile" cue, replacing the old amplitude glow.
+- **Minimize / return.** A down-chevron (top-left, `closeButton` id, "Minimize")
+  sets `AppEnvironment.isCallScreenMinimized`, which dismisses only the projection —
+  the coordinator, transport, and audio session stay up (the view has no
+  call-ending teardown; ending is exclusively the End button / hangup signal).
+  Returning to the foreground with a still-active minimized call (e.g. tapping the
+  CallKit Dynamic Island / status-bar pill) clears the flag and re-presents — the
+  same consume-on-`.active` pattern `RootTabView` uses for `pendingSiriCall`. A call
+  that ends while minimized is reset in `RootTabView` (no in-view auto-reset to run).
 
 ## Reconnection + spoken state
 

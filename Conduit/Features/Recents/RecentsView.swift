@@ -30,8 +30,10 @@ struct RecentsView: View {
                     .accessibilityIdentifier(AccessibilityID.Recents.addButton)
                 }
             }
-            .navigationDestination(for: Agent.self) { agent in
-                AgentDetailView(agent: agent)
+            .navigationDestination(for: CallLogEntry.self) { entry in
+                if let agent = entry.agent {
+                    AgentDetailView(agent: agent)
+                }
             }
             .sheet(isPresented: $showingAdd) {
                 AddEditAgentSheet(environment: environment)
@@ -61,7 +63,7 @@ struct RecentsView: View {
     private func row(for entry: CallLogEntry, index: Int) -> some View {
         Group {
             if let agent = entry.agent {
-                NavigationLink(value: agent) {
+                NavigationLink(value: entry) {
                     RecentRow(entry: entry)
                 }
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {

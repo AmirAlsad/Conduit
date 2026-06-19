@@ -13,6 +13,7 @@ extension AccessibilityID {
         static let nameField = "AddAgent_NameField"
         static let detailField = "AddAgent_DetailField"
         static let photoPicker = "AddAgent_PhotoPicker"
+        static func colorSwatch(_ color: AgentColor) -> String { "AddAgent_Color_\(color.rawValue)" }
         static let cropChooseButton = "AddAgent_CropChooseButton"
         static let cropCancelButton = "AddAgent_CropCancelButton"
         static let transportPicker = "AddAgent_TransportPicker"

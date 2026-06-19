@@ -40,12 +40,7 @@ struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let info = Bundle.main.infoDictionary
-        guard let short = info?["CFBundleShortVersionString"] as? String else { return "—" }
-        if let build = info?["CFBundleVersion"] as? String {
-            return "\(short) (\(build))"
-        }
-        return short
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
     }
 }
 

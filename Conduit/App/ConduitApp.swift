@@ -55,6 +55,12 @@ struct ConduitApp: App {
                 // Requests" toggle defaults OFF and Siri claims the app has no
                 // support (found in the M10 device pass).
                 .task {
+                    #if DEBUG
+                    // A UI-test / screenshot run must not trip the system Siri prompt
+                    // (it blocks the screen and there's no accessibility to dismiss it
+                    // on the iOS 26 simulator).
+                    if ProcessInfo.processInfo.arguments.contains("--uitest") { return }
+                    #endif
                     if INPreferences.siriAuthorizationStatus() == .notDetermined {
                         INPreferences.requestSiriAuthorization { status in
                             Log.info(.app, "Siri authorization: \(String(describing: status))")
@@ -64,7 +70,13 @@ struct ConduitApp: App {
                 #if DEBUG
                 .task {
                     DebugSeed.runIfRequested(environment)
-                    if ProcessInfo.processInfo.environment["CONDUIT_DEBUG_CALLKIT"] == "1" {
+                    if ProcessInfo.processInfo.environment["CONDUIT_DEBUG_INCALL"] == "1" {
+                        // Boots straight into the in-call surface — seed an agent and
+                        // drive a connected projection so it screenshots fully populated.
+                        if let hero = DebugSeed.seedIfEmpty(environment) {
+                            environment.callSession.debugPresentConnected(agent: hero)
+                        }
+                    } else if ProcessInfo.processInfo.environment["CONDUIT_DEBUG_CALLKIT"] == "1" {
                         await DebugCallKitSpike.runIfRequested()
                     } else {
                         await DebugDailyAutoConnect.runIfRequested()
@@ -82,6 +94,8 @@ struct ConduitApp: App {
         // placing a real call.
         if ProcessInfo.processInfo.environment["CONDUIT_DEBUG_INCALL"] == "1" {
             InCallView()
+        } else if ProcessInfo.processInfo.environment["CONDUIT_DEBUG_DETAIL"] == "1" {
+            DebugAgentDetailHost()
         } else {
             RootTabView()
         }

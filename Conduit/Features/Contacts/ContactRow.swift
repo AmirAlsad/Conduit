@@ -16,7 +16,7 @@ struct ContactRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AgentAvatarView(name: agent.name, imageData: agent.avatarData)
+            AgentAvatarView(name: agent.name, imageData: agent.avatarData, color: agent.paletteColor)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(agent.name)
