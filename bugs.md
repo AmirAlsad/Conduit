@@ -7,6 +7,43 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### iOS 26 Liquid Glass bled the blue background into the white icon pills (light mode)
+First seen: 2026-06-23 (App Store Connect + on-device; light mode only, dark looked fine)
+
+**Pattern:** The app icon was a single flat `AppIcon.appiconset/AppIcon.png` (white
+waveform pills on solid systemBlue `#0A84FF`). iOS 26 wraps every icon in the Liquid
+Glass material (specular + translucency + refraction); with only one flat layer it
+treats the whole image as one surface and refracts the blue up into the bottom of the
+white pills — a "blue gradient down the pills" in light mode (dark mode's darker glass
+hid it). NOT a color-profile shift (it's appearance-dependent → it's the glass).
+
+**Rule:** Control the glass with a layered Icon Composer `.icon`, not a flat PNG. Now
+`Conduit/AppIcon.icon` (sibling of `Assets.xcassets`; `ASSETCATALOG_COMPILER_APPICON_NAME`
+stays `AppIcon`; XcodeGen auto-tags it `wrapper.icon`). The actual bleed cause is
+**translucency** (the glass letting the blue background through the pills), so the only
+override needed to fix light mode is group `translucency.enabled:false` (+ `specular:false`
+to drop the highlight). Keep it minimal otherwise — let dark mode stay AUTOMATIC:
+- Background = a single manifest `fill` (solid blue), NO dark `fill-specializations` →
+  iOS auto-darkens it to the black gradient in dark mode (Apple's own Horizon example
+  relies on this). Pinning a dark fill was an over-correction that forced blue-in-dark.
+- Pills = one foreground layer (`Assets/pills.svg`) with `glass:true` and NO explicit
+  `fill` → white in light, and the system auto-recolors them BLUE in dark with the glass
+  shading (slightly darker top→bottom). That blue-on-black is the DESIRED dark look — do
+  NOT force the pills white (`glass:false` + white fill) or you lose it.
+
+Schema: github.com/dfabulich/unofficial-apple-icon-composer-json-schema.
+
+**Verify without a device:** render the real glass with Icon Composer's bundled ictool —
+`"/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool" X.icon --export-preview iOS <Default|Dark|TintedLight|TintedDark> 1024 1024 1 out.png`.
+(The Xcode `xcrun ictool` is the actool variant, NOT the renderer.) Layers can be split
+from a flat flat-color PNG with Pillow (mask white vs background; pills → SVG rects).
+
+**Why it's missed:** the source PNG looks perfect, the test-sim pin (iOS 18.6) doesn't
+render Liquid Glass at all, and dark mode masks the bleed — it only shows in light mode
+on iOS 26 (device, or an iOS 26 sim's SpringBoard — not the icon preview in Xcode).
+
+---
+
 ### Native CallKit call screen can't control Daily/WebRTC audio output
 First seen: 2026-06-08 (M5b, native route button)
 
