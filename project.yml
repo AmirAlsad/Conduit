@@ -103,7 +103,9 @@ packages:
     revision: bf829f57679fd8c534241f538dac7edd42bb433f
   LiveKit:
     url: https://github.com/livekit/client-sdk-swift.git
-    from: "2.9.0"
+    # Floor at 2.15.1 to pull the latest LiveKitWebRTC (webrtc-xcframework
+    # 144.7559.10) — App Review hygiene (Guideline 2.5.1 binary scan).
+    from: "2.15.1"
 
 targets:
   Conduit:
