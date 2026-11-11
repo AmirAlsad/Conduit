@@ -280,3 +280,23 @@ Upstream: pipecat-client-ios-small-webrtc#6.
 **Why it's missed:** Links clean, sim is fine (FakeTransport), and even on
 device the app launches normally — it only dies when Daily's track KVO fires
 mid-call. Static check: intersect `llvm-objdump --objc-meta-data` class lists.
+
+### SmallWebRTC's audio manager outlives the call and pins the audio route
+First seen: 2026-11-11 (device run after the call-engine extraction; present since M9)
+
+**Pattern:** The SmallWebRTC SDK's audio manager starts managing the shared
+`AVAudioSession` on connect and stops only on `PipecatClient.release()`, not on
+`disconnect()`. The adapter never called `release()`, so after any SmallWebRTC
+connection (a call or Test Connection) the manager kept re-applying its last
+preferred route on every route change. Later calls on ANY transport could not
+change route: the in-app picker and the native button both switched for a moment
+and snapped back to whatever was selected during the SmallWebRTC call.
+
+**Rule:** `PipecatSmallWebRTCTransport.disconnect()` calls `client.release()` after
+`client.disconnect()`. A transport is never reused after disconnect, so this is
+safe. When adding a transport, check what its SDK leaves running after disconnect
+(audio-session management, timers, observers) and release it explicitly.
+
+**Why it's missed:** It only shows after a SmallWebRTC connection in the same app
+launch, and only when you then try to change route in a later call. Calls still
+connect and sound fine, and relaunching the app clears it.

@@ -83,6 +83,11 @@ final class PipecatSmallWebRTCTransport: CallTransport, PipecatClientDelegate {
         }
         do { try await client.disconnect() }
         catch { Log.error(.transport, "SmallWebRTC disconnect error: \(error)") }
+        // The SDK's audio manager starts managing the shared AVAudioSession on connect
+        // and only stops on release(), not on disconnect(). Left running, it re-applies
+        // its own route (speaker) on every later route change, in calls on any transport.
+        // A transport is never reused after disconnect, so releasing here is safe.
+        client.release()
     }
 
     func setMicEnabled(_ enabled: Bool) async {
