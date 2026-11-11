@@ -94,7 +94,7 @@ struct InCallView: View {
     /// The active agent's identity color (name-derived placeholder when there's no
     /// agent yet). Resolved dark, matching `AgentColor`, so it's stable.
     private var agentColor: Color {
-        (coordinator.activeAgent?.paletteColor ?? .derived(forName: "Agent")).color
+        (environment.activeCallAgent?.paletteColor ?? .derived(forName: "Agent")).color
     }
 
     private var background: some View {
@@ -156,7 +156,7 @@ struct InCallView: View {
 
     private func header(state: CallState) -> some View {
         VStack(spacing: 8) {
-            Text(coordinator.activeAgent?.name ?? "Agent")
+            Text(environment.activeCallAgent?.name ?? "Agent")
                 .font(.largeTitle.weight(.semibold))
                 .foregroundStyle(onSurface)
                 .multilineTextAlignment(.center)
@@ -181,7 +181,7 @@ struct InCallView: View {
                 Text("Paused")
             } else if case .connected(let since) = state {
                 HStack(spacing: 4) {
-                    if let transport = coordinator.activeAgent?.transportKind.displayName {
+                    if let transport = environment.activeCallAgent?.transportKind.displayName {
                         Text("\(transport) ·")
                     }
                     Text(since, style: .timer)
@@ -203,9 +203,9 @@ struct InCallView: View {
 
     private var avatar: some View {
         AgentAvatarView(
-            name: coordinator.activeAgent?.name ?? "Agent",
-            imageData: coordinator.activeAgent?.avatarData,
-            color: coordinator.activeAgent?.paletteColor,
+            name: environment.activeCallAgent?.name ?? "Agent",
+            imageData: environment.activeCallAgent?.avatarData,
+            color: environment.activeCallAgent?.paletteColor,
             size: 180
         )
         .activeSpeakerRing(isActive: coordinator.isBotSpeaking, color: agentColor)

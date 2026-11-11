@@ -101,7 +101,7 @@ struct AgentDetailView: View {
             .listRowSeparator(.hidden)
 
             Button {
-                Task { await environment.callSession.placeCall(agent) }
+                Task { await environment.placeCall(agent) }
             } label: {
                 Label("Call", systemImage: "phone.fill")
             }

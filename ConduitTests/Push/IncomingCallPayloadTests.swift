@@ -22,7 +22,7 @@ struct IncomingCallPayloadTests {
         ]))
         #expect(payload.agentID == agentID)
         #expect(payload.callID == callID)
-        #expect(payload.inlineCredentials == nil)
+        #expect(payload.inlineConnection == nil)
     }
 
     @Test func parsesInlineCredentials() throws {
@@ -32,8 +32,8 @@ struct IncomingCallPayloadTests {
             "room_url": "https://example.daily.co/room",
             "token": "room-token",
         ]))
-        let creds = try #require(payload.inlineCredentials)
-        #expect(creds.roomURL == URL(string: "https://example.daily.co/room"))
+        let creds = try #require(payload.inlineConnection)
+        #expect(creds.url == URL(string: "https://example.daily.co/room"))
         #expect(creds.token == "room-token")
     }
 
@@ -52,7 +52,7 @@ struct IncomingCallPayloadTests {
 
     @Test func mintsCallIDWhenAbsent() throws {
         let payload = try #require(IncomingCallPayload(dictionary: ["agent_id": UUID().uuidString]))
-        #expect(payload.inlineCredentials == nil) // call id minted; no inline creds
+        #expect(payload.inlineConnection == nil) // call id minted; no inline creds
     }
 
     @Test func rejectsMissingAgentID() {
@@ -68,6 +68,6 @@ struct IncomingCallPayloadTests {
             "agent_id": UUID().uuidString,
             "room_url": "https://example.daily.co/room",
         ]))
-        #expect(payload.inlineCredentials == nil)
+        #expect(payload.inlineConnection == nil)
     }
 }

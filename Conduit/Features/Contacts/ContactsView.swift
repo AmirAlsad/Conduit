@@ -90,7 +90,7 @@ struct ContactsView: View {
                         ContactRow(
                             agent: agent,
                             callButtonID: AccessibilityID.Contacts.callButton(index),
-                            onCall: { Task { await environment.callSession.placeCall(agent) } }
+                            onCall: { Task { await environment.placeCall(agent) } }
                         )
                     }
                     .accessibilityIdentifier(AccessibilityID.Contacts.row(index))

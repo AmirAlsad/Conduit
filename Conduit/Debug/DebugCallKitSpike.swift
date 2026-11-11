@@ -64,22 +64,25 @@ enum DebugCallKitSpike {
         try? keychain.setToken(apiKey, for: KeychainTokenRef(account: agent.keychainTokenRef))
         record("agent created (pairing endpoint host=\(pairingEndpoint.host() ?? "?"))")
 
+        let host = AgentCallHost(
+            repository: repository,
+            keychain: keychain,
+            announcer: SpeechSpokenStateAnnouncer(),
+            missedCallNotifier: MissedCallNotifier(),
+            transportFactory: { _ in PipecatDailyTransport() }
+        )
         let coordinator = CallSessionCoordinator(
             callProvider: SystemCallProvider(),
-            transportFactory: { _ in PipecatDailyTransport() },
-            keychain: keychain,
-            repository: repository,
-            announcer: SpeechSpokenStateAnnouncer(),
             interruptionObserver: SystemAudioInterruptionObserver(),
-            missedCallNotifier: MissedCallNotifier(),
             ringStatusReporter: RingStatusReporter(),
             now: { .now },
             sleep: { try await Task.sleep(for: $0) },
             isPushToTalkEnabled: { false }
         )
+        coordinator.delegate = host
 
         record("placeCall")
-        await coordinator.placeCall(agent)
+        await coordinator.placeCall(host.target(for: agent))
 
         // Observe the call for ~45s: CallKit UI + didActivate + Daily connect +
         // the agent's greet. Records state and bot-speaking transitions.
@@ -104,6 +107,8 @@ enum DebugCallKitSpike {
         await coordinator.endCall()
         try? await Task.sleep(for: .seconds(2))
         record("state=\(String(describing: coordinator.state))")
+        // The coordinator holds its delegate weakly.
+        withExtendedLifetime(host) {}
         record("SPIKE FINISHED")
     }
 

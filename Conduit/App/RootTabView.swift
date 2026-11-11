@@ -121,7 +121,7 @@ struct RootTabView: View {
             return
         }
         Log.info(.call, "Siri dial: placing call")
-        Task { await environment.callSession.placeCall(agent) }
+        Task { await environment.placeCall(agent) }
     }
 
     /// Whether the in-call cover should be shown: an active call the user hasn't

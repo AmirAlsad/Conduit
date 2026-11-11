@@ -27,6 +27,8 @@ final class AppEnvironment {
     let interruptionObserver: AudioInterruptionObserving
     let transportFactory: (TransportKind) -> CallTransport
     let callSession: CallSessionCoordinator
+    /// The engine's delegate: call targets, history, spoken cues, Siri donation.
+    let callHost: AgentCallHost
     /// Set by the AppDelegate once PushKit is up (`VoIPPushService` is the real
     /// implementation), so saving an inbound-enabled agent registers immediately
     /// instead of waiting for the next launch. Weak: the delegate owns the service.
@@ -65,20 +67,39 @@ final class AppEnvironment {
         self.announcer = announcer
         self.interruptionObserver = interruptionObserver
         self.transportFactory = transportFactory
+        self.callHost = AgentCallHost(
+            repository: agentRepository,
+            keychain: keychain,
+            announcer: announcer,
+            missedCallNotifier: MissedCallNotifier(),
+            transportFactory: transportFactory
+        )
         self.callSession = CallSessionCoordinator(
             callProvider: callProvider,
-            transportFactory: transportFactory,
-            keychain: keychain,
-            repository: agentRepository,
-            announcer: announcer,
             interruptionObserver: interruptionObserver,
-            missedCallNotifier: MissedCallNotifier(),
             ringStatusReporter: RingStatusReporter(),
             now: { .now },
             sleep: { try await Task.sleep(for: $0) },
             isPushToTalkEnabled: isPushToTalkEnabled
         )
+        callSession.delegate = callHost
     }
+
+    func placeCall(_ agent: Agent) async {
+        await callSession.placeCall(callHost.target(for: agent))
+    }
+
+    /// The agent behind the live call, for its name, avatar, and color. nil when
+    /// the call's target is unknown (the UI falls back to a generic caller).
+    var activeCallAgent: Agent? {
+        guard let id = callSession.activeCall?.targetID else { return nil }
+        if let cached = activeCallAgentCache, cached.id == id { return cached.agent }
+        let agent = callHost.agent(id: id)
+        activeCallAgentCache = (id, agent)
+        return agent
+    }
+
+    @ObservationIgnored private var activeCallAgentCache: (id: UUID, agent: Agent?)?
 
     /// The real app environment: a persistent SwiftData store and the real
     /// Keychain / Contacts / persistence / spoken-state services. CallKit and

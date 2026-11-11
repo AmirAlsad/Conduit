@@ -16,19 +16,19 @@ import Testing
 struct CallInterruptionTests {
 
     /// Place + connect + activate so the mic is live before the interruption.
-    private func connectedCall(pushToTalk: Bool = false) async throws -> CoordinatorHarness {
-        let h = try CoordinatorHarness(pushToTalk: pushToTalk)
-        await h.coordinator.placeCall(h.agent)
+    private func connectedCall(pushToTalk: Bool = false) async -> CoordinatorHarness {
+        let h = CoordinatorHarness(pushToTalk: pushToTalk)
+        await h.placeCall()
         h.coordinator.handle(.connected)
         await h.coordinator.activate(FakeAudioSession(hasExternalAudioRoute: false))
         return h
     }
 
     @Test func observingStartsOnPlaceCallAndStopsOnEnd() async throws {
-        let h = try CoordinatorHarness()
+        let h = CoordinatorHarness()
         #expect(!h.interruption.isObserving)
 
-        await h.coordinator.placeCall(h.agent)
+        await h.placeCall()
         #expect(h.interruption.isObserving)
 
         await h.coordinator.endCall()
@@ -36,7 +36,7 @@ struct CallInterruptionTests {
     }
 
     @Test func interruptionBeganPausesMic() async throws {
-        let h = try await connectedCall()
+        let h = await connectedCall()
         #expect(h.transport.isMicEnabled)
 
         h.interruption.simulateBegan()
@@ -47,7 +47,7 @@ struct CallInterruptionTests {
     }
 
     @Test func interruptionEndedWithResumeReenablesMic() async throws {
-        let h = try await connectedCall()
+        let h = await connectedCall()
         h.interruption.simulateBegan()
         await waitUntil { !h.transport.isMicEnabled }
 
@@ -59,7 +59,7 @@ struct CallInterruptionTests {
     }
 
     @Test func interruptionEndedWithoutResumeStaysPaused() async throws {
-        let h = try await connectedCall()
+        let h = await connectedCall()
         h.interruption.simulateBegan()
         await waitUntil { !h.transport.isMicEnabled }
 
@@ -70,7 +70,7 @@ struct CallInterruptionTests {
     }
 
     @Test func resumeRespectsMute() async throws {
-        let h = try await connectedCall()
+        let h = await connectedCall()
         await h.coordinator.setMuted(true)
         #expect(!h.transport.isMicEnabled)
 
@@ -84,7 +84,7 @@ struct CallInterruptionTests {
     }
 
     @Test func resumeKeepsMicOffInPushToTalk() async throws {
-        let h = try await connectedCall(pushToTalk: true)
+        let h = await connectedCall(pushToTalk: true)
         #expect(!h.transport.isMicEnabled) // PTT holds the mic closed
 
         h.interruption.simulateBegan()
@@ -95,7 +95,7 @@ struct CallInterruptionTests {
     }
 
     @Test func endedWithoutBeganIsIgnored() async throws {
-        let h = try await connectedCall()
+        let h = await connectedCall()
         #expect(h.transport.isMicEnabled)
 
         h.interruption.simulateEnded(shouldResume: true) // no preceding interruption

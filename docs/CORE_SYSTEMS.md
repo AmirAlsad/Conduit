@@ -34,15 +34,20 @@ The `CallTransport` event surface is Conduit's own vocabulary (`TransportEvent`:
 Daily/LiveKit/RTVI types, so a second transport drops in behind the same protocol.
 
 Transports never pair: `connect(_:)` takes an already-resolved `CallConnection`
-(room/offer URL + optional token). `CallSessionCoordinator` creates and subscribes
-the transport **first**, then resolves credentials (pairing via `PairingClient`,
-the direct room + Keychain token, or inline push credentials), then connects — so a
-CallKit activation that lands mid-fetch still reaches `attachAudioSession()`. The
-same resolve step re-runs for every reconnect attempt (pairing agents re-pair;
-direct/inline reuse the same room). `PairingError.unauthorized` maps to
-`TransportError.authenticationFailed` (→ `.badToken`); other pairing failures to
-`.connectionFailed` (→ `.transportError`). Ending the call while a resolve is in
-flight leaves the attempt inert (no join, no return to `.reconnecting`).
+(room/offer URL + optional token). The coordinator is handed a `CallTarget`
+(`Core/Services/Call/CallTarget.swift`: id, display name, handle, `makeTransport`,
+`connect`); it calls `makeTransport()` and subscribes **first**, then awaits
+`target.connect()` for the credentials, then joins — so a CallKit activation that
+lands mid-fetch still reaches `attachAudioSession()`. `target.connect()` re-runs
+for every reconnect attempt. For agents the target comes from `Agent+CallTarget`
+(`Core/Services/AgentCalls/`): pairing via `PairingClient` (re-paired per attempt),
+the direct room + Keychain token, or inline push credentials (the same room every
+attempt); the agent's configuration is captured when the target is made.
+`PairingError.unauthorized` maps to `TransportError.authenticationFailed`
+(→ `.badToken`); other pairing failures to `.connectionFailed` (→ `.transportError`);
+a direct agent with no token throws `.authenticationFailed`. Ending the call while
+a resolve is in flight leaves the attempt inert (no join, no return to
+`.reconnecting`).
 
 `PipecatDailyTransport` (`Transport/`) wraps `PipecatClient` + the Daily transport
 and maps RTVI/Daily callbacks to `TransportEvent`s. `.connected` is emitted only on
@@ -99,8 +104,10 @@ instead — the iOS SDK can't reconnect in place; a retry re-pairs to a fresh bo
 
 `Core/Services/AppEnvironment.swift` — a `@MainActor @Observable` container that
 owns the SwiftData `ModelContainer`, the protocol-typed services, a
-`transportFactory: (TransportKind) -> Transport`, and the app-wide
-`CallSessionCoordinator`. `inMemory()` wires the fakes + an in-memory store
+`transportFactory: (TransportKind) -> CallTransport`, the app-wide
+`CallSessionCoordinator`, and its delegate `AgentCallHost`. UI places calls through
+`AppEnvironment.placeCall(_ agent:)` and reads the live call's agent (name, avatar,
+color) from `activeCallAgent`, looked up by `callSession.activeCall?.targetID`. `inMemory()` wires the fakes + an in-memory store
 (previews, tests). `live()` (what `ConduitApp` runs on) wires the real services —
 `KeychainService`, a persistent SwiftData store, and `SpeechSpokenStateAnnouncer`.
 CallKit (`SystemCallProvider`) and the Daily transport can't run in the simulator,
@@ -145,8 +152,8 @@ SwiftData persists only the `KeychainTokenRef`. An agent can hold **two**
 independent secrets under separate refs both derived from its id — the **pairing
 API key** (`agent.token.<id>`, also `Agent.keychainTokenRef`) and the **direct-room
 token** (`agent.directToken.<id>`) — so the two connection paths don't share a
-field. `CallSessionCoordinator.loadToken` reads whichever the call uses (pairing
-wins when both are set). The round-trip is unit-tested on the simulator under a
+field. `Agent+CallTarget` reads whichever the call uses (pairing wins when both
+are set). The round-trip is unit-tested on the simulator under a
 per-test service namespace.
 
 Adding an agent to Contacts is **optional and permission-free**. From AgentDetail,
@@ -183,6 +190,23 @@ consumed by multiple features (Recents redial, Contacts/AgentDetail call, the
 InCall projection). It conforms to `CallProviderDelegate` and
 `AudioInterruptionObserverDelegate`.
 
+It knows calls, not agents. The host side is `CallEngineDelegate`
+(`Core/Services/Call/CallEngineDelegate.swift`), synchronous and main-actor:
+`didChangeStateFrom:to:` fires on every real state change (never for a duplicate
+`.connected`), after that transition's other fields are set; `didFinish(CallRecord)`
+fires where a call ends (and for a busy ring), carrying a `missedReason` when the
+ring never reached the user; `targetForIncomingCall` resolves a push to a
+`CallTarget` (nil = unknown, the ring fails); `ringStatusBearerForTarget` supplies
+the receipt bearer. Conduit's delegate is `AgentCallHost`
+(`Core/Services/AgentCalls/AgentCallHost.swift`): it writes `CallLogEntry` rows
+(looking the agent up by target id — none, no row), posts the missed-call
+notification for busy / Focus-filtered rings, donates outgoing calls to Siri on
+`dialing → connecting`, and speaks the cues from transitions: `→ connecting`
+starts "Connecting"; `→ connected` stops it and says "Connected";
+`→ reconnecting(n)` from `connected`, or with `n == 1`, says "Disconnected" and
+starts "Retrying"; `→ ended`/`failed` stops repeating. A provider reset stops
+nothing (preserved behavior).
+
 `CallState` (`Core/Models/CallState.swift`, pure/`Equatable`):
 
 ```
@@ -206,7 +230,7 @@ Key behaviors:
   announcement never fires before the agent can actually hear the user.
 - **Idempotent terminal transitions.** `fail` / `endRemote` / `finishEnded` all
   guard on `state.isTerminal`, so the real CallKit "end" round-trip
-  (`endCall` → `providerPerformEndCall`) cannot double-write the call log.
+  (`endCall` → `providerPerformEndCall`) cannot double-record the call.
 - **Failure distinctions.** `authFailed` → `failed(.badToken)` (red in Recents);
   a never-connected drop → `failed(.transportError)`; a mid-call drop → reconnect.
 - **Audio interruptions.** `AudioInterruptionObserving` (real:
@@ -218,11 +242,12 @@ Key behaviors:
   that both re-apply mic state idempotently. Transient GPS/nav ducking is system-managed
   by `.duckOthers`; this observer covers full takeovers (Siri, a phone call). The live
   audio behavior is device-only; the begin/resume logic is unit-tested via the fake.
-- **Inbound (agent-initiated) calls.** A VoIP push (PushKit) → `receiveCall(_:)` resolves
-  the agent, reports an incoming call to CallKit (`reportIncomingCall`), and rings in
+- **Inbound (agent-initiated) calls.** A VoIP push (PushKit) → `receiveCall(_:)` asks
+  the delegate for the target (`IncomingCall` carries the push's inline room, if any),
+  reports an incoming call to CallKit (`reportIncomingCall`), and rings in
   `incomingRinging`. On `providerPerformAnswerCall` → `answer()` reuses the shared
-  `connectTransport(for:inlineCreds:)` — hybrid credentials: inline push room/token if
-  present, else the agent's own pairing endpoint or direct room. Decline while ringing logs `.declined`; the call
+  `connectTransport(for:)` — hybrid credentials: the host's target returns the inline
+  push room/token if present, else the agent's own pairing endpoint or direct room. Decline while ringing logs `.declined`; the call
   log records `direction` (`.incoming`/`.outgoing`). Edge paths are first-class: a push
   mid-call **reports then immediately ends** under the push's own id (iOS kills the app
   for an unreported VoIP push — `bugs.md`); a Focus/DND-filtered ring logs as missed and
@@ -316,7 +341,7 @@ spoken name to an agent UUID (the pure, tiered `AgentNameMatcher`: exact →
 prefix → word-boundary contains, case/diacritic-folded) and sets
 `AppEnvironment.pendingSiriCall`; `RootTabView` consumes it **only when
 `scenePhase == .active`** and no call is up, then calls the one true entry point
-`callSession.placeCall(agent)`. The gate is load-bearing: CallKit rejects
+`environment.placeCall(agent)`. The gate is load-bearing: CallKit rejects
 `CXStartCallAction` from a not-yet-foregrounded app (cold-launch-from-Siri race),
 which is also why `CallAgentIntent.openAppWhenRun = true` and why `perform()`
 never dials directly.

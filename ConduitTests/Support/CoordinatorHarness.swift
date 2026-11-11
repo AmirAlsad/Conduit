@@ -2,15 +2,13 @@
 //  CoordinatorHarness.swift
 //  ConduitTests
 //
-//  Shared fixtures for CallSessionCoordinator tests: the fakes (including a
-//  suspendable pairing resolver), an in-memory SwiftData repository with one
-//  inserted agent, and a controllable clock. The
-//  coordinator depends only on protocols, so the whole state machine runs here at
-//  simulator speed.
+//  Shared fixtures for the engine-side CallSessionCoordinator tests: the CallKit,
+//  interruption, and receipt fakes, a scripted call target, a delegate that
+//  records everything the engine reports, and a controllable clock. The
+//  coordinator knows no agents, so nothing here needs SwiftData or the Keychain.
 //
 
 import Foundation
-import SwiftData
 import Testing
 @testable import Conduit
 
@@ -23,32 +21,50 @@ final class MutableClock {
     func advance(_ seconds: TimeInterval) { current = current.addingTimeInterval(seconds) }
 }
 
-/// Stands in for `PairingClient.resolve`: records every request and can hold each
-/// one open until `release()`, so a test can act while credentials are in flight.
+/// A call target whose transport and credential step are scripted: it counts
+/// `makeTransport` and `connect` calls, and `connect` can fail or be held open
+/// until `release()` so a test can act while credentials are in flight.
 @MainActor
-final class FakePairingResolver {
-    struct Request: Equatable {
-        let endpoint: URL
-        let apiKey: String
-        let kind: TransportKind
-    }
-
-    private(set) var requests: [Request] = []
-    var result: Result<PairingCredentials, any Error> = .success(
-        PairingCredentials(roomURL: URL(string: "https://example.daily.co/paired")!, token: "paired-token")
-    )
+final class FakeTarget {
+    let id = UUID()
+    let displayName = "Echo Bot"
+    let handle = "echo-bot@conduit.invalid"
+    var connection = CallConnection(url: URL(string: "https://example.daily.co/room")!, token: "valid-token")
+    var error: (any Error)?
     var suspend = false
+
+    private(set) var makeTransportCount = 0
+    private(set) var connectCount = 0
+    private let transport: FakeTransport
     private var pending: [CheckedContinuation<Void, Never>] = []
 
-    func resolve(endpoint: URL, apiKey: String, kind: TransportKind) async throws -> PairingCredentials {
-        requests.append(Request(endpoint: endpoint, apiKey: apiKey, kind: kind))
+    init(transport: FakeTransport) {
+        self.transport = transport
+    }
+
+    var callTarget: CallTarget {
+        CallTarget(
+            id: id,
+            displayName: displayName,
+            handle: handle,
+            makeTransport: { [self] in
+                makeTransportCount += 1
+                return transport
+            },
+            connect: { [self] in try await connect() }
+        )
+    }
+
+    private func connect() async throws -> CallConnection {
+        connectCount += 1
         if suspend {
             await withCheckedContinuation { pending.append($0) }
         }
-        return try result.get()
+        if let error { throw error }
+        return connection
     }
 
-    /// Resume every suspended resolve; each then returns (or throws) `result`.
+    /// Resume every suspended `connect`; each then returns (or throws) as scripted.
     func release() {
         let waiting = pending
         pending = []
@@ -56,93 +72,107 @@ final class FakePairingResolver {
     }
 }
 
-/// The transport kinds the coordinator asked its factory for, in order.
+/// Records every delegate call in order and answers from simple tables.
 @MainActor
-final class TransportRequestLog {
-    var kinds: [TransportKind] = []
+final class RecordingCallEngineDelegate: CallEngineDelegate {
+    enum Event: Equatable {
+        case transition(from: CallState, to: CallState)
+        case finish(CallRecord)
+        case resolve(IncomingCall)
+        case bearer(UUID)
+    }
+
+    private(set) var events: [Event] = []
+    var targets: [UUID: CallTarget] = [:]
+    var bearers: [UUID: String] = [:]
+
+    /// Transitions as `"old→new"` labels, in order.
+    var transitions: [String] {
+        events.compactMap {
+            if case .transition(let old, let new) = $0 { return "\(old.label)→\(new.label)" }
+            return nil
+        }
+    }
+
+    var records: [CallRecord] {
+        events.compactMap { if case .finish(let record) = $0 { return record } else { return nil } }
+    }
+
+    var resolved: [IncomingCall] {
+        events.compactMap { if case .resolve(let call) = $0 { return call } else { return nil } }
+    }
+
+    var bearerRequests: [UUID] {
+        events.compactMap { if case .bearer(let id) = $0 { return id } else { return nil } }
+    }
+
+    func callEngine(_ engine: CallSessionCoordinator, targetForIncomingCall call: IncomingCall) -> CallTarget? {
+        events.append(.resolve(call))
+        return targets[call.targetID]
+    }
+
+    func callEngine(_ engine: CallSessionCoordinator, didChangeStateFrom old: CallState, to new: CallState) {
+        events.append(.transition(from: old, to: new))
+    }
+
+    func callEngine(_ engine: CallSessionCoordinator, didFinish record: CallRecord) {
+        events.append(.finish(record))
+    }
+
+    func callEngine(_ engine: CallSessionCoordinator, ringStatusBearerForTarget id: UUID) -> String? {
+        events.append(.bearer(id))
+        return bearers[id]
+    }
 }
 
 @MainActor
 final class CoordinatorHarness {
     let provider = FakeCallProvider()
-    let keychain = InMemoryKeychain()
-    let announcer = FakeSpokenStateAnnouncer()
     let interruption = FakeAudioInterruptionObserver()
-    let missedNotifier = FakeMissedCallNotifier()
     let ringStatusReporter = FakeRingStatusReporter()
-    let interactionDonor = FakeCallInteractionDonor()
     let transport = FakeTransport()
-    let pairing = FakePairingResolver()
-    let transportRequests = TransportRequestLog()
-    let container: ModelContainer
-    let repository: SwiftDataAgentRepository
+    let target: FakeTarget
+    let delegate = RecordingCallEngineDelegate()
     let coordinator: CallSessionCoordinator
-    let agent: Agent
     let callID = UUID()
 
-    /// `pairingEndpoint` makes the agent pairing-mode: `token` is then its API key
-    /// and every connect attempt goes through `pairing`.
     init(
         policy: ReconnectionPolicy = .default,
-        token: String? = "valid-token",
-        pairingEndpoint: URL? = nil,
         pushToTalk: Bool = false,
         now: @escaping () -> Date = { Date() }
-    ) throws {
-        container = try ModelContainer(
-            for: Agent.self, CallLogEntry.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
-        repository = SwiftDataAgentRepository(context: container.mainContext)
-
+    ) {
         provider.nextCallID = callID
+        target = FakeTarget(transport: transport)
+        // The host knows this target, so an incoming push for it resolves.
+        delegate.targets[target.id] = target.callTarget
 
-        let agent = Agent(
-            name: "Echo Bot",
-            detail: "test parrot",
-            transportKind: .daily,
-            connectionURL: pairingEndpoint == nil ? URL(string: "https://example.daily.co/room")! : nil,
-            pairingEndpoint: pairingEndpoint
-        )
-        self.agent = agent
-        repository.insert(agent)
-        try repository.save()
-
-        // Each path's secret lives under the ref the coordinator loads for it: the
-        // API key for a pairing agent, the room token for a direct one.
-        if let token {
-            let ref = pairingEndpoint != nil
-                ? KeychainTokenRef(account: agent.keychainTokenRef)
-                : KeychainTokenRef(directTokenForAgentID: agent.id)
-            try keychain.setToken(token, for: ref)
-        }
-
-        let transport = self.transport
-        let pairing = self.pairing
-        let transportRequests = self.transportRequests
         coordinator = CallSessionCoordinator(
             callProvider: provider,
-            transportFactory: { kind in
-                transportRequests.kinds.append(kind)
-                return transport
-            },
-            pairingResolver: { try await pairing.resolve(endpoint: $0, apiKey: $1, kind: $2) },
-            keychain: keychain,
-            repository: repository,
-            announcer: announcer,
             interruptionObserver: interruption,
-            missedCallNotifier: missedNotifier,
             ringStatusReporter: ringStatusReporter,
-            interactionDonor: interactionDonor,
             policy: policy,
             now: now,
             sleep: { _ in },
             isPushToTalkEnabled: { pushToTalk }
         )
+        coordinator.delegate = delegate
     }
 
-    func loggedEntries() throws -> [CallLogEntry] {
-        try container.mainContext.fetch(FetchDescriptor<CallLogEntry>())
+    func placeCall() async {
+        await coordinator.placeCall(target.callTarget)
+    }
+
+    /// A ringing push for this harness's target (or `targetID`, e.g. an unknown one).
+    func payload(
+        targetID: UUID? = nil,
+        callID: UUID = UUID(),
+        roomURL: URL? = nil,
+        token: String? = nil,
+        statusURL: URL? = nil
+    ) -> IncomingCallPayload {
+        IncomingCallPayload(
+            agentID: targetID ?? target.id, callID: callID, roomURL: roomURL, token: token, statusURL: statusURL
+        )
     }
 }
 
@@ -170,5 +200,19 @@ extension CallState {
     }
     var endedOutcome: CallOutcome? {
         if case .ended(let o) = self { return o } else { return nil }
+    }
+
+    /// A date-free label for transition logs, e.g. `reconnecting(1)`.
+    var label: String {
+        switch self {
+        case .idle: "idle"
+        case .incomingRinging: "incomingRinging"
+        case .dialing: "dialing"
+        case .connecting: "connecting"
+        case .connected: "connected"
+        case .reconnecting(let attempt): "reconnecting(\(attempt))"
+        case .ended(let outcome): "ended(\(outcome.rawValue))"
+        case .failed(let reason): "failed(\(reason.rawValue))"
+        }
     }
 }

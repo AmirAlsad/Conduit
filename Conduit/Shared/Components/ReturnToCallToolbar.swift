@@ -23,7 +23,7 @@ struct ReturnToCallToolbarModifier: ViewModifier {
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "phone.fill")
-                            Text(environment.callSession.activeAgent?.name ?? "Call")
+                            Text(environment.activeCallAgent?.name ?? "Call")
                                 .lineLimit(1)
                         }
                         .font(.caption.weight(.semibold))
@@ -31,7 +31,7 @@ struct ReturnToCallToolbarModifier: ViewModifier {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(
-                            environment.callSession.activeAgent?.paletteColor.color ?? .green,
+                            environment.activeCallAgent?.paletteColor.color ?? .green,
                             in: .capsule
                         )
                     }

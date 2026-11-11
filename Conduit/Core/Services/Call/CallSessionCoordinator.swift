@@ -4,8 +4,10 @@
 //
 //  The call state machine and the heart of the app: it orchestrates the CallKit
 //  seam (`CallProviding`) and the transport seam (`CallTransport`), owns `CallState`,
-//  drives reconnection-with-spoken-state, and writes the call log. It depends only
-//  on protocols, so the whole machine runs in the simulator against fakes.
+//  and drives reconnection. It knows calls, not agents: the host hands it a
+//  `CallTarget` and hears back through `CallEngineDelegate` (transitions, finished
+//  calls, incoming-target resolution, receipt bearers). It depends only on
+//  protocols, so the whole machine runs in the simulator against fakes.
 //
 //  AUDIO-SESSION OWNERSHIP INVARIANT: `transport.attachAudioSession()` is called
 //  from exactly one place — `activate(_:)`, reached only via the CallKit
@@ -22,7 +24,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     // MARK: - Observed state (the InCall screen is a pure projection of these)
 
     private(set) var state: CallState = .idle
-    private(set) var activeAgent: Agent?
+    private(set) var activeCall: ActiveCall?
     private(set) var isMuted = false
     private(set) var isBotSpeaking = false
     private(set) var remoteAudioLevel: Float = 0
@@ -41,16 +43,11 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
 
     // MARK: - Dependencies
 
+    @ObservationIgnored weak var delegate: CallEngineDelegate?
+
     private let callProvider: CallProviding
-    private let transportFactory: (TransportKind) -> CallTransport
-    private let pairingResolver: @Sendable (URL, String, TransportKind) async throws -> PairingCredentials
-    private let keychain: KeychainStoring
-    private let repository: AgentRepository
-    private let announcer: SpokenStateAnnouncing
     private let interruptionObserver: AudioInterruptionObserving
-    private let missedCallNotifier: MissedCallNotifying
     private let ringStatusReporter: RingStatusReporting
-    private let interactionDonor: CallInteractionDonating
     private let policy: ReconnectionPolicy
     private let now: () -> Date
     private let sleep: (Duration) async throws -> Void
@@ -59,13 +56,13 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     // MARK: - Live-call bookkeeping
 
     private var transport: CallTransport?
-    /// Resolves the room for one connect attempt; built once per call and re-run
-    /// for every reconnect attempt.
-    private var connectionResolver: (@MainActor () async throws -> CallConnection)?
+    /// The resolved target of the live call; its `connect` runs per attempt.
+    private var currentTarget: CallTarget?
+    /// Who this call's record is attributed to — set even when an incoming
+    /// target is unknown, so the host can decide there is nothing to record.
+    private var recordTargetID: UUID?
     private var activeCallID: UUID?
     private var callDirection: CallDirection = .outgoing
-    /// Inline room credentials from an incoming push, consumed when the user answers.
-    private var pendingInlineCreds: PairingCredentials?
     /// Where to report this ring's terminal status, when the push asked for receipts.
     private var ringStatusURL: URL?
     private var callStartedAt: Date?
@@ -78,32 +75,16 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
 
     init(
         callProvider: CallProviding,
-        transportFactory: @escaping (TransportKind) -> CallTransport,
-        pairingResolver: @escaping @Sendable (URL, String, TransportKind) async throws -> PairingCredentials = {
-            try await PairingClient.resolve(endpoint: $0, apiKey: $1, transport: $2)
-        },
-        keychain: KeychainStoring,
-        repository: AgentRepository,
-        announcer: SpokenStateAnnouncing,
         interruptionObserver: AudioInterruptionObserving,
-        missedCallNotifier: MissedCallNotifying,
         ringStatusReporter: RingStatusReporting,
-        interactionDonor: CallInteractionDonating = CallInteractionDonor(),
         policy: ReconnectionPolicy = .default,
         now: @escaping () -> Date,
         sleep: @escaping (Duration) async throws -> Void,
         isPushToTalkEnabled: @escaping () -> Bool
     ) {
         self.callProvider = callProvider
-        self.transportFactory = transportFactory
-        self.pairingResolver = pairingResolver
-        self.keychain = keychain
-        self.repository = repository
-        self.announcer = announcer
         self.interruptionObserver = interruptionObserver
-        self.missedCallNotifier = missedCallNotifier
         self.ringStatusReporter = ringStatusReporter
-        self.interactionDonor = interactionDonor
         self.policy = policy
         self.now = now
         self.sleep = sleep
@@ -114,21 +95,23 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
 
     // MARK: - Placing a call
 
-    func placeCall(_ agent: Agent) async {
+    func placeCall(_ target: CallTarget) async {
         guard case .idle = state else {
             Log.warning(.call, "placeCall ignored; state is \(String(describing: state))")
             return
         }
 
-        activeAgent = agent
+        currentTarget = target
+        recordTargetID = target.id
+        activeCall = ActiveCall(targetID: target.id, displayName: target.displayName, direction: .outgoing)
         callDirection = .outgoing
         callStartedAt = now()
-        state = .dialing
+        transition(to: .dialing)
         interruptionObserver.startObserving()
 
         let id: UUID
         do {
-            id = try await callProvider.startOutgoingCall(handle: agent.callHandle, displayName: agent.name)
+            id = try await callProvider.startOutgoingCall(handle: callHandle(for: target), displayName: target.displayName)
         } catch {
             Log.error(.callkit, "startOutgoingCall failed: \(error)")
             fail(.unknown)
@@ -136,82 +119,82 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         }
         activeCallID = id
         callProvider.reportOutgoingCallConnecting(id)
-        state = .connecting
-        announcer.startRepeating(.connecting)
-        // Teach Siri's calling domain that this contact is called via Conduit —
-        // enables the bare "call <agent>" phrase (the mirror contact has no
-        // phone number, so without donations Siri considers it uncallable).
-        interactionDonor.donateOutgoingCall(to: agent)
+        transition(to: .connecting)
 
-        await connectTransport(for: agent)
+        await connectTransport(for: target)
+    }
+
+    private func callHandle(for target: CallTarget) -> CallHandle {
+        CallHandle(value: target.handle ?? CallTarget.defaultHandle(for: target.id))
     }
 
     // MARK: - Receiving a call (agent-initiated, via VoIP push)
 
     /// Report an incoming call to CallKit and ring. The transport doesn't connect
-    /// until the user answers (`answer()`), so this only resolves the agent and
-    /// reports — credentials (inline or via pairing) are used on answer.
+    /// until the user answers (`answer()`), so this only resolves the target and
+    /// reports — its credentials (inline or via the host) are used on answer.
     func receiveCall(_ payload: IncomingCallPayload) async {
+        let incoming = IncomingCall(
+            callID: payload.callID,
+            targetID: payload.agentID,
+            displayName: Self.unknownCallerName,
+            handle: Self.unknownCallerHandle,
+            connection: payload.inlineConnection
+        )
         guard case .idle = state else {
             // One call at a time — but iOS terminates the app (killing the active
             // call's media) if a VoIP push doesn't report an incoming call. Report
-            // under the push's own id, end it immediately, and log the missed ring
+            // under the push's own id, end it immediately, and record the missed ring
             // without touching the active call's state.
             Log.warning(.call, "Busy on VoIP push; reporting call \(payload.callID) and ending it")
-            let busyAgent = (try? repository.fetch(id: payload.agentID)) ?? nil
+            let busyTarget = delegate?.callEngine(self, targetForIncomingCall: incoming)
             try? await callProvider.reportIncomingCall(
                 id: payload.callID,
-                handle: busyAgent?.callHandle ?? CallHandle(value: "agent"),
-                displayName: busyAgent?.name ?? "Agent"
+                handle: busyTarget.map(callHandle(for:)) ?? CallHandle(value: incoming.handle),
+                displayName: busyTarget?.displayName ?? incoming.displayName
             )
             callProvider.reportCallEnded(payload.callID, reason: .unanswered)
-            if let busyAgent {
-                let entry = CallLogEntry(
-                    agent: busyAgent,
-                    direction: .incoming,
-                    startedAt: now(),
-                    duration: 0,
-                    outcome: .noAnswer,
-                    transportKind: busyAgent.transportKind
-                )
-                repository.addCallLogEntry(entry)
-                try? repository.save()
-                missedCallNotifier.notifyMissedCall(agentName: busyAgent.name)
-            }
+            delegate?.callEngine(self, didFinish: CallRecord(
+                targetID: payload.agentID,
+                direction: .incoming,
+                startedAt: now(),
+                duration: 0,
+                outcome: .noAnswer,
+                missedReason: .busy
+            ))
             if let url = payload.statusURL {
-                reportRingStatus(.busy, callID: payload.callID, endpoint: url, agent: busyAgent)
+                reportRingStatus(.busy, callID: payload.callID, endpoint: url, targetID: payload.agentID)
             }
             return
         }
 
-        let agent = (try? repository.fetch(id: payload.agentID)) ?? nil
+        let target = delegate?.callEngine(self, targetForIncomingCall: incoming)
         activeCallID = payload.callID
-        activeAgent = agent
+        currentTarget = target
+        recordTargetID = payload.agentID
+        activeCall = target.map { ActiveCall(targetID: $0.id, displayName: $0.displayName, direction: .incoming) }
         callDirection = .incoming
         callStartedAt = now()
-        pendingInlineCreds = payload.inlineCredentials
         ringStatusURL = payload.statusURL
-        state = .incomingRinging
+        transition(to: .incomingRinging)
         interruptionObserver.startObserving()
 
-        // PushKit requires reporting the call this run loop even if the agent is
+        // PushKit requires reporting the call this run loop even if the target is
         // unknown — report under a generic handle, then fail gracefully.
         do {
             try await callProvider.reportIncomingCall(
                 id: payload.callID,
-                handle: agent?.callHandle ?? CallHandle(value: "agent"),
-                displayName: agent?.name ?? "Agent"
+                handle: target.map(callHandle(for:)) ?? CallHandle(value: incoming.handle),
+                displayName: target?.displayName ?? incoming.displayName
             )
         } catch IncomingCallReportError.filteredByFocus {
             // The system suppressed the ring (Focus/DND) — a missed call, not a
-            // failure. Log it, notify quietly, and return to idle so the next
-            // push rings normally.
-            Log.info(.call, "Incoming call filtered by Focus; logging as missed")
+            // failure. Record it and return to idle so the next push rings normally.
+            Log.info(.call, "Incoming call filtered by Focus; recording as missed")
             interruptionObserver.stopObserving()
-            writeLog(outcome: .noAnswer)
-            if let agent { missedCallNotifier.notifyMissedCall(agentName: agent.name) }
+            finish(outcome: .noAnswer, missedReason: .filteredByFocus)
             if let url = ringStatusURL {
-                reportRingStatus(.suppressedByFocus, callID: payload.callID, endpoint: url, agent: agent)
+                reportRingStatus(.suppressedByFocus, callID: payload.callID, endpoint: url, targetID: payload.agentID)
             }
             resetState()
             return
@@ -221,35 +204,33 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
             return
         }
 
-        if agent == nil {
-            Log.error(.call, "Incoming call for unknown agent \(payload.agentID)")
+        if target == nil {
+            Log.error(.call, "Incoming call for unknown target \(payload.agentID)")
             fail(.unknown)
         }
     }
 
-    /// The user answered (from the system UI). Connect the transport, preferring the
-    /// push's inline credentials and falling back to the agent's pairing endpoint.
+    private static let unknownCallerName = "Agent"
+    private static let unknownCallerHandle = "agent"
+
+    /// The user answered (from the system UI). Connect the transport with the
+    /// resolved target's credentials (the push's inline room, or the host's own).
     func answer() async {
-        guard case .incomingRinging = state, let agent = activeAgent else { return }
-        state = .connecting
+        guard case .incomingRinging = state, let target = currentTarget else { return }
+        transition(to: .connecting)
         // Answering is the ring's terminal status — the receipt fires here whether
         // or not the transport subsequently connects.
         if let url = ringStatusURL, let id = activeCallID {
-            reportRingStatus(.answered, callID: id, endpoint: url, agent: agent)
+            reportRingStatus(.answered, callID: id, endpoint: url, targetID: target.id)
             ringStatusURL = nil
         }
-        announcer.startRepeating(.connecting)
-        let creds = pendingInlineCreds
-        pendingInlineCreds = nil
-        await connectTransport(for: agent, inlineCreds: creds)
+        await connectTransport(for: target)
     }
 
-    /// Fire-and-forget receipt to the server that rang us, authenticated like token
-    /// registration: bearer = the agent's API key (omitted when none is stored).
-    private func reportRingStatus(_ status: RingStatus, callID: UUID, endpoint: URL, agent: Agent?) {
-        let apiKey = agent.flatMap {
-            try? keychain.token(for: KeychainTokenRef(account: $0.keychainTokenRef))
-        } ?? nil
+    /// Fire-and-forget receipt to the server that rang us, authenticated with the
+    /// bearer the host supplies for the target (omitted when it has none).
+    private func reportRingStatus(_ status: RingStatus, callID: UUID, endpoint: URL, targetID: UUID?) {
+        let apiKey = targetID.flatMap { delegate?.callEngine(self, ringStatusBearerForTarget: $0) }
         ringStatusReporter.report(status, callID: callID, endpoint: endpoint, apiKey: apiKey ?? "")
     }
 
@@ -257,16 +238,13 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     /// Shared by `placeCall` and `answer`. The transport exists before the
     /// credential fetch so a CallKit activation landing mid-fetch still reaches
     /// `attachAudioSession()` (see potential_skills/callkit.md).
-    private func connectTransport(for agent: Agent, inlineCreds: PairingCredentials? = nil) async {
-        let transport = transportFactory(agent.transportKind)
+    private func connectTransport(for target: CallTarget) async {
+        let transport = target.makeTransport()
         self.transport = transport
         subscribe(to: transport)
 
-        let resolveConnection = makeConnectionResolver(for: agent, inlineCreds: inlineCreds)
-        connectionResolver = resolveConnection
-
         do {
-            let connection = try await resolveConnection()
+            let connection = try await target.connect()
             // The call may have ended while credentials were in flight.
             guard self.transport === transport, !Task.isCancelled else { return }
             try await transport.connect(connection)
@@ -279,63 +257,6 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
             guard self.transport === transport else { return }
             fail((error as? TransportError) == .authenticationFailed ? .badToken : .transportError)
         }
-    }
-
-    /// The credential step for this call: inline push credentials as-is, otherwise
-    /// the agent's pairing endpoint (re-paired on every attempt) or its direct room.
-    /// The agent's configuration is captured once, so every attempt resolves
-    /// against the same values. Failures surface as `TransportError`s.
-    private func makeConnectionResolver(
-        for agent: Agent,
-        inlineCreds: PairingCredentials?
-    ) -> @MainActor () async throws -> CallConnection {
-        if let inlineCreds {
-            let connection = CallConnection(url: inlineCreds.roomURL, token: inlineCreds.token)
-            return { connection }
-        }
-
-        let token = loadToken(for: agent) ?? ""
-        if let endpoint = agent.pairingEndpoint {
-            let kind = agent.transportKind
-            let resolve = pairingResolver
-            return {
-                do {
-                    let creds = try await resolve(endpoint, token, kind)
-                    return CallConnection(url: creds.roomURL, token: creds.token)
-                } catch let error as PairingError {
-                    Log.error(.transport, "Pairing failed: \(error)")
-                    throw error == .unauthorized ? TransportError.authenticationFailed
-                                                 : TransportError.connectionFailed("pairing: \(error)")
-                } catch {
-                    throw TransportError.connectionFailed(String(describing: error))
-                }
-            }
-        }
-
-        let url = agent.connectionURL
-        let email = agent.syntheticEmail
-        return {
-            // Direct mode needs its room token; pairing mode authenticates with its API
-            // key, but an endpoint may be open, so it doesn't hard-require one.
-            guard !token.isEmpty else {
-                Log.error(.call, "No token for agent \(Log.redactEmail(email))")
-                throw TransportError.authenticationFailed
-            }
-            guard let url else { throw TransportError.connectionFailed("No room URL or pairing endpoint") }
-            return CallConnection(url: url, token: token)
-        }
-    }
-
-    /// The secret for the path this call will take: the pairing API key when a
-    /// pairing endpoint is set (it wins if both are configured), otherwise the
-    /// direct-room token. Each lives under its own Keychain ref.
-    private func loadToken(for agent: Agent) -> String? {
-        let ref = agent.pairingEndpoint != nil
-            ? KeychainTokenRef(account: agent.keychainTokenRef)
-            : KeychainTokenRef(directTokenForAgentID: agent.id)
-        let token = try? keychain.token(for: ref)
-        guard let token, !token.isEmpty else { return nil }
-        return token
     }
 
     private func subscribe(to transport: CallTransport) {
@@ -390,14 +311,12 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         case .connecting:
             let start = now()
             firstConnectedAt = start
-            state = .connected(since: start)
+            transition(to: .connected(since: start))
             // Incoming calls are marked connected to CallKit by fulfilling the answer
             // action; only outgoing calls report connected here.
             if callDirection == .outgoing, let id = activeCallID {
                 callProvider.reportOutgoingCallConnected(id)
             }
-            announcer.stopRepeating()
-            announcer.announce(.connected)
             applyMicIfActivated()
             Task { [weak self] in await self?.updateAudioDevices() }
             Log.info(.call, "Connected")
@@ -406,9 +325,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
             reconnectAttempt = 0
             reconnectTask?.cancel()
             reconnectTask = nil
-            state = .connected(since: firstConnectedAt ?? now())
-            announcer.stopRepeating()
-            announcer.announce(.connected)
+            transition(to: .connected(since: firstConnectedAt ?? now()))
             applyMicIfActivated()
             Log.info(.call, "Reconnected")
 
@@ -467,9 +384,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     /// owned solely by `scheduleReconnect` (driven by `.disconnected`). The transport
     /// must follow a `.reconnecting` with a `.connected` or `.disconnected`.
     private func enterReconnectingDisplay() {
-        state = .reconnecting(attempt: reconnectAttempt)
-        announcer.announce(.disconnected)
-        announcer.startRepeating(.retrying)
+        transition(to: .reconnecting(attempt: reconnectAttempt))
     }
 
     private func scheduleReconnect() {
@@ -481,11 +396,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         }
         reconnectAttempt = next
 
-        state = .reconnecting(attempt: reconnectAttempt)
-        if reconnectAttempt == 1 {
-            announcer.announce(.disconnected)
-            announcer.startRepeating(.retrying)
-        }
+        transition(to: .reconnecting(attempt: reconnectAttempt))
 
         let delay = policy.delay(forAttempt: reconnectAttempt)
         reconnectTask?.cancel()
@@ -497,13 +408,13 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     }
 
     private func retryConnect() async {
-        guard let transport, let resolveConnection = connectionResolver else { return }
+        guard let transport, let target = currentTarget else { return }
         // Success surfaces as a `.connected` event; a transport that reports the
         // failed attempt as a `.disconnected` event schedules the next attempt there.
         // A transport that instead throws is chained here, so the loop never stalls.
         // Both awaits can outlive the call: once it has ended, this attempt is inert.
         do {
-            let connection = try await resolveConnection()
+            let connection = try await target.connect()
             guard self.transport === transport, !Task.isCancelled else { return }
             try await transport.connect(connection)
         } catch {
@@ -681,10 +592,10 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     #if DEBUG
     /// Project a connected call onto the in-call surface without a real transport,
     /// so its look can be screenshotted in the simulator. Drives only the observed
-    /// state the view reads — no CallKit, no media.
-    func debugPresentConnected(agent: Agent, secondsElapsed: TimeInterval = 154, botSpeaking: Bool = true) {
-        activeAgent = agent
-        callDirection = .outgoing
+    /// state the view reads — no CallKit, no media, and no delegate callbacks.
+    func debugPresentConnected(_ call: ActiveCall, secondsElapsed: TimeInterval = 154, botSpeaking: Bool = true) {
+        activeCall = call
+        callDirection = call.direction
         state = .connected(since: now().addingTimeInterval(-secondsElapsed))
         isBotSpeaking = botSpeaking
     }
@@ -698,26 +609,24 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
 
     private func fail(_ reason: CallFailureReason) {
         guard !state.isTerminal else { return }
-        state = .failed(reason)
-        announcer.stopRepeating()
+        transition(to: .failed(reason))
         if let id = activeCallID { callProvider.reportCallEnded(id, reason: .failed) }
-        writeLog(outcome: .failed, failureReason: reason)
+        finish(outcome: .failed, failureReason: reason)
         teardownTransport()
     }
 
     private func endRemote() {
         guard !state.isTerminal else { return }
         let connected = firstConnectedAt != nil
-        state = .ended(.completed)
-        announcer.stopRepeating()
+        transition(to: .ended(.completed))
         if let id = activeCallID { callProvider.reportCallEnded(id, reason: .remoteEnded) }
-        writeLog(outcome: connected ? .completed : .noAnswer)
+        finish(outcome: connected ? .completed : .noAnswer)
         teardownTransport()
     }
 
     /// The system already knows the call is ending (we requested it, or it told us),
     /// so this does not report back to CallKit. The terminal guard makes the real
-    /// CallKit end → providerPerformEndCall round-trip idempotent (no double log).
+    /// CallKit end → providerPerformEndCall round-trip idempotent (no double record).
     private func finishEnded() {
         guard !state.isTerminal else { return }
         let connected = firstConnectedAt != nil
@@ -726,12 +635,11 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         let outcome: CallOutcome = connected ? .completed
             : (callDirection == .incoming ? .declined : .canceled)
         if outcome == .declined, let url = ringStatusURL, let id = activeCallID {
-            reportRingStatus(.declined, callID: id, endpoint: url, agent: activeAgent)
+            reportRingStatus(.declined, callID: id, endpoint: url, targetID: recordTargetID)
             ringStatusURL = nil
         }
-        state = .ended(outcome)
-        announcer.stopRepeating()
-        writeLog(outcome: outcome)
+        transition(to: .ended(outcome))
+        finish(outcome: outcome)
         teardownTransport()
     }
 
@@ -752,13 +660,12 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     }
 
     private func resetState() {
-        state = .idle
-        activeAgent = nil
+        activeCall = nil
+        currentTarget = nil
+        recordTargetID = nil
         activeCallID = nil
         callDirection = .outgoing
-        pendingInlineCreds = nil
         ringStatusURL = nil
-        connectionResolver = nil
         callStartedAt = nil
         firstConnectedAt = nil
         reconnectAttempt = 0
@@ -771,23 +678,34 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         selectedAudioDeviceID = nil
         didApplyHandsFreeDefault = false
         endedByUser = false
+        transition(to: .idle)
     }
 
-    private func writeLog(outcome: CallOutcome, failureReason: CallFailureReason? = nil) {
-        guard let agent = activeAgent else { return }
+    /// Assign the state and tell the delegate. Callers set the transition's other
+    /// fields first, so the delegate sees a consistent snapshot.
+    private func transition(to new: CallState) {
+        let old = state
+        state = new
+        guard old != new else { return }
+        delegate?.callEngine(self, didChangeStateFrom: old, to: new)
+    }
+
+    private func finish(
+        outcome: CallOutcome,
+        failureReason: CallFailureReason? = nil,
+        missedReason: MissedCallReason? = nil
+    ) {
+        guard let targetID = recordTargetID else { return }
         let started = callStartedAt ?? now()
         let duration = firstConnectedAt.map { max(0, now().timeIntervalSince($0)) } ?? 0
-        let entry = CallLogEntry(
-            agent: agent,
+        delegate?.callEngine(self, didFinish: CallRecord(
+            targetID: targetID,
             direction: callDirection,
             startedAt: started,
             duration: duration,
             outcome: outcome,
-            transportKind: agent.transportKind,
-            failureReason: failureReason
-        )
-        repository.addCallLogEntry(entry)
-        do { try repository.save() }
-        catch { Log.error(.call, "Failed to save call log: \(error)") }
+            failureReason: failureReason,
+            missedReason: missedReason
+        ))
     }
 }

@@ -21,10 +21,10 @@ struct IncomingCallPayload: Equatable, Sendable {
     /// servers that don't care simply omit it.
     let statusURL: URL?
 
-    /// Inline credentials, if the push carried both a room and a token.
-    var inlineCredentials: PairingCredentials? {
+    /// Inline room credentials, if the push carried both a room and a token.
+    var inlineConnection: CallConnection? {
         guard let roomURL, let token, !token.isEmpty else { return nil }
-        return PairingCredentials(roomURL: roomURL, token: token)
+        return CallConnection(url: roomURL, token: token)
     }
 }
 

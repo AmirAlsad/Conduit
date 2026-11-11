@@ -68,7 +68,7 @@ struct RecentsView: View {
                 }
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     Button {
-                        Task { await environment.callSession.placeCall(agent) }
+                        Task { await environment.placeCall(agent) }
                     } label: {
                         Label("Call", systemImage: "phone.fill")
                     }
