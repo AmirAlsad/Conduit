@@ -102,6 +102,15 @@ before CallKit activation. **Daily audio is device-only:** its WebRTC
 voice-processing audio unit aborts in the iOS Simulator (see `bugs.md`), so the sim
 verifies pairing/negotiation only; real connect + downlink is verified on device
 (confirmed M2: the `live` agent greets on connect via RTVI `client-ready`).
+Daily heals short network outages inside its SDK without changing the Pipecat
+transport state, so the client callbacks never report them. The adapter infers
+them from the device's network path instead: once the call has reported
+`.connected` it watches an `NWPathMonitor` (behind the package-internal
+`NetworkPathMonitoring` seam), and the pure, unit-tested `DailyInterruptionGate`
+turns a lost path into one `.reconnecting` and its return into `.connected`
+(none after a transport disconnect or a hangup; a fresh gate per connect attempt).
+It reflects the path, not Daily's media state: a dead-but-associated Wi-Fi is not
+caught, and "Connected" can be announced a moment before audio resumes.
 
 `LiveKitTransport` (package product `ConduitCallEngineLiveKit`, M6) is the native
 second transport over `livekit/client-sdk-swift`, behind the same protocol. It
@@ -124,6 +133,12 @@ button moves the audio** (Daily can't — see `bugs.md`), and the in-app picker 
 through `AVAudioSession` directly (`LiveKitAudioRouter`) instead of the SDK. Like
 Daily, it's **device-only** (WebRTC audio aborts in the sim), so `live()` uses
 `FakeTransport` in the simulator; the only sim-tested logic is `LiveKitConnectGate`.
+A reconnect the SDK reports complete goes back through that gate: it is `.connected`
+only with the room connected and a remote present. LiveKit 2.15.1 can report an
+abandoned reconnect as complete during a long outage (room marked connected, remotes
+cleared by the failed full attempt); the adapter then disconnects the room and
+reports `.disconnected(.networkDropped)`, so the engine's retries run and the call
+ends as `failed(.lostConnection)` if the outage lasts.
 
 `PipecatSmallWebRTCTransport` (app, `Core/Services/Transport/`, M9) is the
 zero-cloud third transport: peer-to-peer WebRTC straight to the user's own Pipecat
@@ -385,8 +400,12 @@ defining driving problem. Reconnection is **event-driven**: each
 `.disconnected(.networkDropped)` is one attempt; `ReconnectionPolicy`
 (package, `Models/`, pure: `base * 2^(n-1)` capped, default 6 attempts / 1 s / 30 s)
 gates the budget; a `.connected` recovers and resets; exhaustion →
-`failed(.lostConnection)`. A transport that self-heals may emit `.reconnecting`
-(display-only — it does not count against the budget). *No jitter:* this is a
+`failed(.lostConnection)`. A transport that self-heals emits `.reconnecting`
+(display-only — `reconnecting(0)`, it does not count against the budget), then
+`.connected` or, if it gives up, `.disconnected`, which starts the engine's own
+attempts from that display state. LiveKit reports its SDK's own reconnects this
+way, and Daily its network-path interruptions (see the Daily adapter above); the
+app's SmallWebRTC adapter does not. *No jitter:* this is a
 single client calling one agent, so there is no thundering-herd to spread.
 
 `SpokenStateAnnouncing` (`Core/Services/Audio/`) speaks connection state in a
