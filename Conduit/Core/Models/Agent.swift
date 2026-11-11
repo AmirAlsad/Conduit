@@ -34,7 +34,7 @@ final class Agent {
     var pairingEndpoint: URL?
     /// Inbound calls: a URL the app POSTs its VoIP push token to (bearer = the
     /// agent's API key), so this agent's own server can ring the user. `nil` means
-    /// the agent can't call in. See `VoIPPushService` and `docs/INBOUND_CALLS.md`.
+    /// the agent can't call in. See `AgentCallHost` and `docs/INBOUND_CALLS.md`.
     var inboundRegistrationURL: URL?
     /// `CNContact.identifier` of the system contact, once the user adds the agent
     /// via the system Add-Contact sheet. `nil` means not added.

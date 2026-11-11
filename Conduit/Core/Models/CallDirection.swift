@@ -3,7 +3,7 @@
 //  Conduit
 //
 //  Which way a call was initiated. Outgoing is the user calling an agent; incoming
-//  is the agent's own server ringing the user via a VoIP push (see VoIPPushService).
+//  is the agent's own server ringing the user via a VoIP push (see `CallEngine.handleIncomingPush`).
 //  Modeled as an enum so the call log stays explicit.
 //
 
