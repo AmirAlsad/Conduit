@@ -13,7 +13,8 @@ import Foundation
 
 @MainActor
 protocol CallEngineDelegate: AnyObject {
-    /// Once per ringing push. nil means the target is unknown and the ring fails.
+    /// Once per ringing push, after CallKit accepted the report (so never before the
+    /// call rings). nil means the target is unknown and the ring fails.
     func callEngine(_ engine: CallSessionCoordinator, targetForIncomingCall call: IncomingCall) -> CallTarget?
     /// Only on real assignments, after the engine's own field batch for that transition.
     func callEngine(_ engine: CallSessionCoordinator, didChangeStateFrom old: CallState, to new: CallState)

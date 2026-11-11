@@ -4,15 +4,18 @@
 //
 //  Wraps PushKit. On a VoIP token update it registers the token with every agent
 //  that opted into inbound calls (`inboundRegistrationURL`); on an incoming push it
-//  parses the payload and hands it to the coordinator, which rings via CallKit.
+//  hands the raw payload to the coordinator, which reports and rings via CallKit.
 //
 //  Device-only: PushKit doesn't deliver in the simulator. The token-registration
-//  POST (`PushTokenRegistrar`) and payload parsing (`IncomingCallPayload`) are the
-//  unit-tested pieces; the live push round-trip is verified on hardware.
+//  POST (`PushTokenRegistrar`), payload parsing (`IncomingCallPayload`), and the
+//  coordinator's push entry are the unit-tested pieces; the live push round-trip is
+//  verified on hardware.
 //
-//  NOTE (device): iOS requires `reportNewIncomingCall` to be invoked within the push
-//  handler or the app is terminated. `receiveCall` reports synchronously before the
-//  completion fires; keep that invariant if this is refactored.
+//  NOTE (device): iOS terminates the app unless `reportNewIncomingCall` is invoked
+//  before the push callback returns. The callback therefore calls the coordinator's
+//  synchronous `handleIncomingPush` directly — no Task in between — which issues
+//  the report before returning and calls PushKit's completion after CallKit's.
+//  Keep that invariant if this is refactored.
 //
 
 import Foundation
@@ -57,15 +60,11 @@ final class VoIPPushService: NSObject, PKPushRegistryDelegate {
         completion: @escaping () -> Void
     ) {
         MainActor.assumeIsolated {
-            guard type == .voIP, let parsed = IncomingCallPayload(dictionary: payload.dictionaryPayload) else {
-                Log.warning(.callkit, "Dropping VoIP push: unparseable payload")
+            guard type == .voIP else {
                 completion()
                 return
             }
-            Task {
-                await self.environment.callSession.receiveCall(parsed)
-                completion()
-            }
+            environment.callSession.handleIncomingPush(payload.dictionaryPayload, completion: completion)
         }
     }
 

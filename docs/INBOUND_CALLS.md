@@ -109,8 +109,10 @@ authorization: bearer <APNs JWT signed with your .p8>
 }
 ```
 
-`display_name` and `handle` are the values the app sent when it registered its token
-(§1); include them whenever you stored them and omit the keys otherwise. When they
+The app also accepts `target_id` in place of `agent_id` (if both are present,
+`target_id` wins). `display_name` and `handle` are the values the app sent when it
+registered its token (§1); include them whenever you stored them and omit the keys
+otherwise. When they
 are absent the app rings under a generic caller name and corrects it once it has
 matched the `agent_id` locally.
 
@@ -131,10 +133,14 @@ agent's transport — same shapes as the pairing response.
 
 ## 3. What the app does
 
-1. **Push received** → Conduit reports an incoming call to CallKit and rings
-   (`incomingRinging`). It must report synchronously, so the push need only carry
-   `agent_id` + `call_id` (add `display_name` + `handle` so it can ring under the
-   right name straight away); credentials are used later.
+1. **Push received** → Conduit reports an incoming call to CallKit **first**,
+   synchronously inside the PushKit callback and before anything else, under the
+   identity the push carries: `display_name`, else the generic name "Agent"; `handle`,
+   else a handle derived from the id. Then it rings (`incomingRinging`). Once CallKit
+   accepts the report, Conduit matches `agent_id` to a local agent and, if the agent's
+   name or handle differ from what rang, updates the ring to show them. PushKit's
+   completion is called after that, on every path. Credentials are used later.
+   A push it can't parse (no valid `agent_id`) is still reported, then ended at once.
 2. **User answers** → Conduit connects the transport (inline creds, else pairing
    resolve), transitions to `connecting` → `connected`, and the call behaves exactly
    like an outgoing one (mute, routing, reconnection, interruptions).
@@ -142,6 +148,9 @@ agent's transport — same shapes as the pairing response.
    **incoming** call.
 4. **Unknown `agent_id`** (not configured in the app) → Conduit still reports the call
    to satisfy PushKit, then ends it gracefully.
+5. **Already on a call** → the new call is reported (corrected to the agent's identity
+   if known), then ended at once and logged as a missed incoming call; the live call is
+   untouched. A push arriving while a finished call's screen is still up rings normally.
 
 ---
 

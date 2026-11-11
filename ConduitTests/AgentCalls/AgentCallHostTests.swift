@@ -81,7 +81,7 @@ struct AgentCallHostTests {
 
     @Test func answeredCallWritesIncomingRow() async throws {
         let h = try AgentCallHostHarness()
-        await h.coordinator.receiveCall(h.payload())
+        h.ring()
         await h.coordinator.answer()
         h.coordinator.handle(.connected)
         await h.coordinator.endCall()
@@ -96,7 +96,7 @@ struct AgentCallHostTests {
     @Test func declinedRingWritesDeclinedRowWithoutNotification() async throws {
         let h = try AgentCallHostHarness()
         let callID = UUID()
-        await h.coordinator.receiveCall(h.payload(callID: callID))
+        h.ring(callID: callID)
         h.coordinator.providerPerformEndCall(callID)
 
         let entry = try #require(try h.loggedEntries().first)
@@ -107,7 +107,7 @@ struct AgentCallHostTests {
 
     @Test func unknownTargetWritesNoRow() async throws {
         let h = try AgentCallHostHarness()
-        await h.coordinator.receiveCall(h.payload(agentID: UUID()))
+        h.ring(agentID: UUID())
 
         #expect(h.coordinator.state.failureReason == .unknown)
         #expect(try h.loggedEntries().isEmpty) // no agent to attribute the row to
@@ -124,7 +124,7 @@ struct AgentCallHostTests {
     @Test func busyRingWritesMissedRowAndNotifies() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall() // already in a call
-        await h.coordinator.receiveCall(h.payload())
+        h.ring()
 
         let entries = try h.loggedEntries()
         #expect(entries.count == 1)
@@ -133,13 +133,15 @@ struct AgentCallHostTests {
         #expect(entries.first?.duration == 0)
         #expect(entries.first?.transportKind == .daily)
         #expect(h.missedNotifier.missedAgentNames == [h.agent.name])
-        #expect(h.provider.reportedIncoming.first?.handle == h.agent.callHandle)
+        // Rang under the push's fallbacks, corrected to the agent before it ended.
+        #expect(h.provider.updatedCalls.first?.handle == h.agent.callHandle)
+        #expect(h.provider.updatedCalls.first?.displayName == h.agent.name)
     }
 
     @Test func focusFilteredRingWritesMissedRowAndNotifies() async throws {
         let h = try AgentCallHostHarness()
         h.provider.reportIncomingError = IncomingCallReportError.filteredByFocus
-        await h.coordinator.receiveCall(h.payload())
+        h.ring()
 
         #expect(h.coordinator.state == .idle)
         let entries = try h.loggedEntries()
@@ -260,7 +262,7 @@ struct AgentCallHostTests {
 
     @Test func answerStartsConnectingCueWithoutDonation() async throws {
         let h = try AgentCallHostHarness()
-        await h.coordinator.receiveCall(h.payload())
+        h.ring()
         await h.coordinator.answer()
 
         #expect(h.announcer.startedRepeating == [.connecting])
@@ -282,7 +284,7 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness()
         try h.keychain.setToken("agent-api-key", for: KeychainTokenRef(account: h.agent.keychainTokenRef))
         let callID = UUID()
-        await h.coordinator.receiveCall(h.payload(callID: callID, statusURL: statusEndpoint))
+        h.ring(callID: callID, statusURL: statusEndpoint)
         await h.coordinator.answer()
 
         #expect(h.ringStatusReporter.reports == [
@@ -295,18 +297,42 @@ struct AgentCallHostTests {
     @Test func receiveCallRingsAndResolvesAgent() async throws {
         let h = try AgentCallHostHarness()
         let callID = UUID()
-        await h.coordinator.receiveCall(h.payload(callID: callID))
+        h.ring(callID: callID)
 
         #expect(h.coordinator.state == .incomingRinging)
         #expect(h.coordinator.activeCall?.targetID == h.agent.id)
         #expect(h.coordinator.activeCall?.displayName == h.agent.name)
         #expect(h.provider.reportedIncoming.map(\.id) == [callID])
+        #expect(h.provider.updatedCalls.first?.handle == h.agent.callHandle)
+    }
+
+    @Test func ringWithoutIdentityIsCorrectedToTheAgent() async throws {
+        let h = try AgentCallHostHarness()
+        let callID = UUID()
+        h.ring(callID: callID) // no display_name, no handle
+
+        let reported = try #require(h.provider.reportedIncoming.first)
+        #expect(reported.displayName == "Agent")
+        #expect(reported.handle == CallHandle(value: CallTarget.defaultHandle(for: h.agent.id)))
+        let corrected = try #require(h.provider.updatedCalls.first)
+        #expect(corrected.id == callID)
+        #expect(corrected.displayName == h.agent.name)
+        #expect(corrected.handle == CallHandle(value: h.agent.syntheticEmail))
+        #expect(h.provider.updatedCalls.count == 1)
+    }
+
+    @Test func ringUnderTheAgentsOwnIdentityIsNotCorrected() async throws {
+        let h = try AgentCallHostHarness()
+        h.ring(displayName: h.agent.name, handle: h.agent.syntheticEmail)
+
         #expect(h.provider.reportedIncoming.first?.handle == h.agent.callHandle)
+        #expect(h.provider.updatedCalls.isEmpty)
+        #expect(h.coordinator.state == .incomingRinging)
     }
 
     @Test func answerConnectsViaAgentDirectConfig() async throws {
         let h = try AgentCallHostHarness()
-        await h.coordinator.receiveCall(h.payload())
+        h.ring()
         await h.coordinator.answer()
 
         #expect(h.transport.connectCount == 1)
@@ -318,7 +344,7 @@ struct AgentCallHostTests {
     @Test func answerWithInlineCredentialsJoinsDirectly() async throws {
         let h = try AgentCallHostHarness(pairingEndpoint: endpoint) // inline wins over pairing
         let room = URL(string: "https://example.daily.co/inbound-room")!
-        await h.coordinator.receiveCall(h.payload(roomURL: room, token: "push-token"))
+        h.ring(roomURL: room, token: "push-token")
         await h.coordinator.answer()
 
         #expect(h.transport.lastConnection?.url == room)
@@ -344,7 +370,7 @@ struct AgentCallHostTests {
     @Test func inlinePushCredentialsRepeatOnEveryAttempt() async throws {
         let h = try AgentCallHostHarness()
         let room = URL(string: "https://example.daily.co/inbound-room")!
-        await h.coordinator.receiveCall(h.payload(roomURL: room, token: "push-token"))
+        h.ring(roomURL: room, token: "push-token")
         await h.coordinator.answer()
         h.coordinator.handle(.connected)
 

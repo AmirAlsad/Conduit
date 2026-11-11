@@ -88,6 +88,14 @@ final class FakeTarget {
     }
 }
 
+/// One ordered log shared by the fake provider, the recording delegate, and
+/// PushKit's completion, so a test asserts the order across all three.
+@MainActor
+final class EventLog {
+    private(set) var entries: [String] = []
+    func append(_ entry: String) { entries.append(entry) }
+}
+
 /// Records every delegate call in order and answers from simple tables.
 @MainActor
 final class RecordingCallEngineDelegate: CallEngineDelegate {
@@ -99,6 +107,7 @@ final class RecordingCallEngineDelegate: CallEngineDelegate {
     }
 
     private(set) var events: [Event] = []
+    var log: EventLog?
     var targets: [UUID: CallTarget] = [:]
     var bearers: [UUID: String] = [:]
 
@@ -124,19 +133,23 @@ final class RecordingCallEngineDelegate: CallEngineDelegate {
 
     func callEngine(_ engine: CallSessionCoordinator, targetForIncomingCall call: IncomingCall) -> CallTarget? {
         events.append(.resolve(call))
+        log?.append("resolve")
         return targets[call.targetID]
     }
 
     func callEngine(_ engine: CallSessionCoordinator, didChangeStateFrom old: CallState, to new: CallState) {
         events.append(.transition(from: old, to: new))
+        log?.append("T(\(old.label)→\(new.label))")
     }
 
     func callEngine(_ engine: CallSessionCoordinator, didFinish record: CallRecord) {
         events.append(.finish(record))
+        log?.append("finish(\(record.outcome.rawValue))")
     }
 
     func callEngine(_ engine: CallSessionCoordinator, ringStatusBearerForTarget id: UUID) -> String? {
         events.append(.bearer(id))
+        log?.append("bearer")
         return bearers[id]
     }
 }
@@ -149,8 +162,11 @@ final class CoordinatorHarness {
     let transports = FakeTransportPool()
     let target: FakeTarget
     let delegate = RecordingCallEngineDelegate()
+    let log = EventLog()
     let coordinator: CallSessionCoordinator
     let callID = UUID()
+    /// How many times PushKit's completion has run, across every ring.
+    private(set) var pushCompletions = 0
 
     init(
         policy: ReconnectionPolicy = .default,
@@ -161,6 +177,9 @@ final class CoordinatorHarness {
         target = FakeTarget(transports: transports)
         // The host knows this target, so an incoming push for it resolves.
         delegate.targets[target.id] = target.callTarget
+        let log = self.log
+        delegate.log = log
+        provider.onEvent = { log.append($0) }
 
         coordinator = CallSessionCoordinator(
             callProvider: provider,
@@ -169,7 +188,8 @@ final class CoordinatorHarness {
             policy: policy,
             now: now,
             sleep: { _ in },
-            isPushToTalkEnabled: { pushToTalk }
+            isPushToTalkEnabled: { pushToTalk },
+            unknownCallerName: "Agent"
         )
         coordinator.delegate = delegate
     }
@@ -181,17 +201,35 @@ final class CoordinatorHarness {
         await coordinator.placeCall(target.callTarget)
     }
 
-    /// A ringing push for this harness's target (or `targetID`, e.g. an unknown one).
-    func payload(
+    /// Deliver a VoIP push for this harness's target (or `targetID`, e.g. an
+    /// unknown one) through the coordinator's PushKit entry.
+    func ring(
         targetID: UUID? = nil,
         callID: UUID = UUID(),
+        displayName: String? = nil,
+        handle: String? = nil,
         roomURL: URL? = nil,
         token: String? = nil,
         statusURL: URL? = nil
-    ) -> IncomingCallPayload {
-        IncomingCallPayload(
-            agentID: targetID ?? target.id, callID: callID, roomURL: roomURL, token: token, statusURL: statusURL
-        )
+    ) {
+        var push: [AnyHashable: Any] = [
+            "target_id": (targetID ?? target.id).uuidString,
+            "call_id": callID.uuidString,
+        ]
+        push["display_name"] = displayName
+        push["handle"] = handle
+        push["room_url"] = roomURL?.absoluteString
+        push["token"] = token
+        push["status_url"] = statusURL?.absoluteString
+        deliverPush(push)
+    }
+
+    /// Deliver a raw push dictionary, recording PushKit's completion in the log.
+    func deliverPush(_ push: [AnyHashable: Any]) {
+        coordinator.handleIncomingPush(push) { [self] in
+            pushCompletions += 1
+            log.append("push-completed")
+        }
     }
 }
 

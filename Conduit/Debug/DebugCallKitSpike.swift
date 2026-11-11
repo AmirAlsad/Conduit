@@ -77,7 +77,8 @@ enum DebugCallKitSpike {
             ringStatusReporter: RingStatusReporter(),
             now: { .now },
             sleep: { try await Task.sleep(for: $0) },
-            isPushToTalkEnabled: { false }
+            isPushToTalkEnabled: { false },
+            unknownCallerName: "Agent"
         )
         coordinator.delegate = host
 

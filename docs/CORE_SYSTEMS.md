@@ -243,10 +243,19 @@ Key behaviors:
   that both re-apply mic state idempotently. Transient GPS/nav ducking is system-managed
   by `.duckOthers`; this observer covers full takeovers (Siri, a phone call). The live
   audio behavior is device-only; the begin/resume logic is unit-tested via the fake.
-- **Inbound (agent-initiated) calls.** A VoIP push (PushKit) → `receiveCall(_:)` asks
-  the delegate for the target (`IncomingCall` carries the push's inline room, if any),
-  reports an incoming call to CallKit (`reportIncomingCall`), and rings in
-  `incomingRinging`. On `providerPerformAnswerCall` → `answer()` reuses the shared
+- **Inbound (agent-initiated) calls.** A VoIP push (PushKit) → the synchronous
+  `handleIncomingPush(_:completion:)`, called straight from the PushKit callback. It
+  parses the payload and reports to CallKit **first** (`reportIncomingCall`, which issues
+  `reportNewIncomingCall` before returning and completes later), under the push's own
+  identity: `display_name` else the configured unknown-caller name ("Agent"), `handle`
+  else `CallTarget.defaultHandle(for:)`. Only then does it touch state (`incomingRinging`)
+  or the delegate. In the report's completion it asks the delegate for the target
+  (`IncomingCall` carries the push's inline room, if any), corrects the ring with
+  `updateCall` when the target's name or handle differ, and fails gracefully for an
+  unknown target; PushKit's completion runs after that on every path. A malformed push
+  (no valid `target_id`/`agent_id`) is reported under a minted id and ended, with no
+  state change. A push or `placeCall` arriving while a finished call is still terminal
+  first resets to idle; one during a live or ringing call takes the busy path. On `providerPerformAnswerCall` → `answer()` reuses the shared
   `connectTransport(for:)` — hybrid credentials: the host's target returns the inline
   push room/token if present, else the agent's own pairing endpoint or direct room. Decline while ringing logs `.declined`; the call
   log records `direction` (`.incoming`/`.outgoing`). Edge paths are first-class: a push

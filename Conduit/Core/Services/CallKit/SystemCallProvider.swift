@@ -56,7 +56,12 @@ final class SystemCallProvider: NSObject, CallProviding, CXProviderDelegate {
         return uuid
     }
 
-    func reportIncomingCall(id: UUID, handle: CallHandle, displayName: String) async throws {
+    func reportIncomingCall(
+        id: UUID,
+        handle: CallHandle,
+        displayName: String,
+        completion: @escaping @MainActor (IncomingCallReportError?) -> Void
+    ) {
         // Pre-configure the session (no activation); CallKit activates on answer.
         try? audioSession.prepareForVoIPCall()
 
@@ -64,18 +69,31 @@ final class SystemCallProvider: NSObject, CallProviding, CXProviderDelegate {
         update.localizedCallerName = displayName
         update.remoteHandle = CXHandle(type: .emailAddress, value: handle.value)
         update.hasVideo = false
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            provider.reportNewIncomingCall(with: id, update: update) { error in
-                if let cxError = error as? CXErrorCodeIncomingCallError,
-                   cxError.code == .filteredByDoNotDisturb {
-                    continuation.resume(throwing: IncomingCallReportError.filteredByFocus)
-                } else if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
+        // Issued synchronously: PushKit kills the app if a VoIP push's call isn't
+        // reported before the push callback returns.
+        provider.reportNewIncomingCall(with: id, update: update) { error in
+            let result: IncomingCallReportError?
+            if let cxError = error as? CXErrorCodeIncomingCallError,
+               cxError.code == .filteredByDoNotDisturb {
+                result = .filteredByFocus
+            } else if let error {
+                result = .failed(String(describing: error))
+            } else {
+                result = nil
+            }
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { completion(result) }
+            } else {
+                Task { @MainActor in completion(result) }
             }
         }
+    }
+
+    func updateCall(_ id: UUID, handle: CallHandle, displayName: String) {
+        let update = CXCallUpdate()
+        update.localizedCallerName = displayName
+        update.remoteHandle = CXHandle(type: .emailAddress, value: handle.value)
+        provider.reportCall(with: id, updated: update)
     }
 
     func reportOutgoingCallConnecting(_ id: UUID) {

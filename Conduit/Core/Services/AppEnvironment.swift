@@ -80,7 +80,8 @@ final class AppEnvironment {
             ringStatusReporter: RingStatusReporter(),
             now: { .now },
             sleep: { try await Task.sleep(for: $0) },
-            isPushToTalkEnabled: isPushToTalkEnabled
+            isPushToTalkEnabled: isPushToTalkEnabled,
+            unknownCallerName: "Agent"
         )
         callSession.delegate = callHost
     }

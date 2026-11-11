@@ -74,6 +74,7 @@ final class AgentCallHostHarness {
     let coordinator: CallSessionCoordinator
     let agent: Agent
     let callID = UUID()
+    private(set) var pushCompletions = 0
 
     /// `pairingEndpoint` makes the agent pairing-mode: `token` is then its API key
     /// and every connect attempt goes through `pairing`.
@@ -132,7 +133,8 @@ final class AgentCallHostHarness {
             policy: policy,
             now: now,
             sleep: { _ in },
-            isPushToTalkEnabled: { false }
+            isPushToTalkEnabled: { false },
+            unknownCallerName: "Agent"
         )
         coordinator.delegate = host
     }
@@ -148,15 +150,26 @@ final class AgentCallHostHarness {
         try container.mainContext.fetch(FetchDescriptor<CallLogEntry>())
     }
 
-    func payload(
+    /// Deliver a VoIP push the way Conduit's reference engine sends one (keyed by
+    /// `agent_id`), through the coordinator's PushKit entry.
+    func ring(
         agentID: UUID? = nil,
         callID: UUID = UUID(),
+        displayName: String? = nil,
+        handle: String? = nil,
         roomURL: URL? = nil,
         token: String? = nil,
         statusURL: URL? = nil
-    ) -> IncomingCallPayload {
-        IncomingCallPayload(
-            agentID: agentID ?? agent.id, callID: callID, roomURL: roomURL, token: token, statusURL: statusURL
-        )
+    ) {
+        var push: [AnyHashable: Any] = [
+            "agent_id": (agentID ?? agent.id).uuidString,
+            "call_id": callID.uuidString,
+        ]
+        push["display_name"] = displayName
+        push["handle"] = handle
+        push["room_url"] = roomURL?.absoluteString
+        push["token"] = token
+        push["status_url"] = statusURL?.absoluteString
+        coordinator.handleIncomingPush(push) { [self] in pushCompletions += 1 }
     }
 }

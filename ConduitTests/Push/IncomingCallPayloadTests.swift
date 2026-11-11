@@ -20,7 +20,7 @@ struct IncomingCallPayloadTests {
             "agent_id": agentID.uuidString,
             "call_id": callID.uuidString,
         ]))
-        #expect(payload.agentID == agentID)
+        #expect(payload.targetID == agentID)
         #expect(payload.callID == callID)
         #expect(payload.inlineConnection == nil)
     }
@@ -69,5 +69,42 @@ struct IncomingCallPayloadTests {
             "room_url": "https://example.daily.co/room",
         ]))
         #expect(payload.inlineConnection == nil)
+    }
+
+    @Test func parsesTargetID() throws {
+        let targetID = UUID()
+        let payload = try #require(IncomingCallPayload(dictionary: ["target_id": targetID.uuidString]))
+        #expect(payload.targetID == targetID)
+    }
+
+    @Test func targetIDWinsOverTheAgentIDAlias() throws {
+        let targetID = UUID()
+        let payload = try #require(IncomingCallPayload(dictionary: [
+            "target_id": targetID.uuidString,
+            "agent_id": UUID().uuidString,
+        ]))
+        #expect(payload.targetID == targetID)
+    }
+
+    @Test func parsesDisplayNameAndHandle() throws {
+        let payload = try #require(IncomingCallPayload(dictionary: [
+            "target_id": UUID().uuidString,
+            "display_name": "Echo Bot",
+            "handle": "echo-bot@conduit.invalid",
+        ]))
+        #expect(payload.displayName == "Echo Bot")
+        #expect(payload.handle == "echo-bot@conduit.invalid")
+    }
+
+    @Test func absentOrEmptyIdentityIsNil() throws {
+        let absent = try #require(IncomingCallPayload(dictionary: ["target_id": UUID().uuidString]))
+        #expect(absent.displayName == nil)
+        #expect(absent.handle == nil)
+
+        let empty = try #require(IncomingCallPayload(dictionary: [
+            "target_id": UUID().uuidString, "display_name": "", "handle": "",
+        ]))
+        #expect(empty.displayName == nil)
+        #expect(empty.handle == nil)
     }
 }

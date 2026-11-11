@@ -53,6 +53,8 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     private let now: () -> Date
     private let sleep: (Duration) async throws -> Void
     private let isPushToTalkEnabled: () -> Bool
+    /// The caller name a ring shows until (unless) its target is resolved.
+    private let unknownCallerName: String
 
     // MARK: - Live-call bookkeeping
 
@@ -73,6 +75,9 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     private var eventTask: Task<Void, Never>?
     private(set) var reconnectTask: Task<Void, Never>?
     private var activationTask: Task<Void, Never>?
+    /// Identifies the outgoing call a suspended `placeCall` belongs to, so its
+    /// continuation can tell it has been superseded (reset, or a newer call).
+    private var dialToken = UUID()
 
     init(
         callProvider: CallProviding,
@@ -81,7 +86,8 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         policy: ReconnectionPolicy = .default,
         now: @escaping () -> Date,
         sleep: @escaping (Duration) async throws -> Void,
-        isPushToTalkEnabled: @escaping () -> Bool
+        isPushToTalkEnabled: @escaping () -> Bool,
+        unknownCallerName: String = "Unknown"
     ) {
         self.callProvider = callProvider
         self.interruptionObserver = interruptionObserver
@@ -90,6 +96,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         self.now = now
         self.sleep = sleep
         self.isPushToTalkEnabled = isPushToTalkEnabled
+        self.unknownCallerName = unknownCallerName
         callProvider.delegate = self
         interruptionObserver.delegate = self
     }
@@ -97,11 +104,15 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     // MARK: - Placing a call
 
     func placeCall(_ target: CallTarget) async {
+        // A finished call still on screen gives way to the new one.
+        if state.isTerminal { resetState() }
         guard case .idle = state else {
             Log.warning(.call, "placeCall ignored; state is \(String(describing: state))")
             return
         }
 
+        let token = UUID()
+        dialToken = token
         currentTarget = target
         recordTargetID = target.id
         activeCall = ActiveCall(targetID: target.id, displayName: target.displayName, direction: .outgoing)
@@ -115,13 +126,15 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
             id = try await callProvider.startOutgoingCall(handle: callHandle(for: target), displayName: target.displayName)
         } catch {
             Log.error(.callkit, "startOutgoingCall failed: \(error)")
+            // Only this call can fail here — not one that was reset or replaced meanwhile.
+            guard isStillDialing(token) else { return }
             fail(.unknown)
             return
         }
-        // The user may have ended the call while CallKit was starting it. That end
-        // already finished and recorded the call; don't leave the system holding
-        // the call it just started, and don't join the room.
-        guard case .dialing = state else {
+        // The user may have ended the call while CallKit was starting it (that end
+        // already finished and recorded it), or it was reset or replaced. Don't
+        // leave the system holding the call it just started, and don't join the room.
+        guard isStillDialing(token) else {
             Log.info(.call, "Call ended while dialing; ending the started CallKit call")
             await callProvider.endCall(id)
             return
@@ -133,94 +146,153 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         await connectTransport(for: target)
     }
 
+    private func isStillDialing(_ token: UUID) -> Bool {
+        guard case .dialing = state else { return false }
+        return dialToken == token
+    }
+
     private func callHandle(for target: CallTarget) -> CallHandle {
         CallHandle(value: target.handle ?? CallTarget.defaultHandle(for: target.id))
     }
 
-    // MARK: - Receiving a call (agent-initiated, via VoIP push)
+    // MARK: - Receiving a call (via VoIP push)
 
-    /// Report an incoming call to CallKit and ring. The transport doesn't connect
-    /// until the user answers (`answer()`), so this only resolves the target and
-    /// reports — its credentials (inline or via the host) are used on answer.
-    func receiveCall(_ payload: IncomingCallPayload) async {
-        let incoming = IncomingCall(
-            callID: payload.callID,
-            targetID: payload.agentID,
-            displayName: Self.unknownCallerName,
-            handle: Self.unknownCallerHandle,
-            connection: payload.inlineConnection
-        )
-        guard case .idle = state else {
-            // One call at a time — but iOS terminates the app (killing the active
-            // call's media) if a VoIP push doesn't report an incoming call. Report
-            // under the push's own id, end it immediately, and record the missed ring
-            // without touching the active call's state.
-            Log.warning(.call, "Busy on VoIP push; reporting call \(payload.callID) and ending it")
-            let busyTarget = delegate?.callEngine(self, targetForIncomingCall: incoming)
-            try? await callProvider.reportIncomingCall(
-                id: payload.callID,
-                handle: busyTarget.map(callHandle(for:)) ?? CallHandle(value: incoming.handle),
-                displayName: busyTarget?.displayName ?? incoming.displayName
-            )
-            callProvider.reportCallEnded(payload.callID, reason: .unanswered)
-            delegate?.callEngine(self, didFinish: CallRecord(
-                targetID: payload.agentID,
-                direction: .incoming,
-                startedAt: now(),
-                duration: 0,
-                outcome: .noAnswer,
-                missedReason: .busy
-            ))
-            if let url = payload.statusURL {
-                reportRingStatus(.busy, callID: payload.callID, endpoint: url, targetID: payload.agentID)
+    /// The PushKit entry point. iOS terminates the app if a VoIP push doesn't
+    /// report an incoming call before the push callback returns, so this reports
+    /// FIRST — synchronously, under the identity the push itself carries — and only
+    /// then touches state or the delegate. The target is resolved when CallKit
+    /// accepts the report, and the ring is corrected if the target's name or handle
+    /// differ. `completion` (PushKit's) runs after the report's completion, on
+    /// every path.
+    func handleIncomingPush(_ dictionary: [AnyHashable: Any], completion: @escaping () -> Void) {
+        guard let payload = IncomingCallPayload(dictionary: dictionary) else {
+            let id = UUID()
+            Log.warning(.callkit, "Malformed VoIP push; reporting call \(id) and ending it")
+            callProvider.reportIncomingCall(
+                id: id,
+                handle: CallHandle(value: CallTarget.defaultHandle(for: id)),
+                displayName: unknownCallerName
+            ) { [self] _ in
+                callProvider.reportCallEnded(id, reason: .failed)
+                completion()
             }
             return
         }
 
-        let target = delegate?.callEngine(self, targetForIncomingCall: incoming)
-        activeCallID = payload.callID
-        currentTarget = target
-        recordTargetID = payload.agentID
-        activeCall = target.map { ActiveCall(targetID: $0.id, displayName: $0.displayName, direction: .incoming) }
+        let incoming = IncomingCall(
+            callID: payload.callID,
+            targetID: payload.targetID,
+            displayName: payload.displayName ?? unknownCallerName,
+            handle: payload.handle ?? CallTarget.defaultHandle(for: payload.targetID),
+            connection: payload.inlineConnection
+        )
+        // One call at a time: a push during a live (or ringing) call is reported,
+        // then ended at once, without touching that call.
+        let isBusy: Bool
+        switch state {
+        case .idle, .ended, .failed: isBusy = false
+        default: isBusy = true
+        }
+
+        // The report's completion may arrive before this method finishes (a fake
+        // completes synchronously); hold it until the ring is set up.
+        var ringIsSetUp = false
+        var earlyResult: IncomingCallReportError??
+        let finishRing: (IncomingCallReportError?) -> Void = { [self] result in
+            if isBusy {
+                completeBusyRing(incoming, payload: payload, result: result)
+            } else {
+                completeRing(incoming, payload: payload, result: result)
+            }
+            completion()
+        }
+        callProvider.reportIncomingCall(
+            id: incoming.callID,
+            handle: CallHandle(value: incoming.handle),
+            displayName: incoming.displayName
+        ) { result in
+            if ringIsSetUp { finishRing(result) } else { earlyResult = .some(result) }
+        }
+
+        if isBusy {
+            Log.warning(.call, "Busy on VoIP push; reported call \(incoming.callID), ending it")
+        } else {
+            beginRing(incoming, payload: payload)
+        }
+        ringIsSetUp = true
+        if let earlyResult { finishRing(earlyResult) }
+    }
+
+    private func beginRing(_ incoming: IncomingCall, payload: IncomingCallPayload) {
+        // A finished call still on screen gives way to the ring.
+        if state.isTerminal { resetState() }
+        activeCallID = incoming.callID
+        recordTargetID = incoming.targetID
+        activeCall = ActiveCall(targetID: incoming.targetID, displayName: incoming.displayName, direction: .incoming)
         callDirection = .incoming
         callStartedAt = now()
         ringStatusURL = payload.statusURL
         transition(to: .incomingRinging)
         interruptionObserver.startObserving()
+    }
 
-        // PushKit requires reporting the call this run loop even if the target is
-        // unknown — report under a generic handle, then fail gracefully.
-        do {
-            try await callProvider.reportIncomingCall(
-                id: payload.callID,
-                handle: target.map(callHandle(for:)) ?? CallHandle(value: incoming.handle),
-                displayName: target?.displayName ?? incoming.displayName
-            )
-        } catch IncomingCallReportError.filteredByFocus {
+    private func completeRing(_ incoming: IncomingCall, payload: IncomingCallPayload, result: IncomingCallReportError?) {
+        // The ring may already be over (declined, or the provider reset).
+        guard activeCallID == incoming.callID, case .incomingRinging = state else { return }
+
+        switch result {
+        case .filteredByFocus:
             // The system suppressed the ring (Focus/DND) — a missed call, not a
             // failure. Record it and return to idle so the next push rings normally.
             Log.info(.call, "Incoming call filtered by Focus; recording as missed")
             interruptionObserver.stopObserving()
             finish(outcome: .noAnswer, missedReason: .filteredByFocus)
             if let url = ringStatusURL {
-                reportRingStatus(.suppressedByFocus, callID: payload.callID, endpoint: url, targetID: payload.agentID)
+                reportRingStatus(.suppressedByFocus, callID: incoming.callID, endpoint: url, targetID: incoming.targetID)
             }
             resetState()
-            return
-        } catch {
-            Log.error(.callkit, "reportIncomingCall failed: \(error)")
-            fail(.unknown)
-            return
-        }
 
-        if target == nil {
-            Log.error(.call, "Incoming call for unknown target \(payload.agentID)")
+        case .failed(let message):
+            Log.error(.callkit, "reportIncomingCall failed: \(message)")
             fail(.unknown)
+
+        case nil:
+            guard let target = delegate?.callEngine(self, targetForIncomingCall: incoming) else {
+                Log.error(.call, "Incoming call for unknown target \(incoming.targetID)")
+                fail(.unknown)
+                return
+            }
+            currentTarget = target
+            activeCall = ActiveCall(targetID: incoming.targetID, displayName: target.displayName, direction: .incoming)
+            correctRingIfNeeded(incoming, to: target)
         }
     }
 
-    private static let unknownCallerName = "Agent"
-    private static let unknownCallerHandle = "agent"
+    private func completeBusyRing(_ incoming: IncomingCall, payload: IncomingCallPayload, result: IncomingCallReportError?) {
+        if result == nil, let target = delegate?.callEngine(self, targetForIncomingCall: incoming) {
+            correctRingIfNeeded(incoming, to: target)
+        }
+        callProvider.reportCallEnded(incoming.callID, reason: .unanswered)
+        delegate?.callEngine(self, didFinish: CallRecord(
+            targetID: incoming.targetID,
+            direction: .incoming,
+            startedAt: now(),
+            duration: 0,
+            outcome: .noAnswer,
+            missedReason: .busy
+        ))
+        if let url = payload.statusURL {
+            reportRingStatus(.busy, callID: incoming.callID, endpoint: url, targetID: incoming.targetID)
+        }
+    }
+
+    /// Local truth wins: show the resolved target's name and handle when the push
+    /// rang under different ones.
+    private func correctRingIfNeeded(_ incoming: IncomingCall, to target: CallTarget) {
+        let handle = callHandle(for: target)
+        guard target.displayName != incoming.displayName || handle.value != incoming.handle else { return }
+        callProvider.updateCall(incoming.callID, handle: handle, displayName: target.displayName)
+    }
 
     /// The user answered (from the system UI). Connect the transport with the
     /// resolved target's credentials (the push's inline room, or the host's own).

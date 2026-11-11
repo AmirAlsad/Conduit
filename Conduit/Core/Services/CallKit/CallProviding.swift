@@ -13,10 +13,12 @@
 
 import Foundation
 
-/// Thrown by `reportIncomingCall` when the system suppressed the ring (Focus/DND).
-/// Not a failure: the caller logs a missed call instead of entering a failed state.
-enum IncomingCallReportError: Error {
+/// Why `reportIncomingCall` did not ring.
+enum IncomingCallReportError: Error, Equatable, Sendable {
+    /// The system suppressed the ring (Focus/DND). Not a failure: the caller
+    /// records a missed call instead of entering a failed state.
     case filteredByFocus
+    case failed(String)
 }
 
 @MainActor
@@ -25,9 +27,18 @@ protocol CallProviding: AnyObject {
 
     /// Report an outgoing call to the system. Returns the call's UUID.
     func startOutgoingCall(handle: CallHandle, displayName: String) async throws -> UUID
-    /// Report an agent-initiated incoming call to the system (from a VoIP push). The
-    /// `id` is the call's UUID (the push's call_id); the system then rings.
-    func reportIncomingCall(id: UUID, handle: CallHandle, displayName: String) async throws
+    /// Report an incoming call to the system (from a VoIP push). The `id` is the
+    /// call's UUID (the push's call_id); the system then rings. The report is issued
+    /// before this returns — PushKit requires it in the same run-loop turn as the
+    /// push — and `completion` runs later on the main actor (nil error = ringing).
+    func reportIncomingCall(
+        id: UUID,
+        handle: CallHandle,
+        displayName: String,
+        completion: @escaping @MainActor (IncomingCallReportError?) -> Void
+    )
+    /// Correct how a reported call is shown (caller name and handle).
+    func updateCall(_ id: UUID, handle: CallHandle, displayName: String)
     func reportOutgoingCallConnecting(_ id: UUID)
     func reportOutgoingCallConnected(_ id: UUID)
     /// Request the system end the call (app-initiated End).

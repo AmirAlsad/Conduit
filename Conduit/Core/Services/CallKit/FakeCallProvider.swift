@@ -15,7 +15,8 @@ final class FakeCallProvider: CallProviding {
 
     private(set) var startedCalls: [UUID] = []
     private(set) var startedHandles: [CallHandle] = []
-    private(set) var reportedIncoming: [(id: UUID, handle: CallHandle)] = []
+    private(set) var reportedIncoming: [(id: UUID, handle: CallHandle, displayName: String)] = []
+    private(set) var updatedCalls: [(id: UUID, handle: CallHandle, displayName: String)] = []
     private(set) var reportedConnecting: [UUID] = []
     private(set) var reportedConnected: [UUID] = []
     private(set) var endRequests: [UUID] = []
@@ -25,8 +26,16 @@ final class FakeCallProvider: CallProviding {
 
     /// When set, the next `startOutgoingCall` throws this.
     var startError: Error?
-    /// When set, the next `reportIncomingCall` throws this.
-    var reportIncomingError: Error?
+    /// When set, `reportIncomingCall` completes with this error.
+    var reportIncomingError: IncomingCallReportError?
+    /// When true, `reportIncomingCall` holds its completion until
+    /// `completeIncomingReports()` (real CallKit completes later); when false it
+    /// completes before returning.
+    var completesIncomingReportsLater = false
+    private var pendingIncomingCompletions: [@MainActor () -> Void] = []
+    /// Receives a label for each call into the provider, so a test can assert the
+    /// order of provider calls against other events in one log.
+    var onEvent: ((String) -> Void)?
     /// The UUID handed back from the next `startOutgoingCall`.
     var nextCallID = UUID()
 
@@ -44,26 +53,60 @@ final class FakeCallProvider: CallProviding {
     }
 
     func startOutgoingCall(handle: CallHandle, displayName: String) async throws -> UUID {
+        let id = nextCallID
         if suspendStart {
             pendingStartCount += 1
             await withCheckedContinuation { startContinuations.append($0) }
         }
         if let startError { throw startError }
-        let id = nextCallID
         startedCalls.append(id)
         startedHandles.append(handle)
         return id
     }
 
-    func reportIncomingCall(id: UUID, handle: CallHandle, displayName: String) async throws {
-        if let reportIncomingError { throw reportIncomingError }
-        reportedIncoming.append((id, handle))
+    func reportIncomingCall(
+        id: UUID,
+        handle: CallHandle,
+        displayName: String,
+        completion: @escaping @MainActor (IncomingCallReportError?) -> Void
+    ) {
+        onEvent?("report")
+        let error = reportIncomingError
+        reportedIncoming.append((id, handle, displayName))
+        let complete: @MainActor () -> Void = { [weak self] in
+            self?.onEvent?("report-completed")
+            completion(error)
+        }
+        if completesIncomingReportsLater {
+            pendingIncomingCompletions.append(complete)
+        } else {
+            complete()
+        }
+    }
+
+    /// Deliver every held `reportIncomingCall` completion, in report order.
+    func completeIncomingReports() {
+        let pending = pendingIncomingCompletions
+        pendingIncomingCompletions = []
+        pending.forEach { $0() }
+    }
+
+    func updateCall(_ id: UUID, handle: CallHandle, displayName: String) {
+        onEvent?("update")
+        updatedCalls.append((id, handle, displayName))
     }
 
     func reportOutgoingCallConnecting(_ id: UUID) { reportedConnecting.append(id) }
     func reportOutgoingCallConnected(_ id: UUID) { reportedConnected.append(id) }
-    func endCall(_ id: UUID) async { endRequests.append(id) }
-    func reportCallEnded(_ id: UUID, reason: CallEndReason) { reportedEnded.append((id, reason)) }
+    func endCall(_ id: UUID) async {
+        onEvent?("end-request")
+        endRequests.append(id)
+    }
+
+    func reportCallEnded(_ id: UUID, reason: CallEndReason) {
+        onEvent?("ended(\(reason))")
+        reportedEnded.append((id, reason))
+    }
     func setMuted(_ id: UUID, muted: Bool) async { muteStates[id] = muted }
     func setOnHold(_ id: UUID, held: Bool) async { holdStates[id] = held }
 

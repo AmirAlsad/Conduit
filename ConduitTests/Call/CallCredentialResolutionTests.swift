@@ -154,7 +154,7 @@ struct CallCredentialResolutionTests {
 
     @Test func activationBeforeAnswerAttachesTheTransportWhenItIsCreated() async throws {
         let h = CoordinatorHarness()
-        await h.coordinator.receiveCall(h.payload())
+        h.ring()
         h.provider.simulateActivate(FakeAudioSession(hasExternalAudioRoute: false))
         await h.coordinator.awaitPendingActivation()
         #expect(h.coordinator.isAudioActivated)
