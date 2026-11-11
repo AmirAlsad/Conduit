@@ -317,3 +317,20 @@ Any new local notification must be checked with the app in the foreground too.
 
 **Why it's missed:** The request is added without error and nothing is logged; the
 notice works whenever the app happens to be backgrounded, which is how it was verified.
+
+### Missed-call notice for a ring during a call never appeared
+First seen: 2026-11-11 (device run after the call-engine extraction; present since inbound calls shipped)
+
+**Pattern:** iOS drops a local notification delivered while its app is in the
+foreground unless a `UNUserNotificationCenterDelegate` returns presentation options
+from `willPresent`. The app had no delegate. A ring that arrives during a call is
+the busy path, and the in-call screen is in front at that moment, so the
+"Missed Call" notice was posted and silently discarded. Focus-filtered rings were
+unaffected because the app is in the background then.
+
+**Rule:** `AppDelegate` is the notification delegate and returns `[.list]`, so a
+foreground delivery lands quietly in Notification Center like a background one.
+Any notification the app posts must be checked with the app in the foreground.
+
+**Why it's missed:** The notice is quiet by design (provisional authorization), so
+its absence looks like "delivered quietly", and the history row is still written.
