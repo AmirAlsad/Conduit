@@ -46,6 +46,7 @@ exclude_docs: |
   ARCHITECTURE.md
   CONVENTIONS.md
   CORE_SYSTEMS.md
+  DEVICE_VERIFICATION.md
   ROADMAP.md
 
 nav:
