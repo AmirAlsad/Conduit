@@ -16,8 +16,10 @@ Add-to-Contacts, reconnection + spoken state, Recents swipe-to-delete, the
 audio-interruption seam, and the **full inbound (agent-initiated) call plumbing**.
 Both call directions exist in code — and **M8's on-ramp is built** (QR/deep-link
 pairing, staged connection diagnostics, persisted failure reasons, decluttered
-in-app copy). See [ARCHITECTURE](./ARCHITECTURE.md) and
-[CORE_SYSTEMS](./CORE_SYSTEMS.md).
+in-app copy). The call engine (state machine, CallKit, PushKit, the Daily and
+LiveKit adapters) lives in the `ConduitCallEngine` Swift package, consumed by path
+from `../ConduitCallEngine` until it is consumed by version. See
+[ARCHITECTURE](./ARCHITECTURE.md) and [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 **The one fact that shapes this roadmap:** a large share of what's "built" is verified
 only in the **simulator against fakes**. The real CallKit + **Daily** two-way audio was
@@ -35,8 +37,9 @@ hasn't rung a real phone — so the roadmap leads with closing that debt.
   Firebase. Credentials are the user's and live in the Keychain. This is why the
   developer on-ramp (M8) ships *runnable example* code, never a hosted service.
 - **The testability spine holds.** Every new external boundary gets a protocol seam +
-  an in-app fake, so logic verifies at sim speed and only genuine audio/CallKit/Push
-  behavior needs a device.
+  a fake (the engine's in the package's `ConduitCallEngineTesting` product, the
+  app's in the app target), so logic verifies at sim speed and only genuine
+  audio/CallKit/Push behavior needs a device.
 - **Prove, then grow.** A capability isn't "done" until it works on hardware. New
   surface area waits behind verification of what it builds on.
 - **Self-built / self-signed.** Each developer builds Conduit under their own Apple
@@ -238,11 +241,14 @@ surface rather than a moving one.
 ## Cross-cutting threads (always on)
 
 - **Testability spine** — protocol seam + fake for every new boundary.
+- **Pinned dependencies** — SDK versions come from the tracked root
+  `Package.resolved`; bump them deliberately and re-run the device checks.
 - **Docs discipline** — update the relevant `docs/` file with each architectural change.
 - **The hard constraints** — no backend / Firebase / analytics; secrets only in the
   Keychain, never in a log, a contact, or source control.
-- **Test-sim pin** — iPhone 16 / iOS 18.6 (the iOS 26 sim's accessibility subsystem is
-  broken).
+- **Test-sim pin** — CI runs iPhone 16 / iOS 18.6 (the iOS 26 sim's accessibility
+  subsystem is broken); a Mac that can't install an iOS 18 runtime uses iPhone 17 /
+  iOS 27.2 locally, where XCUITest queries work.
 
 ## Deferred / explicitly not doing
 

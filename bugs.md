@@ -7,10 +7,31 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### Unpinned SPM ranges let the SDKs drift between a device-verified build and the next one
+First seen: 2026-11-11 (a fresh resolve had drifted to unverified SDKs)
+
+**Pattern:** `project.yml` declares transport SDKs with `from:` floors, and the
+generated `.xcodeproj` (so its resolved versions) is gitignored. Nothing recorded
+which versions a device-verified build used, so the next fresh resolve floated to
+newer, never-verified ones: LiveKit 2.19 with WebRTC M150, Pipecat 1.3, and
+daily-client-ios 0.41 — none of them device-verified, against the June 2026 set
+the calls were verified on. An SDK bump can change audio and WebRTC behavior (see
+the duplicated-WebRTC entry below) with no source change on our side.
+
+**Rule:** Pin with a tracked root `Package.resolved`. `project.yml`'s
+`postGenCommand` copies it into the generated project, so `xcodegen generate`
+always resolves to the recorded versions; change a pin on purpose, commit the
+diff, then run `scripts/check-bundle.sh <Conduit.app>` and regression-call Daily,
+LiveKit, and SmallWebRTC on a device. The `from:` ranges are floors, not pins.
+
+**Why it's missed:** The build is green and the simulator runs fakes, so drift is
+invisible until a device call; and with the project gitignored there is no diff
+that shows a version moved.
+
 ### Awaits in the call path outlived the call (phantom CallKit call, lost activation)
 First seen: 2026-11-11 (code review of the engine-boundary refactor; not yet seen on device)
 
-**Pattern:** Each `await` in `placeCall` / `connectTransport` / `retryConnect` is a
+**Pattern:** Each `await` in `CallEngine`'s `placeCall` / `connectTransport` / `retryConnect` is a
 point where the call can end or CallKit can activate. (1) End tapped while
 `startOutgoingCall` was suspended: `finishEnded` recorded the call, then the await
 returned and `placeCall` overwrote the terminal state with `.connecting` and joined
@@ -100,7 +121,7 @@ First seen: 2026-06-08 (M5b, pairing-flow device test)
 **Pattern:** With the pairing flow, `transport.connect` does an HTTP POST
 (`PairingClient`) before joining Daily, which delays the join. CallKit, meanwhile,
 fires `providerDidActivate` right after the start action is fulfilled — i.e.
-BEFORE the transport is connected. The coordinator's `activate(_:)` called
+BEFORE the transport is connected. The engine's `activate(_:)` called
 `setMicEnabled(true)` once, but Daily's `enableMic` is a no-op on a not-yet-joined
 client, so the mic never came on (no uplink, no permission prompt) even though
 downlink audio played (Daily manages its own session). The direct path connected
@@ -176,7 +197,8 @@ make double-fire invisible in the simulator; it only manifests on device.
 ### A VoIP push must ALWAYS report a CallKit call — silent "ignore" kills the app
 First seen: 2026-06-10 (M7 inbound device verification)
 
-**Pattern:** `receiveCall` guarded `state == .idle` and silently returned on a
+**Pattern:** The push handler (then `receiveCall`, now
+`CallEngine.handleIncomingPush`) guarded `state == .idle` and silently returned on a
 mid-call push. On device, iOS enforces that every PushKit VoIP push results in
 `reportNewIncomingCall` *in that handler invocation* — a silent return gets the
 app terminated, which tears down the **active** call's media (mic dot vanished,
@@ -186,7 +208,9 @@ don't model the PushKit kill.
 **Rule:** Every path out of the push handler must report a call — busy means
 report under the push's `call_id`, then immediately `reportCallEnded(.unanswered)`
 and log a missed incoming entry; never touch the active call's state. Same
-invariant family as "report even for unknown agents."
+invariant family as "report even for unknown agents." `handleIncomingPush` reports
+first, synchronously inside the PushKit callback, before any other work; a
+malformed push is reported under a minted id, then ended.
 
 **Why it's missed:** The PushKit termination rule is invisible in the simulator
 (PushKit doesn't deliver there) and in unit tests (no OS watchdog in fakes);
@@ -201,7 +225,7 @@ CallKit's audio activation landed mid-fetch: `attachAudioSession()` set the
 engine `.default`, then connect's late `.none` stomped it — the room joined with
 the engine forbidden, so the mic never published (no orange dot). Warm-launch
 calls reordered benignly, which is why only the FIRST call after a fresh launch
-failed. The same stomp would kill audio on a coordinator-driven mid-call
+failed. The same stomp would kill audio on an engine-driven mid-call
 reconnect (`retryConnect` re-enters `connect()` while the session is active).
 
 **Rule:** Activation (`attach`/`detach`) and `connect()` are unordered edges —
@@ -223,7 +247,7 @@ on LiveKit it *couldn't* have worked: Pipecat's LiveKit input transport re-wraps
 incoming data-channel messages as OUTPUT frames, so client RTVI messages never
 reach the RTVI processor at all.
 
-**Rule:** Deliberate hangup = `Transport.disconnect()`; each adapter sends the
+**Rule:** Deliberate hangup = `CallTransport.disconnect()`; each adapter sends the
 end signal there (Daily: `sendClientMessage("end-call")` + a 200 ms flush pause;
 LiveKit: publish the RTVI client-message envelope on the data channel). The
 engine listens on Daily via `on_client_message` and on LiveKit via the raw
@@ -247,9 +271,11 @@ update. LiveKit never collides because its build prefixes everything (`LKRTC*`).
 **Rule:** Never ship two un-prefixed WebRTC copies. Our fork
 (AmirAlsad/pipecat-client-ios-small-webrtc, branch `livekit-webrtc`, pinned by
 revision in project.yml) rebuilds the package against LiveKitWebRTC via a
-typealias shim. After ANY transport-SDK bump, check the device launch/bundle:
-`Frameworks/` must contain no `WebRTC.framework` (stasel), and a real Daily call
-is the regression test. Upstream: pipecat-client-ios-small-webrtc#6.
+typealias shim, and it stays an app-only dependency (never one of the
+ConduitCallEngine package's). After ANY transport-SDK bump, check the device
+bundle with `scripts/check-bundle.sh <Conduit.app>`: `Frameworks/` must contain no
+`WebRTC.framework` (stasel), and a real Daily call is the regression test.
+Upstream: pipecat-client-ios-small-webrtc#6.
 
 **Why it's missed:** Links clean, sim is fine (FakeTransport), and even on
 device the app launches normally — it only dies when Daily's track KVO fires

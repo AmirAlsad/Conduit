@@ -4,7 +4,11 @@ Pre-flight checklist for the CallKit/audio/transport seam. CallKit's request→d
 round-trips and its activation timing are driven by the system, not your call site —
 and the in-app fakes don't model that round-trip, so these bugs pass the sim suite and
 only appear on device. Read before touching `CallEngine`, `SystemCallProvider`,
-or a `CallTransport` adapter's connect/audio path.
+or a `CallTransport` adapter's connect/audio path. All of it is in the
+`ConduitCallEngine` package (`../ConduitCallEngine`): `CallEngine` in
+`Sources/ConduitCallEngine/Call/`, `SystemCallProvider` in `…/CallKit/`, the Daily
+and LiveKit adapters in `Sources/ConduitCallEngineDaily` / `…LiveKit`. The app's
+SmallWebRTC adapter is `Conduit/Core/Services/Transport/`.
 
 ### System callbacks fire more than once and out of order vs. your code
 First seen: 2026-06-07
@@ -20,7 +24,7 @@ BEFORE the transport finished connecting (a slow pairing fetch), so a one-shot
 unconditionally reset `setEngineAvailability(.none)` after its pairing fetch, stomping
 an activation that had already attached (`.default`) mid-fetch — dead mic on the first
 call after a cold launch, where the fetch is slowest. (4) An activation that landed before
-the coordinator had created the transport (while dialing, or before `answer()`) attached
+the engine had created the transport (while dialing, or before `answer()`) attached
 nothing, and an End during `startOutgoingCall` was overwritten when the await returned.
 
 **Rule:**
@@ -34,8 +38,9 @@ nothing, and an End during `startOutgoingCall` was overwritten when the await re
 - After every `await` on the call path, re-check it is still the same call (state,
   transport identity) before acting; a transport created after activation attaches at once.
 
-**Why it's missed:** The fakes (`FakeCallProvider`, `FakeTransport`) don't round-trip
+**Why it's missed:** The fakes (`FakeCallProvider`, `FakeTransport`, in the package's
+`ConduitCallEngineTesting`) don't round-trip
 through the delegate and aren't connection-gated, so the unit suite shows one clean
 ordered pass. The misbehavior is device-only — verify the call lifecycle on hardware,
 and when a device bug appears, add the diagnostic to the debug spike's file log
-(os.log isn't capturable with the env-driven launch).
+(`Conduit/Debug/DebugCallKitSpike.swift`; os.log isn't capturable with the env-driven launch).

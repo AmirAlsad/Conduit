@@ -19,12 +19,15 @@ the connection contract, and the example backend. Internal architecture docs sta
 # 1. Prerequisites
 brew install xcodegen          # Xcode 26+ also required
 
-# 2. Per-developer build settings (team id + bundle id)
+# 2. The call engine package must sit next to this repo as ../ConduitCallEngine
+#    (project.yml references it by path until it is consumed by version)
+
+# 3. Per-developer build settings (team id + bundle id)
 cp Config/local.xcconfig.template Config/local.xcconfig
 #   …then edit Config/local.xcconfig with your DEVELOPMENT_TEAM and APP_BUNDLE_IDENTIFIER.
 #   This file is gitignored. Simulator builds work without it; device builds need it.
 
-# 3. Generate and open the project
+# 4. Generate and open the project
 xcodegen generate
 open Conduit.xcodeproj
 ```
@@ -36,10 +39,12 @@ xcodebuild -scheme Conduit \
   -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.6' test
 ```
 
-> **Simulator pin:** unit/UI tests run on **iPhone 16 / iOS 18.6**. The iOS 26 simulator has a
+> **Simulator pin:** unit/UI tests run on **iPhone 16 / iOS 18.6** in CI. The iOS 26 simulator has a
 > broken accessibility subsystem that times out XCUITest queries — see the note in
-> `.github/workflows/tests.yml`. The core CallKit + WebRTC live call is **device-only** and
-> cannot run in the simulator.
+> `.github/workflows/tests.yml`. (Xcode 27.2 can't install an iOS 18 runtime; locally it runs
+> iPhone 17 / iOS 27.2, where XCUITest queries work.) The core CallKit + WebRTC live call is
+> **device-only** and cannot run in the simulator. Engine tests run from the package checkout
+> (`xcodebuild -scheme ConduitCallEngine-Package … test`).
 
 ## Project layout
 
@@ -51,6 +56,7 @@ Conduit/
   Shared/     Reusable components and navigation helpers
   Resources/  Fonts, JSON, assets
 Config/       Base.xcconfig (committed) + local.xcconfig (gitignored, per-developer)
+../ConduitCallEngine/  The call engine as a Swift package (sibling checkout, referenced by path)
 docs/         Architecture, conventions, core-systems guides (start at docs/README.md)
 example-backend/  Self-hosted reference backend (Pipecat / FastAPI) — its own README + CLAUDE.md
 project.yml   XcodeGen project definition (the .xcodeproj is generated from this)

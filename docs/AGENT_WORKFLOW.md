@@ -14,9 +14,16 @@ builds (TestFlight, archive verification), pass `extraArgs: ["-configuration",
 "Release"]`; everything else stays Debug.
 
 Don't `clean` reflexively — it costs minutes. Reach for it only after `xcodegen
-generate`, after dependency or `Config/` changes, or when symptoms match
-cached-artifact failure (mysterious link errors, "module compiled with different
-version").
+generate`, after dependency or `Config/` changes (including edits to the
+`ConduitCallEngine` package checkout), or when symptoms match cached-artifact
+failure (mysterious link errors, "module compiled with different version").
+
+The engine package is a local path dependency (`../ConduitCallEngine`, until it is
+consumed by version), so a fresh clone needs that checkout next to the repo before
+`xcodegen generate` can resolve packages. SDK versions come from the tracked root
+`Package.resolved`, which `xcodegen generate` copies into the project; don't let a
+build re-resolve to newer ones. After any pin change, run
+`scripts/check-bundle.sh <path-to-Conduit.app>` on the built app.
 
 ## UI verification & the AccessibilityID rule
 
@@ -93,7 +100,15 @@ xcodebuild -scheme Conduit -destination 'platform=iOS Simulator,name=iPhone 16,O
 # Single test (target/suite/method)
 xcodebuild -scheme Conduit -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.6' \
   -only-testing:ConduitTests/SomeSuite/someTest test
+
+# Engine tests, from the package checkout (../ConduitCallEngine)
+xcodebuild -scheme ConduitCallEngine-Package \
+  -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.6' test
 ```
+
+On a Mac whose Xcode can't install an iOS 18 simulator runtime (Xcode 27.2 can't),
+swap the destination for an installed one — `platform=iOS Simulator,name=iPhone 17,OS=27.2`
+— where XCUITest queries were confirmed to work. CI keeps iPhone 16 / iOS 18.6.
 
 A clean build shows **zero** Swift warnings (the strict baseline + CI gate hold
 the count at 0):

@@ -1,14 +1,13 @@
 # Architecture
 
-> Status: built through **M6**, plus follow-ons. `Core/Models/` and `Core/Services/`
-> are populated (protocol seams + fakes, SwiftData models, `AppEnvironment`,
-> `CallEngine`, reconnection, spoken state); all `Features/` modules and
-> `Shared/` components are built; the **real** implementations are in —
-> CallKit (`SystemCallProvider`, M3), both transports (`PipecatDailyTransport` M2,
-> `LiveKitTransport` M6), and Keychain (`KeychainService`). Adding an agent to
-> Contacts is permission-free (system Add-Contact sheet). Since M6: Recents
-> swipe-to-delete, an audio-interruption seam (`AudioInterruptionObserving`), and
-> agent-initiated inbound calls (VoIP push, `Core/Services/Push/`; see
+> Status: built through **M6**, plus follow-ons. The call engine (state machine,
+> CallKit, PushKit, reconnection, the Daily and LiveKit adapters) is the
+> `ConduitCallEngine` Swift package; the app holds everything agent-shaped —
+> `Core/Models/` and `Core/Services/` (SwiftData models, `AppEnvironment`, the
+> `AgentCalls/` glue, Keychain, pairing, contacts, Siri), all `Features/` modules
+> and `Shared/` components, and the SmallWebRTC adapter. Adding an agent to
+> Contacts is permission-free (system Add-Contact sheet). Recents has
+> swipe-to-delete, and agents can ring the user (VoIP push; see
 > [INBOUND_CALLS](./INBOUND_CALLS.md)). The LiveKit call path is device-verified
 > (pairing connect, two-way audio, native route button, reconnection — against the
 > deployed reference engine, June 2026), and so is the **inbound path** (cold ring,
@@ -27,8 +26,9 @@ themselves), so the app has no accounts, no token service, and no per-minute cos
 
 ## The Three-Layer Model
 
-The whole system is three conceptual layers. The app owns only the first two; the
-third is the user's.
+The whole system is three conceptual layers. The app owns only the first two —
+implemented by the `ConduitCallEngine` package plus the app's own SmallWebRTC
+adapter; the third is the user's.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -65,8 +65,8 @@ third is the user's.
 Presents the agent session as a system call so it behaves like the native Phone
 app: lock-screen controls, Dynamic Island pill, status-bar indicator, the
 CarPlay/Bluetooth call display, and a real entry in the system Recents. **CallKit
-owns the audio session** — the app reports the call and lets the system activate
-the session at the right moment. The one screen the app actually builds is the
+owns the audio session** — the engine reports the call and lets the system
+activate the session at the right moment. The one screen the app actually builds is the
 in-app foreground in-call screen (the WhatsApp/Zoom pattern); the system owns the
 locked-screen UI and cannot be replicated.
 
@@ -76,9 +76,9 @@ Carries the live audio. Transports are interchangeable behind one client: **Dail
 and LiveKit** over their clouds, and **SmallWebRTC** peer-to-peer with the user's
 own server (LAN / self-hosted — the zero-cloud option).
 Because model APIs ride inside the agent, supporting the orchestration transports
-transitively covers every model and voice. This layer is meant to live behind a
-protocol boundary so the call state machine, connection parsing, and transport
-selection can unit-test against fakes (voice plan "Layer 1").
+transitively covers every model and voice. The layer sits behind the
+`CallTransport` protocol so the call state machine, connection parsing, and
+transport selection can unit-test against fakes (voice plan "Layer 1").
 
 ### (3) The agent — the user's
 
@@ -103,32 +103,53 @@ Related hazards to design for (detailed in [CORE_SYSTEMS](./CORE_SYSTEMS.md)):
 
 ## Folder Structure
 
+The call engine is the **`ConduitCallEngine`** Swift package, consumed through a
+local path (`../ConduitCallEngine`, set in `project.yml`); it is meant to be
+consumed by version from `github.com/AmirAlsad/ConduitCallEngine` later. Until
+then a fresh clone needs it checked out next to this repo. It holds layers (1) and (2)
+and their fakes; the app holds the agents, the UI, and the glue that joins them.
+
 ```
 Conduit/
-├── App/            # Entry point + tab shell (ConduitApp, RootTabView)
+├── App/            # Entry point + tab shell (ConduitApp, AppDelegate, RootTabView)
 ├── Core/           # Shared, app-agnostic infrastructure
-│   ├── Models/     # Pure value types + SwiftData @Models (Agent, CallLogEntry,
-│   │               #   CallState, TransportKind, ReconnectionPolicy, …)
-│   ├── Services/   # AppEnvironment (composition root) + the protocol seams:
-│   │               #   Call/, CallKit/, Transport/, Keychain/, Contacts/,
-│   │               #   Persistence/, Audio/, Push/, Pairing/  (each: protocol
-│   │               #   + fake [+ real])
+│   ├── Models/     # Agent, CallLogEntry (SwiftData @Models), TransportKind,
+│   │               #   AgentColor, KeychainTokenRef, SpokenPhrase, …
+│   ├── Services/   # AppEnvironment (composition root) + the app's services:
+│   │               #   AgentCalls/ (engine glue), Transport/ (SmallWebRTC
+│   │               #   adapter), Keychain/, Contacts/, Persistence/, Audio/
+│   │               #   (spoken state), Push/ (token registration, missed-call
+│   │               #   notification), Pairing/, Siri/, DeepLink/
 │   └── Utilities/  # Log (os.log), AccessibilityID base namespace, helpers
 ├── Features/       # Self-contained feature modules (Recents, Contacts,
 │                   #   Settings, AgentDetail, AddEditAgent, InCall)
 ├── Shared/         # Reusable UI components, navigation
+├── Debug/          # DEBUG-only device spikes and call trace
 └── Resources/      # Assets, audio, data files
+
+../ConduitCallEngine/            # the package
+├── Sources/ConduitCallEngine/         # core: Call/ (CallEngine, CallTarget,
+│                                      #   CallEngineDelegate), CallKit/, Push/,
+│                                      #   Transport/ (CallTransport + event
+│                                      #   types), Models/, Utilities/
+├── Sources/ConduitCallEngineDaily/    # PipecatDailyTransport
+├── Sources/ConduitCallEngineLiveKit/  # LiveKitTransport + audio router/gate
+├── Sources/ConduitCallEngineTesting/  # FakeTransport, SimulatedCallSystem,
+│                                      #   CallEngine.simulated(...)
+└── Tests/                             # engine, Daily and LiveKit tests
 ```
 
 Within a feature: `Views/`, `ViewModels/`, optional `Models/`, `Services/`,
 `Coordinators/`. Naming and the per-feature `AccessibilityID+<Feature>.swift`
 convention are in [CONVENTIONS](./CONVENTIONS.md).
 
-> **Coordinator placement.** `CallEngine` lives in
-> `Core/Services/Call/`, not under `Features/InCall/`. It is an app-wide service
-> owned by `AppEnvironment` and consumed by multiple features (Recents redial,
-> Contacts/AgentDetail call, the InCall projection), so placing it inside one
-> feature would invert the dependency.
+> **Engine placement.** `CallEngine` is an app-wide service: `AppEnvironment` owns
+> one instance and several features consume it (Recents redial, Contacts/AgentDetail
+> call, the InCall projection), so it sits outside any feature — in the package.
+> It knows calls, not agents. The host reaches it through its public surface only
+> (`CallTarget`, `CallEngineDelegate`, `CallEngineConfiguration`), and
+> `Core/Services/AgentCalls/` is the one place that turns an `Agent` into a
+> `CallTarget` and reacts to the engine's callbacks.
 
 ## App Surface (planned, from the plan)
 
@@ -149,8 +170,10 @@ Three layers (full detail in [CORE_SYSTEMS](./CORE_SYSTEMS.md) and the CI workfl
 
 - **Layer 1 — logic, simulator, automated.** State machine, connection parsing,
   transport selection, error handling against fakes. Most bugs live here. Runs in
-  CI. The `CallEngine` + `ReconnectionPolicy` suites
-  (`ConduitTests/Call/`) are the current Layer-1 coverage.
+  CI. The engine's suites (`CallEngine`, push handling, reconnection, credential
+  resolution, the Daily and LiveKit adapters' logic) live in the package's
+  `Tests/`; the host's (`AgentCallHost`, `Agent+CallTarget`, pairing, Siri
+  matching, view-model logic) in `ConduitTests/`.
 - **Layer 2 — integration, tethered device, scripted.** Genuine live CallKit +
   WebRTC calls. **Device-only — NOT run on CI simulator runners.**
 - **Layer 3 — audio/routing, manual.** AirPods stand in for the car; validates
