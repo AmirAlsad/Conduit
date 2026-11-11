@@ -2,7 +2,7 @@
 //  FakeTransport.swift
 //  Conduit
 //
-//  In-app fake conforming to `Transport`. Lives in the app target (not the test
+//  In-app fake conforming to `CallTransport`. Lives in the app target (not the test
 //  target) so the unit suite, SwiftUI previews, and the CallKit-free debug path
 //  all share it. A test pushes events with `emit(_:)` and asserts the coordinator
 //  reacts.
@@ -10,13 +10,13 @@
 
 import Foundation
 
-final class FakeTransport: Transport, @unchecked Sendable {
+final class FakeTransport: CallTransport, @unchecked Sendable {
     let events: AsyncStream<TransportEvent>
     private let continuation: AsyncStream<TransportEvent>.Continuation
 
     private(set) var connectCount = 0
     private(set) var disconnectCount = 0
-    private(set) var lastConfig: TransportConfig?
+    private(set) var lastConnection: CallConnection?
     private(set) var isMicEnabled = false
     private(set) var setMicEnabledCallCount = 0
     private(set) var isAudioAttached = false
@@ -36,9 +36,9 @@ final class FakeTransport: Transport, @unchecked Sendable {
         self.continuation = continuation
     }
 
-    func connect(_ config: TransportConfig) async throws {
+    func connect(_ connection: CallConnection) async throws {
         connectCount += 1
-        lastConfig = config
+        lastConnection = connection
         if suspendConnect {
             await withCheckedContinuation { cont in
                 if connectReleased { cont.resume() } else { connectContinuation = cont }

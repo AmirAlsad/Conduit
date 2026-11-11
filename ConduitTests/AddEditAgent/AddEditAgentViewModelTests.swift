@@ -29,7 +29,7 @@ struct AddEditAgentViewModelTests {
         repository: SwiftDataAgentRepository,
         keychain: KeychainStoring = InMemoryKeychain(),
         contactSync: ContactSyncing = FakeContactSync(),
-        transportFactory: @escaping (TransportKind) -> Transport = { _ in FakeTransport() },
+        transportFactory: @escaping (TransportKind) -> CallTransport = { _ in FakeTransport() },
         inboundRegistrar: InboundRegistering? = nil,
         pairingResolver: @escaping @Sendable (URL, String, TransportKind) async throws -> PairingCredentials = { _, _, _ in
             throw PairingError.invalidResponse
@@ -387,9 +387,9 @@ struct AddEditAgentViewModelTests {
         #expect(vm.diagnosticSteps.map(\.stage) == [.pairing, .credentials, .transport, .ready])
         #expect(vm.diagnosticSteps.allSatisfy { $0.status == .passed })
         // The transport joined with the RESOLVED creds, not the pairing config.
-        #expect(fake.lastConfig?.url == room)
-        #expect(fake.lastConfig?.token == "minted-token")
-        #expect(fake.lastConfig?.pairingEndpoint == nil)
+        #expect(fake.lastConnection?.url == room)
+        #expect(fake.lastConnection?.token == "minted-token")
+        #expect(fake.lastConnection == CallConnection(url: room, token: "minted-token"))
     }
 
     @Test func unauthorizedPairingFailsStageOneWithoutConnecting() async throws {

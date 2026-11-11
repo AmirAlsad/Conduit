@@ -2,7 +2,7 @@
 //  LiveKitTransport.swift
 //  Conduit
 //
-//  Native LiveKit transport behind Conduit's `Transport` seam. Unlike Daily,
+//  Native LiveKit transport behind Conduit's `CallTransport` seam. Unlike Daily,
 //  LiveKit supports manual audio: we disable its automatic `AVAudioSession`
 //  management and gate its audio engine on CallKit activation
 //  (`attachAudioSession`/`detachAudioSession` → `AudioManager.setEngineAvailability`).
@@ -18,7 +18,7 @@ import Foundation
 import LiveKit
 
 @MainActor
-final class LiveKitTransport: NSObject, Conduit.Transport {
+final class LiveKitTransport: NSObject, CallTransport {
     nonisolated let events: AsyncStream<TransportEvent>
     private nonisolated let continuation: AsyncStream<TransportEvent>.Continuation
 
@@ -57,36 +57,16 @@ final class LiveKitTransport: NSObject, Conduit.Transport {
         if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
     }
 
-    // MARK: - Conduit.Transport
+    // MARK: - CallTransport
 
-    func connect(_ config: TransportConfig) async throws {
+    func connect(_ connection: CallConnection) async throws {
         gate = LiveKitConnectGate()
         wasBotSpeaking = false
         do {
-            let roomURL: String
-            let token: String
-            if let endpoint = config.pairingEndpoint {
-                let creds = try await PairingClient.resolve(
-                    endpoint: endpoint, apiKey: config.token, transport: config.kind
-                )
-                roomURL = creds.roomURL.absoluteString
-                token = creds.token
-            } else if let url = config.url {
-                roomURL = url.absoluteString
-                token = config.token
-            } else {
-                throw TransportError.connectionFailed("No room URL or pairing endpoint")
-            }
             // Engine off until CallKit activates — unless activation already
             // happened (also keeps the engine alive across a mid-call reconnect).
             try AudioManager.shared.setEngineAvailability(isSessionAttached ? .default : .none)
-            try await room.connect(url: roomURL, token: token)
-        } catch let error as PairingError {
-            Log.error(.transport, "Pairing failed: \(error)")
-            throw error == .unauthorized ? TransportError.authenticationFailed
-                                         : TransportError.connectionFailed("pairing: \(error)")
-        } catch let error as TransportError {
-            throw error
+            try await room.connect(url: connection.url.absoluteString, token: connection.token ?? "")
         } catch {
             Log.error(.transport, "LiveKit connect failed: \(error)")
             throw mapConnectError(error)

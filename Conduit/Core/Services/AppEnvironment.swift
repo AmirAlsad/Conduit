@@ -25,7 +25,7 @@ final class AppEnvironment {
     let agentRepository: AgentRepository
     let announcer: SpokenStateAnnouncing
     let interruptionObserver: AudioInterruptionObserving
-    let transportFactory: (TransportKind) -> Transport
+    let transportFactory: (TransportKind) -> CallTransport
     let callSession: CallSessionCoordinator
     /// Set by the AppDelegate once PushKit is up (`VoIPPushService` is the real
     /// implementation), so saving an inbound-enabled agent registers immediately
@@ -54,7 +54,7 @@ final class AppEnvironment {
         agentRepository: AgentRepository,
         announcer: SpokenStateAnnouncing,
         interruptionObserver: AudioInterruptionObserving,
-        transportFactory: @escaping (TransportKind) -> Transport,
+        transportFactory: @escaping (TransportKind) -> CallTransport,
         isPushToTalkEnabled: @escaping () -> Bool = { false }
     ) {
         self.modelContainer = modelContainer
@@ -110,7 +110,7 @@ final class AppEnvironment {
         }
 
         let callProvider: CallProviding
-        let transportFactory: (TransportKind) -> Transport
+        let transportFactory: (TransportKind) -> CallTransport
         #if targetEnvironment(simulator)
         callProvider = FakeCallProvider()
         transportFactory = { _ in FakeTransport() }

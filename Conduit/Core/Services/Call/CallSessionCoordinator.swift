@@ -3,7 +3,7 @@
 //  Conduit
 //
 //  The call state machine and the heart of the app: it orchestrates the CallKit
-//  seam (`CallProviding`) and the transport seam (`Transport`), owns `CallState`,
+//  seam (`CallProviding`) and the transport seam (`CallTransport`), owns `CallState`,
 //  drives reconnection-with-spoken-state, and writes the call log. It depends only
 //  on protocols, so the whole machine runs in the simulator against fakes.
 //
@@ -42,7 +42,8 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     // MARK: - Dependencies
 
     private let callProvider: CallProviding
-    private let transportFactory: (TransportKind) -> Transport
+    private let transportFactory: (TransportKind) -> CallTransport
+    private let pairingResolver: @Sendable (URL, String, TransportKind) async throws -> PairingCredentials
     private let keychain: KeychainStoring
     private let repository: AgentRepository
     private let announcer: SpokenStateAnnouncing
@@ -57,8 +58,10 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
 
     // MARK: - Live-call bookkeeping
 
-    private var transport: Transport?
-    private var currentConfig: TransportConfig?
+    private var transport: CallTransport?
+    /// Resolves the room for one connect attempt; built once per call and re-run
+    /// for every reconnect attempt.
+    private var connectionResolver: (@MainActor () async throws -> CallConnection)?
     private var activeCallID: UUID?
     private var callDirection: CallDirection = .outgoing
     /// Inline room credentials from an incoming push, consumed when the user answers.
@@ -75,7 +78,10 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
 
     init(
         callProvider: CallProviding,
-        transportFactory: @escaping (TransportKind) -> Transport,
+        transportFactory: @escaping (TransportKind) -> CallTransport,
+        pairingResolver: @escaping @Sendable (URL, String, TransportKind) async throws -> PairingCredentials = {
+            try await PairingClient.resolve(endpoint: $0, apiKey: $1, transport: $2)
+        },
         keychain: KeychainStoring,
         repository: AgentRepository,
         announcer: SpokenStateAnnouncing,
@@ -90,6 +96,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     ) {
         self.callProvider = callProvider
         self.transportFactory = transportFactory
+        self.pairingResolver = pairingResolver
         self.keychain = keychain
         self.repository = repository
         self.announcer = announcer
@@ -246,41 +253,23 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         ringStatusReporter.report(status, callID: callID, endpoint: endpoint, apiKey: apiKey ?? "")
     }
 
-    /// Build the transport config (inline push credentials win; otherwise the agent's
-    /// own direct/pairing config) and connect. Shared by `placeCall` and `answer`.
+    /// Create and subscribe the transport, then resolve credentials and connect.
+    /// Shared by `placeCall` and `answer`. The transport exists before the
+    /// credential fetch so a CallKit activation landing mid-fetch still reaches
+    /// `attachAudioSession()` (see potential_skills/callkit.md).
     private func connectTransport(for agent: Agent, inlineCreds: PairingCredentials? = nil) async {
-        let config: TransportConfig
-        if let inlineCreds {
-            // Credentials delivered in the push: join the room directly, no pairing.
-            config = TransportConfig(
-                kind: agent.transportKind,
-                url: inlineCreds.roomURL,
-                token: inlineCreds.token
-            )
-        } else {
-            let token = loadToken(for: agent) ?? ""
-            // Direct mode needs its room token; pairing mode authenticates with its API
-            // key, but an endpoint may be open, so don't hard-require it.
-            if token.isEmpty, agent.pairingEndpoint == nil {
-                Log.error(.call, "No token for agent \(Log.redactEmail(agent.syntheticEmail))")
-                fail(.badToken)
-                return
-            }
-            config = TransportConfig(
-                kind: agent.transportKind,
-                url: agent.connectionURL,
-                token: token,
-                pairingEndpoint: agent.pairingEndpoint
-            )
-        }
-        currentConfig = config
-
         let transport = transportFactory(agent.transportKind)
         self.transport = transport
         subscribe(to: transport)
 
+        let resolveConnection = makeConnectionResolver(for: agent, inlineCreds: inlineCreds)
+        connectionResolver = resolveConnection
+
         do {
-            try await transport.connect(config)
+            let connection = try await resolveConnection()
+            // The call may have ended while credentials were in flight.
+            guard self.transport === transport, !Task.isCancelled else { return }
+            try await transport.connect(connection)
         } catch {
             Log.error(.transport, "connect failed: \(error)")
             // `connect` can resolve LATE — after an event already failed this call and
@@ -289,6 +278,51 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
             // still the live transport.
             guard self.transport === transport else { return }
             fail((error as? TransportError) == .authenticationFailed ? .badToken : .transportError)
+        }
+    }
+
+    /// The credential step for this call: inline push credentials as-is, otherwise
+    /// the agent's pairing endpoint (re-paired on every attempt) or its direct room.
+    /// The agent's configuration is captured once, so every attempt resolves
+    /// against the same values. Failures surface as `TransportError`s.
+    private func makeConnectionResolver(
+        for agent: Agent,
+        inlineCreds: PairingCredentials?
+    ) -> @MainActor () async throws -> CallConnection {
+        if let inlineCreds {
+            let connection = CallConnection(url: inlineCreds.roomURL, token: inlineCreds.token)
+            return { connection }
+        }
+
+        let token = loadToken(for: agent) ?? ""
+        if let endpoint = agent.pairingEndpoint {
+            let kind = agent.transportKind
+            let resolve = pairingResolver
+            return {
+                do {
+                    let creds = try await resolve(endpoint, token, kind)
+                    return CallConnection(url: creds.roomURL, token: creds.token)
+                } catch let error as PairingError {
+                    Log.error(.transport, "Pairing failed: \(error)")
+                    throw error == .unauthorized ? TransportError.authenticationFailed
+                                                 : TransportError.connectionFailed("pairing: \(error)")
+                } catch {
+                    throw TransportError.connectionFailed(String(describing: error))
+                }
+            }
+        }
+
+        let url = agent.connectionURL
+        let email = agent.syntheticEmail
+        return {
+            // Direct mode needs its room token; pairing mode authenticates with its API
+            // key, but an endpoint may be open, so it doesn't hard-require one.
+            guard !token.isEmpty else {
+                Log.error(.call, "No token for agent \(Log.redactEmail(email))")
+                throw TransportError.authenticationFailed
+            }
+            guard let url else { throw TransportError.connectionFailed("No room URL or pairing endpoint") }
+            return CallConnection(url: url, token: token)
         }
     }
 
@@ -304,7 +338,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         return token
     }
 
-    private func subscribe(to transport: Transport) {
+    private func subscribe(to transport: CallTransport) {
         eventTask?.cancel()
         let events = transport.events
         eventTask = Task { [weak self] in
@@ -463,14 +497,18 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     }
 
     private func retryConnect() async {
-        guard let transport, let config = currentConfig else { return }
+        guard let transport, let resolveConnection = connectionResolver else { return }
         // Success surfaces as a `.connected` event; a transport that reports the
         // failed attempt as a `.disconnected` event schedules the next attempt there.
         // A transport that instead throws is chained here, so the loop never stalls.
+        // Both awaits can outlive the call: once it has ended, this attempt is inert.
         do {
-            try await transport.connect(config)
+            let connection = try await resolveConnection()
+            guard self.transport === transport, !Task.isCancelled else { return }
+            try await transport.connect(connection)
         } catch {
             Log.error(.transport, "Reconnect attempt failed: \(error)")
+            guard self.transport === transport, !Task.isCancelled else { return }
             scheduleReconnect()
         }
     }
@@ -720,7 +758,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         callDirection = .outgoing
         pendingInlineCreds = nil
         ringStatusURL = nil
-        currentConfig = nil
+        connectionResolver = nil
         callStartedAt = nil
         firstConnectedAt = nil
         reconnectAttempt = 0

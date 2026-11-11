@@ -51,7 +51,7 @@ final class AddEditAgentViewModel {
     private let repository: AgentRepository
     private let keychain: KeychainStoring
     private let contactSync: ContactSyncing
-    private let transportFactory: (TransportKind) -> Transport
+    private let transportFactory: (TransportKind) -> CallTransport
     private let inboundRegistrar: InboundRegistering?
     private let pairingResolver: @Sendable (URL, String, TransportKind) async throws -> PairingCredentials
 
@@ -60,7 +60,7 @@ final class AddEditAgentViewModel {
         repository: AgentRepository,
         keychain: KeychainStoring,
         contactSync: ContactSyncing,
-        transportFactory: @escaping (TransportKind) -> Transport,
+        transportFactory: @escaping (TransportKind) -> CallTransport,
         inboundRegistrar: InboundRegistering? = nil,
         pairingResolver: @escaping @Sendable (URL, String, TransportKind) async throws -> PairingCredentials = {
             try await PairingClient.resolve(endpoint: $0, apiKey: $1, transport: $2)
@@ -223,10 +223,10 @@ final class AddEditAgentViewModel {
 
     // MARK: - Test connection (staged diagnostics)
     //
-    // The VM sequences the stages itself: pairing is resolved here (not inside the
-    // transport adapter, which does its own pairing on a real call) so a failure
-    // names the step that broke. Bounded divergence — both paths share
-    // PairingClient and then connect with the same room URL + token.
+    // The VM sequences the stages itself: pairing is resolved here (not by the
+    // call coordinator, which pairs on a real call) so a failure names the step
+    // that broke. Bounded divergence — both paths share PairingClient and then
+    // connect with the same room URL + token.
 
     private enum TestResult {
         case success
@@ -272,7 +272,8 @@ final class AddEditAgentViewModel {
         setStatus(.running, for: .transport)
         let transport = transportFactory(transportKind)
         do {
-            try await transport.connect(TransportConfig(kind: transportKind, url: roomURL, token: token))
+            guard let roomURL else { throw TransportError.connectionFailed("No room URL or pairing endpoint") }
+            try await transport.connect(CallConnection(url: roomURL, token: token.isEmpty ? nil : token))
         } catch {
             Log.warning(.transport, "Test connection failed to start: \(error)")
             let message = (error as? TransportError) == .authenticationFailed

@@ -58,7 +58,7 @@ enum DebugDailyAutoConnect {
         }
 
         do {
-            try await transport.connect(TransportConfig(kind: .daily, url: creds.roomURL, token: creds.token))
+            try await transport.connect(CallConnection(url: creds.roomURL, token: creds.token.isEmpty ? nil : creds.token))
             record("connect() returned")
         } catch {
             record("CONNECT-FAILED transport: \(error)")

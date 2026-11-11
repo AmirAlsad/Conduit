@@ -18,7 +18,7 @@ suite, SwiftUI previews, and the future CallKit-free debug path all reuse them.
 |---|---|---|---|
 | CallKit | `CallProviding` + `CallProviderDelegate` + `AudioSessionActivating` (`CallKit/`) | `FakeCallProvider` / `FakeAudioSession` | `SystemCallProvider` (built, M3) |
 | Audio interruptions | `AudioInterruptionObserving` + `…Delegate` (`CallKit/`) | `FakeAudioInterruptionObserver` | `SystemAudioInterruptionObserver` (built; audio device-only) |
-| Transport | `Transport` (`Transport/`) | `FakeTransport` | `PipecatDailyTransport` (built, M2); `LiveKitTransport` (built, M6); `PipecatSmallWebRTCTransport` (built, M9) |
+| Transport | `CallTransport` (`Transport/`) | `FakeTransport` | `PipecatDailyTransport` (built, M2); `LiveKitTransport` (built, M6); `PipecatSmallWebRTCTransport` (built, M9) |
 | Keychain | `KeychainStoring` (`Keychain/`) | `InMemoryKeychain` | `KeychainService` (built, WS-4) |
 | Contacts sync | `ContactSyncing` (`Contacts/`) | `FakeContactSync` | `ContactSyncService` (built) |
 | Persistence | `AgentRepository` (`Persistence/`) | — | `SwiftDataAgentRepository` (built) |
@@ -28,10 +28,21 @@ suite, SwiftUI previews, and the future CallKit-free debug path all reuse them.
 Only *updating* a linked contact (sync-on-save) touches `CNContactStore`, behind
 the `ContactSyncing` seam above.
 
-The `Transport` event surface is Conduit's own vocabulary (`TransportEvent`:
+The `CallTransport` event surface is Conduit's own vocabulary (`TransportEvent`:
 `connecting` / `connected` / `reconnecting` / `disconnected(reason:)` /
 `botStartedSpeaking` / … / `remoteAudioLevel` / `error`), deliberately **not**
 Daily/LiveKit/RTVI types, so a second transport drops in behind the same protocol.
+
+Transports never pair: `connect(_:)` takes an already-resolved `CallConnection`
+(room/offer URL + optional token). `CallSessionCoordinator` creates and subscribes
+the transport **first**, then resolves credentials (pairing via `PairingClient`,
+the direct room + Keychain token, or inline push credentials), then connects — so a
+CallKit activation that lands mid-fetch still reaches `attachAudioSession()`. The
+same resolve step re-runs for every reconnect attempt (pairing agents re-pair;
+direct/inline reuse the same room). `PairingError.unauthorized` maps to
+`TransportError.authenticationFailed` (→ `.badToken`); other pairing failures to
+`.connectionFailed` (→ `.transportError`). Ending the call while a resolve is in
+flight leaves the attempt inert (no join, no return to `.reconnecting`).
 
 `PipecatDailyTransport` (`Transport/`) wraps `PipecatClient` + the Daily transport
 and maps RTVI/Daily callbacks to `TransportEvent`s. `.connected` is emitted only on
@@ -46,8 +57,8 @@ verifies pairing/negotiation only; real connect + downlink is verified on device
 `livekit/client-sdk-swift`, behind the same protocol. It re-derives the RTVI-style
 signals from LiveKit: `.connected` only when the room **and** the agent (a remote
 participant) are both ready — the pure, unit-tested `LiveKitConnectGate` — and
-bot-speaking from `didUpdateSpeakingParticipants`. It reuses `PairingClient` (the
-pairing contract is transport-neutral; the response's `room_url` is LiveKit's `wss://`
+bot-speaking from `didUpdateSpeakingParticipants`. The pairing contract is
+transport-neutral (for a LiveKit agent the response's `room_url` is LiveKit's `wss://`
 URL). The decisive difference from Daily is **manual audio**: at init it sets
 `AudioManager.shared.audioSession.isAutomaticConfigurationEnabled = false`, and it
 gates LiveKit's audio engine on CallKit via the `attachAudioSession`/`detachAudioSession`
@@ -211,7 +222,7 @@ Key behaviors:
   the agent, reports an incoming call to CallKit (`reportIncomingCall`), and rings in
   `incomingRinging`. On `providerPerformAnswerCall` → `answer()` reuses the shared
   `connectTransport(for:inlineCreds:)` — hybrid credentials: inline push room/token if
-  present, else `PairingClient.resolve`. Decline while ringing logs `.declined`; the call
+  present, else the agent's own pairing endpoint or direct room. Decline while ringing logs `.declined`; the call
   log records `direction` (`.incoming`/`.outgoing`). Edge paths are first-class: a push
   mid-call **reports then immediately ends** under the push's own id (iOS kills the app
   for an unreported VoIP push — `bugs.md`); a Focus/DND-filtered ring logs as missed and

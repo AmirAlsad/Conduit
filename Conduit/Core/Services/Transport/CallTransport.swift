@@ -1,11 +1,11 @@
 //
-//  Transport.swift
+//  CallTransport.swift
 //  Conduit
 //
 //  The seam over the Pipecat iOS client. Concrete adapters (DailyTransport,
 //  later LiveKitTransport) live in this folder and conform here; nothing outside
-//  references an SDK type. The call coordinator drives a `Transport` and consumes
-//  its `events`.
+//  references an SDK type. The call coordinator drives a `CallTransport` and
+//  consumes its `events`.
 //
 //  AUDIO-SESSION INVARIANT: a transport must NOT seize the microphone or activate
 //  the audio session on its own. Media attaches only when the coordinator calls
@@ -15,11 +15,11 @@
 
 import Foundation
 
-protocol Transport: AnyObject {
+protocol CallTransport: AnyObject {
     /// The single channel by which transport state leaves the adapter.
     var events: AsyncStream<TransportEvent> { get }
 
-    func connect(_ config: TransportConfig) async throws
+    func connect(_ connection: CallConnection) async throws
     func disconnect() async
     func setMicEnabled(_ enabled: Bool) async
 

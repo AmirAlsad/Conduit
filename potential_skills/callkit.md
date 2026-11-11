@@ -4,7 +4,7 @@ Pre-flight checklist for the CallKit/audio/transport seam. CallKit's request→d
 round-trips and its activation timing are driven by the system, not your call site —
 and the in-app fakes don't model that round-trip, so these bugs pass the sim suite and
 only appear on device. Read before touching `CallSessionCoordinator`, `SystemCallProvider`,
-or a `Transport` adapter's connect/audio path.
+or a `CallTransport` adapter's connect/audio path.
 
 ### System callbacks fire more than once and out of order vs. your code
 First seen: 2026-06-07

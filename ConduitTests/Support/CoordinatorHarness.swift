@@ -2,8 +2,9 @@
 //  CoordinatorHarness.swift
 //  ConduitTests
 //
-//  Shared fixtures for CallSessionCoordinator tests: the four fakes, an in-memory
-//  SwiftData repository with one inserted agent, and a controllable clock. The
+//  Shared fixtures for CallSessionCoordinator tests: the fakes (including a
+//  suspendable pairing resolver), an in-memory SwiftData repository with one
+//  inserted agent, and a controllable clock. The
 //  coordinator depends only on protocols, so the whole state machine runs here at
 //  simulator speed.
 //
@@ -22,6 +23,45 @@ final class MutableClock {
     func advance(_ seconds: TimeInterval) { current = current.addingTimeInterval(seconds) }
 }
 
+/// Stands in for `PairingClient.resolve`: records every request and can hold each
+/// one open until `release()`, so a test can act while credentials are in flight.
+@MainActor
+final class FakePairingResolver {
+    struct Request: Equatable {
+        let endpoint: URL
+        let apiKey: String
+        let kind: TransportKind
+    }
+
+    private(set) var requests: [Request] = []
+    var result: Result<PairingCredentials, any Error> = .success(
+        PairingCredentials(roomURL: URL(string: "https://example.daily.co/paired")!, token: "paired-token")
+    )
+    var suspend = false
+    private var pending: [CheckedContinuation<Void, Never>] = []
+
+    func resolve(endpoint: URL, apiKey: String, kind: TransportKind) async throws -> PairingCredentials {
+        requests.append(Request(endpoint: endpoint, apiKey: apiKey, kind: kind))
+        if suspend {
+            await withCheckedContinuation { pending.append($0) }
+        }
+        return try result.get()
+    }
+
+    /// Resume every suspended resolve; each then returns (or throws) `result`.
+    func release() {
+        let waiting = pending
+        pending = []
+        waiting.forEach { $0.resume() }
+    }
+}
+
+/// The transport kinds the coordinator asked its factory for, in order.
+@MainActor
+final class TransportRequestLog {
+    var kinds: [TransportKind] = []
+}
+
 @MainActor
 final class CoordinatorHarness {
     let provider = FakeCallProvider()
@@ -32,15 +72,20 @@ final class CoordinatorHarness {
     let ringStatusReporter = FakeRingStatusReporter()
     let interactionDonor = FakeCallInteractionDonor()
     let transport = FakeTransport()
+    let pairing = FakePairingResolver()
+    let transportRequests = TransportRequestLog()
     let container: ModelContainer
     let repository: SwiftDataAgentRepository
     let coordinator: CallSessionCoordinator
     let agent: Agent
     let callID = UUID()
 
+    /// `pairingEndpoint` makes the agent pairing-mode: `token` is then its API key
+    /// and every connect attempt goes through `pairing`.
     init(
         policy: ReconnectionPolicy = .default,
         token: String? = "valid-token",
+        pairingEndpoint: URL? = nil,
         pushToTalk: Bool = false,
         now: @escaping () -> Date = { Date() }
     ) throws {
@@ -56,22 +101,32 @@ final class CoordinatorHarness {
             name: "Echo Bot",
             detail: "test parrot",
             transportKind: .daily,
-            connectionURL: URL(string: "https://example.daily.co/room")!
+            connectionURL: pairingEndpoint == nil ? URL(string: "https://example.daily.co/room")! : nil,
+            pairingEndpoint: pairingEndpoint
         )
         self.agent = agent
         repository.insert(agent)
         try repository.save()
 
-        // The harness agent is direct-mode (connectionURL), so its secret lives under
-        // the direct-token ref the coordinator loads for that path.
+        // Each path's secret lives under the ref the coordinator loads for it: the
+        // API key for a pairing agent, the room token for a direct one.
         if let token {
-            try keychain.setToken(token, for: KeychainTokenRef(directTokenForAgentID: agent.id))
+            let ref = pairingEndpoint != nil
+                ? KeychainTokenRef(account: agent.keychainTokenRef)
+                : KeychainTokenRef(directTokenForAgentID: agent.id)
+            try keychain.setToken(token, for: ref)
         }
 
         let transport = self.transport
+        let pairing = self.pairing
+        let transportRequests = self.transportRequests
         coordinator = CallSessionCoordinator(
             callProvider: provider,
-            transportFactory: { _ in transport },
+            transportFactory: { kind in
+                transportRequests.kinds.append(kind)
+                return transport
+            },
+            pairingResolver: { try await pairing.resolve(endpoint: $0, apiKey: $1, kind: $2) },
             keychain: keychain,
             repository: repository,
             announcer: announcer,

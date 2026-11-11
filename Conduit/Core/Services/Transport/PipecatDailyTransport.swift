@@ -3,13 +3,12 @@
 //  Conduit
 //
 //  The real Daily transport: wraps the Pipecat iOS client (`PipecatClient` + the
-//  Daily `DailyTransport`) behind Conduit's `Transport` protocol. Translates the
+//  Daily `DailyTransport`) behind Conduit's `CallTransport` protocol. Translates the
 //  RTVI/Daily delegate callbacks into Conduit's SDK-agnostic `TransportEvent`s —
 //  no RTVI/Daily type leaks upward.
 //
 //  Named `PipecatDailyTransport` to avoid colliding with the SDK's own
-//  `DailyTransport`; conformance is qualified to `Conduit.Transport` for the same
-//  reason (`PipecatClientIOS` also declares a `Transport`).
+//  `DailyTransport`.
 //
 //  Audio-session note: the Daily SDK manages `AVAudioSession` itself and has no
 //  documented hook to defer activation to CallKit (this is the M3 spike). For now
@@ -24,7 +23,7 @@ import PipecatClientIOS
 import PipecatClientIOSDaily
 
 @MainActor
-final class PipecatDailyTransport: Conduit.Transport, PipecatClientDelegate {
+final class PipecatDailyTransport: CallTransport, PipecatClientDelegate {
     nonisolated let events: AsyncStream<TransportEvent>
     private nonisolated let continuation: AsyncStream<TransportEvent>.Continuation
 
@@ -48,40 +47,16 @@ final class PipecatDailyTransport: Conduit.Transport, PipecatClientDelegate {
         self.client.delegate = self
     }
 
-    // MARK: - Conduit.Transport
+    // MARK: - CallTransport
 
-    func connect(_ config: TransportConfig) async throws {
+    func connect(_ connection: CallConnection) async throws {
         didReportConnected = false
         userRequestedDisconnect = false
         do {
-            let roomURL: String
-            let token: String?
-            if let endpoint = config.pairingEndpoint {
-                // The user's server mints a fresh room + token per call. We POST it
-                // (bearer = the API key) and connect directly with what it returns —
-                // the engine nests credentials under `connection`, which the SDK's
-                // own pairing decoder doesn't handle, so we resolve it ourselves.
-                let creds = try await PairingClient.resolve(
-                    endpoint: endpoint,
-                    apiKey: config.token,
-                    transport: config.kind
-                )
-                roomURL = creds.roomURL.absoluteString
-                token = creds.token
-            } else if let url = config.url {
-                roomURL = url.absoluteString
-                token = config.token.isEmpty ? nil : config.token
-            } else {
-                throw TransportError.connectionFailed("No room URL or pairing endpoint")
-            }
-            let params = DailyTransportConnectionParams(roomUrl: roomURL, token: token)
+            let params = DailyTransportConnectionParams(
+                roomUrl: connection.url.absoluteString, token: connection.token
+            )
             try await client.connect(transportParams: params)
-        } catch let error as PairingError {
-            Log.error(.transport, "Pairing failed: \(error)")
-            throw error == .unauthorized ? TransportError.authenticationFailed
-                                         : TransportError.connectionFailed("pairing: \(error)")
-        } catch let error as TransportError {
-            throw error
         } catch {
             Log.error(.transport, "Daily connect failed: \(error)")
             throw TransportError.connectionFailed(String(describing: error))

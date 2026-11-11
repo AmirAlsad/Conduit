@@ -46,8 +46,8 @@ struct CallInboundTests {
         await h.coordinator.answer()
 
         #expect(h.transport.connectCount == 1)
-        #expect(h.transport.lastConfig?.token == "valid-token")
-        #expect(h.transport.lastConfig?.url == h.agent.connectionURL)
+        #expect(h.transport.lastConnection?.token == "valid-token")
+        #expect(h.transport.lastConnection?.url == h.agent.connectionURL)
         #expect(h.coordinator.state.isConnecting)
     }
 
@@ -57,9 +57,9 @@ struct CallInboundTests {
         await h.coordinator.receiveCall(payload(for: h, roomURL: room, token: "push-token"))
         await h.coordinator.answer()
 
-        #expect(h.transport.lastConfig?.url == room)
-        #expect(h.transport.lastConfig?.token == "push-token")
-        #expect(h.transport.lastConfig?.pairingEndpoint == nil)
+        #expect(h.transport.lastConnection?.url == room)
+        #expect(h.transport.lastConnection?.token == "push-token")
+        #expect(h.pairing.requests.isEmpty)
     }
 
     @Test func answeredCallConnectsAndLogsIncoming() async throws {

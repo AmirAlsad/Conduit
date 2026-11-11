@@ -5,14 +5,13 @@
 //  The SmallWebRTC transport: peer-to-peer WebRTC straight to the user's own
 //  Pipecat server — no Daily/LiveKit cloud. Wraps the Pipecat iOS client
 //  (`PipecatClient` + the package's `SmallWebRTCTransport`) behind Conduit's
-//  `Transport` protocol, mirroring PipecatDailyTransport: the SDK POSTs our SDP
+//  `CallTransport` protocol, mirroring PipecatDailyTransport: the SDK POSTs our SDP
 //  offer to the server's offer URL (bearer-authed), PATCHes trickle-ICE to the
 //  same URL, and carries RTVI over a data channel. Media is UDP, so this only
 //  reaches servers the device can hit directly (LAN / self-hosted).
 //
 //  Named `PipecatSmallWebRTCTransport` to avoid colliding with the SDK's own
-//  `SmallWebRTCTransport`; conformance is qualified to `Conduit.Transport` for
-//  the same reason (`PipecatClientIOS` also declares a `Transport`).
+//  `SmallWebRTCTransport`.
 //
 //  Audio-session note: the SDK configures `AVAudioSession` itself (category,
 //  mode, port overrides) with no manual-audio gate, so — like Daily — we join
@@ -26,7 +25,7 @@ import PipecatClientIOS
 import PipecatClientIOSSmallWebrtc
 
 @MainActor
-final class PipecatSmallWebRTCTransport: Conduit.Transport, PipecatClientDelegate {
+final class PipecatSmallWebRTCTransport: CallTransport, PipecatClientDelegate {
     nonisolated let events: AsyncStream<TransportEvent>
     private nonisolated let continuation: AsyncStream<TransportEvent>.Continuation
 
@@ -50,45 +49,23 @@ final class PipecatSmallWebRTCTransport: Conduit.Transport, PipecatClientDelegat
         self.client.delegate = self
     }
 
-    // MARK: - Conduit.Transport
+    // MARK: - CallTransport
 
-    func connect(_ config: TransportConfig) async throws {
+    func connect(_ connection: CallConnection) async throws {
         didReportConnected = false
         userRequestedDisconnect = false
         do {
-            let offerURL: URL
-            let token: String?
-            if let endpoint = config.pairingEndpoint {
-                // Pairing returns the offer URL as room_url plus a short-lived
-                // bearer for it — the engine key itself never rides the offer leg.
-                // A coordinator retry re-pairs and lands here again with a fresh
-                // offer, which spawns a fresh bot server-side (context resets).
-                let creds = try await PairingClient.resolve(
-                    endpoint: endpoint,
-                    apiKey: config.token,
-                    transport: config.kind
-                )
-                offerURL = creds.roomURL
-                token = creds.token
-            } else if let url = config.url {
-                offerURL = url
-                token = config.token.isEmpty ? nil : config.token
-            } else {
-                throw TransportError.connectionFailed("No offer URL or pairing endpoint")
-            }
+            // A pairing agent's connection is the offer URL plus a short-lived
+            // bearer for it — the engine key itself never rides the offer leg.
+            // Each coordinator retry re-pairs and lands here with a fresh offer,
+            // which spawns a fresh bot server-side (context resets).
             // The SDK copies these headers onto both the offer POST and the
             // trickle-ICE PATCH.
-            let headers: [[String: String]] = token.map { [["Authorization": "Bearer \($0)"]] } ?? []
+            let headers: [[String: String]] = connection.token.map { [["Authorization": "Bearer \($0)"]] } ?? []
             let params = SmallWebRTCTransportConnectionParams(
-                webrtcRequestParams: APIRequest(endpoint: offerURL, headers: headers)
+                webrtcRequestParams: APIRequest(endpoint: connection.url, headers: headers)
             )
             try await client.connect(transportParams: params)
-        } catch let error as PairingError {
-            Log.error(.transport, "Pairing failed: \(error)")
-            throw error == .unauthorized ? TransportError.authenticationFailed
-                                         : TransportError.connectionFailed("pairing: \(error)")
-        } catch let error as TransportError {
-            throw error
         } catch {
             Log.error(.transport, "SmallWebRTC connect failed: \(error)")
             throw TransportError.connectionFailed(String(describing: error))

@@ -47,7 +47,7 @@ enum DebugCallKitSpike {
         }
         let repository = SwiftDataAgentRepository(context: container.mainContext)
 
-        // Exercise the real in-app pairing path: the transport POSTs this endpoint
+        // Exercise the real in-app pairing path: the coordinator POSTs this endpoint
         // (via PairingClient) for a fresh room+token per call, rather than the spike
         // pre-fetching them. This is what the user-facing add-agent flow does.
         let pairingEndpoint = baseURL.appendingPathComponent("connect")

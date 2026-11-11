@@ -24,8 +24,8 @@ struct CallSessionCoordinatorTests {
         #expect(h.provider.startedHandles == [h.agent.callHandle])
         #expect(h.provider.reportedConnecting == [h.callID])
         #expect(h.transport.connectCount == 1)
-        #expect(h.transport.lastConfig?.token == "valid-token")
-        #expect(h.transport.lastConfig?.kind == .daily)
+        #expect(h.transport.lastConnection?.token == "valid-token")
+        #expect(h.transportRequests.kinds == [.daily])
         #expect(h.announcer.startedRepeating == [.connecting])
         // Donated so Siri's calling domain learns "this contact calls via Conduit".
         #expect(h.interactionDonor.donatedAgentIDs == [h.agent.id])
