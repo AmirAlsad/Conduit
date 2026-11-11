@@ -68,8 +68,11 @@ final class FakeRingStatusReporter: RingStatusReporting {
     }
 
     private(set) var reports: [Report] = []
+    /// Receives a label per receipt, for tests that assert order across fakes.
+    var onEvent: ((String) -> Void)?
 
     func report(_ status: RingStatus, callID: UUID, endpoint: URL, apiKey: String) {
+        onEvent?("receipt(\(status.rawValue))")
         reports.append(Report(status: status, callID: callID, endpoint: endpoint, apiKey: apiKey))
     }
 }

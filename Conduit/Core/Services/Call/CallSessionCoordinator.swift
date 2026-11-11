@@ -298,13 +298,13 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     /// resolved target's credentials (the push's inline room, or the host's own).
     func answer() async {
         guard case .incomingRinging = state, let target = currentTarget else { return }
-        transition(to: .connecting)
         // Answering is the ring's terminal status — the receipt fires here whether
-        // or not the transport subsequently connects.
+        // or not the transport subsequently connects, and before the ringback starts.
         if let url = ringStatusURL, let id = activeCallID {
             reportRingStatus(.answered, callID: id, endpoint: url, targetID: target.id)
             ringStatusURL = nil
         }
+        transition(to: .connecting)
         await connectTransport(for: target)
     }
 
@@ -325,7 +325,10 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         subscribe(to: transport)
         // CallKit can activate before the transport exists (while dialing, or
         // before `answer()` runs); that activation found no transport to attach.
-        if isAudioActivated { await transport.attachAudioSession() }
+        if isAudioActivated {
+            await transport.attachAudioSession()
+            guard self.transport === transport else { return }
+        }
 
         do {
             let connection = try await target.connect()
@@ -395,12 +398,13 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         case .connecting:
             let start = now()
             firstConnectedAt = start
-            transition(to: .connected(since: start))
             // Incoming calls are marked connected to CallKit by fulfilling the answer
-            // action; only outgoing calls report connected here.
+            // action; only outgoing calls report connected here — before the host's
+            // "Connected" cue, as it always has.
             if callDirection == .outgoing, let id = activeCallID {
                 callProvider.reportOutgoingCallConnected(id)
             }
+            transition(to: .connected(since: start))
             applyMicIfActivated()
             Task { [weak self] in await self?.updateAudioDevices() }
             Log.info(.call, "Connected")

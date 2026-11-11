@@ -180,6 +180,7 @@ final class CoordinatorHarness {
         let log = self.log
         delegate.log = log
         provider.onEvent = { log.append($0) }
+        ringStatusReporter.onEvent = { log.append($0) }
 
         coordinator = CallSessionCoordinator(
             callProvider: provider,

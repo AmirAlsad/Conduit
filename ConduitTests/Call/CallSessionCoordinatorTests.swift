@@ -44,6 +44,15 @@ struct CallSessionCoordinatorTests {
         #expect(h.provider.startedCalls == [h.callID])
     }
 
+    @Test func connectedIsReportedToCallKitBeforeTheHostHearsIt() async throws {
+        let h = CoordinatorHarness()
+        await h.placeCall()
+        h.coordinator.handle(.connected)
+
+        // CallKit's timer starts before the host's "Connected" cue.
+        #expect(Array(h.log.entries.suffix(2)) == ["reported-connected", "T(connecting→connected)"])
+    }
+
     @Test func connectedTransitionsAndReportsConnected() async throws {
         let h = CoordinatorHarness()
         await h.placeCall()
@@ -302,9 +311,18 @@ struct CallSessionCoordinatorTests {
 
         #expect(h.coordinator.state == .idle)
         #expect(h.coordinator.activeCall == nil)
-        // No record and no receipt: a reset is not a finished call.
-        #expect(h.delegate.records.isEmpty)
+        #expect(h.delegate.records.isEmpty) // a reset is not a finished call
         #expect(h.delegate.transitions.last == "connected→idle")
+
+        // Nor is a ringing call that the provider resets: no record, no receipt.
+        h.ring(statusURL: URL(string: "https://engine.example.com/inbound/status/live")!)
+        #expect(h.coordinator.state == .incomingRinging)
+        h.coordinator.providerWasReset()
+
+        #expect(h.coordinator.state == .idle)
+        #expect(h.delegate.records.isEmpty)
+        #expect(h.ringStatusReporter.reports.isEmpty)
+        #expect(h.delegate.bearerRequests.isEmpty)
     }
 
     @Test func resetReturnsToIdleAfterTerminalState() async throws {

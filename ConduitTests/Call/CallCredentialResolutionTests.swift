@@ -166,6 +166,51 @@ struct CallCredentialResolutionTests {
         #expect(h.transport.connectCount == 1)
     }
 
+    @Test func endDuringTheActivationReplayNeverFetchesCredentials() async throws {
+        let h = CoordinatorHarness()
+        h.provider.suspendStart = true
+        h.transport.suspendAttach = true // the transport this call will get
+
+        let place = Task { await h.placeCall() }
+        await waitUntil { h.provider.pendingStartCount == 1 }
+        #expect(h.provider.pendingStartCount == 1)
+        h.provider.simulateActivate(FakeAudioSession(hasExternalAudioRoute: false))
+        await h.coordinator.awaitPendingActivation()
+
+        h.provider.releaseStart()
+        await waitUntil { h.transport.pendingAttachCount == 1 }
+        #expect(h.transport.pendingAttachCount == 1) // replaying the activation
+        await h.coordinator.endCall()
+
+        h.transport.releaseAttach()
+        await place.value
+
+        #expect(h.target.connectCount == 0)
+        #expect(h.transport.connectCount == 0)
+        #expect(h.coordinator.state.endedOutcome == .canceled)
+    }
+
+    @Test func retryResolvingAfterTheTransportRecoveredDoesNotRejoin() async throws {
+        let h = CoordinatorHarness()
+        await h.placeCall()
+        h.coordinator.handle(.connected)
+        h.target.suspend = true
+        h.coordinator.handle(.disconnected(reason: .networkDropped))
+        await waitUntil { h.target.connectCount == 2 }
+        #expect(h.target.connectCount == 2)
+        let retry = try #require(h.coordinator.reconnectTask)
+
+        h.coordinator.handle(.connected) // the same transport came back on its own
+        #expect(h.coordinator.state.isConnected)
+
+        h.target.release()
+        await retry.value
+
+        #expect(h.transport.connectCount == 1) // the superseded attempt stays inert
+        #expect(h.coordinator.state.isConnected)
+        #expect(h.delegate.transitions.last == "reconnecting(1)→connected")
+    }
+
     @Test(arguments: [false, true])
     func staleFirstResolveLeavesTheNextCallAlone(staleAttemptFails: Bool) async throws {
         let h = CoordinatorHarness()

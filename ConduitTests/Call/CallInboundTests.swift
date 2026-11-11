@@ -186,6 +186,17 @@ struct CallInboundTests {
         #expect(h.delegate.bearerRequests == [h.target.id])
     }
 
+    @Test func answeredReceiptIsSentBeforeTheRingback() async throws {
+        let h = CoordinatorHarness()
+        h.ring(statusURL: statusEndpoint)
+        let before = h.log.entries.count
+        await h.coordinator.answer()
+
+        #expect(Array(h.log.entries.dropFirst(before).prefix(3)) == [
+            "bearer", "receipt(answered)", "T(incomingRinging→connecting)",
+        ])
+    }
+
     @Test func declineReportsDeclinedReceipt() async throws {
         let h = CoordinatorHarness()
         let callID = UUID()

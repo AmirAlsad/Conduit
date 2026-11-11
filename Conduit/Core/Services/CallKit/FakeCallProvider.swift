@@ -97,7 +97,10 @@ final class FakeCallProvider: CallProviding {
     }
 
     func reportOutgoingCallConnecting(_ id: UUID) { reportedConnecting.append(id) }
-    func reportOutgoingCallConnected(_ id: UUID) { reportedConnected.append(id) }
+    func reportOutgoingCallConnected(_ id: UUID) {
+        onEvent?("reported-connected")
+        reportedConnected.append(id)
+    }
     func endCall(_ id: UUID) async {
         onEvent?("end-request")
         endRequests.append(id)

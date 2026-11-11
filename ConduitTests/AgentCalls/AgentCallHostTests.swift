@@ -253,10 +253,31 @@ struct AgentCallHostTests {
 
     @Test func outgoingCallDonatesOnce() async throws {
         let h = try AgentCallHostHarness()
-        await h.placeCall()
+        h.provider.suspendStart = true
+        h.transport.suspendConnect = true // the transport this call will get
+
+        let place = Task { await h.placeCall() }
+        await waitUntil { h.provider.pendingStartCount == 1 }
+        #expect(h.provider.pendingStartCount == 1)
+        #expect(h.interactionDonor.donatedAgentIDs.isEmpty) // not while dialing
+
+        h.provider.releaseStart()
+        await waitUntil { h.transport.connectCount == 1 }
+        #expect(h.coordinator.state.isConnecting)
+        #expect(h.interactionDonor.donatedAgentIDs == [h.agent.id]) // on dialing → connecting
+
+        h.transport.releaseConnect()
+        await place.value
         h.coordinator.handle(.connected)
         await h.coordinator.endCall()
+        #expect(h.interactionDonor.donatedAgentIDs == [h.agent.id])
+    }
 
+    @Test func donationHappensEvenIfTheConnectFails() async throws {
+        let h = try AgentCallHostHarness(token: nil)
+        await h.placeCall()
+
+        #expect(h.coordinator.state.failureReason == .badToken)
         #expect(h.interactionDonor.donatedAgentIDs == [h.agent.id])
     }
 

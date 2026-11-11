@@ -79,7 +79,24 @@ final class FakeTransport: CallTransport, @unchecked Sendable {
     }
     func setAudioDevice(_ id: String) async { selectedAudioDeviceID = id }
 
+    /// When true, `attachAudioSession()` suspends until `releaseAttach()` — stands in
+    /// for a transport whose attach does real async work.
+    var suspendAttach = false
+    private(set) var pendingAttachCount = 0
+    private var attachContinuations: [CheckedContinuation<Void, Never>] = []
+
+    func releaseAttach() {
+        let waiting = attachContinuations
+        attachContinuations = []
+        pendingAttachCount = 0
+        waiting.forEach { $0.resume() }
+    }
+
     func attachAudioSession() async {
+        if suspendAttach {
+            pendingAttachCount += 1
+            await withCheckedContinuation { attachContinuations.append($0) }
+        }
         isAudioAttached = true
     }
 
