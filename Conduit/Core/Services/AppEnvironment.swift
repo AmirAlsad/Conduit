@@ -29,6 +29,9 @@ final class AppEnvironment {
     let announcer: SpokenStateAnnouncing
     let transportFactory: (TransportKind) -> CallTransport
     let callEngine: CallEngine
+    /// The stand-in CallKit/PushKit system behind `callEngine` when it is simulated
+    /// (the simulator, previews, tests); nil on a device, where the engine is real.
+    let simulatedCallSystem: SimulatedCallSystem?
     /// The engine's delegate: call targets, history, spoken cues, Siri donation,
     /// VoIP token registration.
     let callHost: AgentCallHost
@@ -59,6 +62,7 @@ final class AppEnvironment {
         announcer: SpokenStateAnnouncing,
         transportFactory: @escaping (TransportKind) -> CallTransport,
         isPushToTalkEnabled: @escaping @MainActor () -> Bool = { false },
+        simulatedCallSystem: SimulatedCallSystem? = nil,
         makeCallEngine: (CallEngineConfiguration) -> CallEngine
     ) {
         self.modelContainer = modelContainer
@@ -67,6 +71,7 @@ final class AppEnvironment {
         self.agentRepository = agentRepository
         self.announcer = announcer
         self.transportFactory = transportFactory
+        self.simulatedCallSystem = simulatedCallSystem
         self.callHost = AgentCallHost(
             repository: agentRepository,
             keychain: keychain,
@@ -129,10 +134,14 @@ final class AppEnvironment {
 
         let makeCallEngine: (CallEngineConfiguration) -> CallEngine
         let transportFactory: (TransportKind) -> CallTransport
+        let simulatedCallSystem: SimulatedCallSystem?
         #if targetEnvironment(simulator)
-        makeCallEngine = { CallEngine.simulated(configuration: $0, system: SimulatedCallSystem()) }
+        let system = SimulatedCallSystem()
+        simulatedCallSystem = system
+        makeCallEngine = { CallEngine.simulated(configuration: $0, system: system) }
         transportFactory = { _ in FakeTransport() }
         #else
+        simulatedCallSystem = nil
         makeCallEngine = { CallEngine(configuration: $0) }
         transportFactory = { kind in
             switch kind {
@@ -151,6 +160,7 @@ final class AppEnvironment {
             announcer: SpeechSpokenStateAnnouncer(),
             transportFactory: transportFactory,
             isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) },
+            simulatedCallSystem: simulatedCallSystem,
             makeCallEngine: makeCallEngine
         )
     }
@@ -171,6 +181,7 @@ final class AppEnvironment {
         } catch {
             fatalError("Failed to build in-memory ModelContainer: \(error)")
         }
+        let system = SimulatedCallSystem()
         return AppEnvironment(
             modelContainer: container,
             keychain: InMemoryKeychain(),
@@ -179,7 +190,8 @@ final class AppEnvironment {
             announcer: FakeSpokenStateAnnouncer(),
             transportFactory: { _ in FakeTransport() },
             isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) },
-            makeCallEngine: { CallEngine.simulated(configuration: $0, system: SimulatedCallSystem()) }
+            simulatedCallSystem: system,
+            makeCallEngine: { CallEngine.simulated(configuration: $0, system: system) }
         )
     }
 }

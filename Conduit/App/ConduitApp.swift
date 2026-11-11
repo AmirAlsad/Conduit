@@ -77,8 +77,9 @@ struct ConduitApp: App {
                     if ProcessInfo.processInfo.environment["CONDUIT_DEBUG_INCALL"] == "1" {
                         // Boots straight into the in-call surface — seed an agent and
                         // drive a connected projection so it screenshots fully populated.
+                        // Only a simulated engine can project; on a device this is inert.
                         if let hero = DebugSeed.seedIfEmpty(environment) {
-                            environment.callEngine.presentSimulatedConnectedCall(
+                            environment.simulatedCallSystem?.presentConnectedCall(
                                 ActiveCall(targetID: hero.id, displayName: hero.name, direction: .outgoing)
                             )
                         }
