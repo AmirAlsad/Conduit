@@ -543,4 +543,25 @@ struct AgentCallHostTests {
         #expect(request.headers["Authorization"] == "Bearer nova-key")
         #expect(request.headers["Content-Type"] == "application/json")
     }
+
+    @Test func registrationSendsAtMost120CharactersOfTheName() async throws {
+        let endpoint = RecordingURLProtocol.uniqueEndpoint()
+        let longName = String(repeating: "N", count: 200)
+        await PushTokenRegistrar.register(
+            token: "ab01",
+            agentID: UUID(),
+            displayName: longName,
+            handle: "nova@conduit.invalid",
+            endpoint: endpoint,
+            apiKey: "",
+            session: RecordingURLProtocol.session()
+        )
+
+        let host = try #require(endpoint.host())
+        let request = try #require(RecordingURLProtocol.requests(host: host).first)
+        let name = try #require(try body(request)["display_name"])
+        #expect(name.unicodeScalars.count == 120) // the backend rejects over 128
+        #expect(longName.hasPrefix(name))
+    }
 }
+

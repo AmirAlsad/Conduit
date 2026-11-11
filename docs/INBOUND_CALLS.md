@@ -62,6 +62,8 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
   omitted by older builds. Store them with the token and echo them in the ring push
   (§2). Only the app knows them — the user names agents locally — so don't invent
   your own.
+- The app sends `display_name` cut to at most 120 characters (Unicode code points)
+  and a `handle` well under 256; accept at least those lengths.
 
 - The **VoIP token is per-install, app-wide** (not per-agent, not per-transport). The
   same token is registered with every agent the user opted in — each of your servers

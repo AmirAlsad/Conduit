@@ -11,6 +11,11 @@
 import Foundation
 
 enum PushTokenRegistrar {
+    /// The longest caller name sent, in Unicode scalars. The reference backend
+    /// rejects the whole registration when `display_name` exceeds 128 code points;
+    /// a shortened name is corrected to the full one when the engine resolves the ring.
+    static let maxDisplayNameLength = 120
+
     static func register(
         token: String,
         agentID: UUID,
@@ -32,14 +37,18 @@ enum PushTokenRegistrar {
             "platform": "ios",
             "bundle_id": bundleID,
             "agent_id": agentID.uuidString,
-            "display_name": displayName,
+            "display_name": String(String.UnicodeScalarView(displayName.unicodeScalars.prefix(maxDisplayNameLength))),
             "handle": handle,
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         do {
-            _ = try await session.data(for: request)
-            Log.info(.network, "Registered VoIP token with agent endpoint")
+            let (_, response) = try await session.data(for: request)
+            if let failure = httpFailure(response) {
+                Log.warning(.network, "VoIP token registration failed: \(failure)")
+            } else {
+                Log.info(.network, "Registered VoIP token with agent endpoint")
+            }
         } catch {
             Log.warning(.network, "VoIP token registration failed: \(error)")
         }
@@ -61,10 +70,20 @@ enum PushTokenRegistrar {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         do {
-            _ = try await session.data(for: request)
-            Log.info(.network, "Unregistered VoIP token with agent endpoint")
+            let (_, response) = try await session.data(for: request)
+            if let failure = httpFailure(response) {
+                Log.warning(.network, "VoIP token unregistration failed: \(failure)")
+            } else {
+                Log.info(.network, "Unregistered VoIP token with agent endpoint")
+            }
         } catch {
             Log.warning(.network, "VoIP token unregistration failed: \(error)")
         }
+    }
+
+    /// A description of a non-2xx response, or nil when the server accepted it.
+    private static func httpFailure(_ response: URLResponse) -> String? {
+        guard let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) else { return nil }
+        return "HTTP \(http.statusCode)"
     }
 }
