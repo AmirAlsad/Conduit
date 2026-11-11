@@ -300,3 +300,20 @@ safe. When adding a transport, check what its SDK leaves running after disconnec
 **Why it's missed:** It only shows after a SmallWebRTC connection in the same app
 launch, and only when you then try to change route in a later call. Calls still
 connect and sound fine, and relaunching the app clears it.
+
+### A missed-call notice posted while the app is in front was silently dropped
+First seen: 2026-11-11 (device run after the call-engine extraction; present since the missed-call notifier was added)
+
+**Pattern:** iOS discards a local notification delivered while its app is in the
+foreground unless a `UNUserNotificationCenterDelegate` returns presentation options
+from `willPresent`. The app had no delegate, so the missed-call notice for a ring
+that arrives during a call (the user is on the in-call screen) never appeared,
+not even in Notification Center. Focus-filtered rings were unaffected because the
+app is in the background then.
+
+**Rule:** `AppDelegate` is the notification-center delegate and returns `[.list]`,
+so a foreground notice lands quietly in Notification Center like a background one.
+Any new local notification must be checked with the app in the foreground too.
+
+**Why it's missed:** The request is added without error and nothing is logged; the
+notice works whenever the app happens to be backgrounded, which is how it was verified.
