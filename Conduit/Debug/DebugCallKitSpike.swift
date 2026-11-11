@@ -3,11 +3,10 @@
 //  Conduit
 //
 //  DEBUG-only, env-driven device spike for the CallKit↔Daily audio-session seam —
-//  the riskiest boundary in the app. It drives the REAL CallEngine
-//  wired with the REAL SystemCallProvider (CallKit) + PipecatDailyTransport +
-//  SystemAudioSession, placing an actual CallKit call to the engine, to answer
-//  empirically: does Daily's self-managed audio compose with CallKit owning
-//  activation?
+//  the riskiest boundary in the app. It drives a real CallEngine (real CallKit and
+//  audio session) with PipecatDailyTransport, placing an actual CallKit call to the
+//  reference backend, to answer empirically: does Daily's self-managed audio compose
+//  with CallKit owning activation?
 //
 //  Trigger (device only — CallKit doesn't run in the sim):
 //    CONDUIT_DEBUG_CALLKIT=1  + the CONDUIT_DEBUG_ENGINE_* vars (see auto-connect).

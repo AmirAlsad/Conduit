@@ -256,6 +256,7 @@ Copy one block per run.
 Run:                 Before / After
 Date:
 Build SHA:
+Engine package:      (ConduitCallEngine commit or version; n/a before the extraction)
 Build config:        Debug
 iOS version:
 Phone model:
@@ -270,6 +271,7 @@ Notes / surprises:
 Run:                 Before / After
 Date:
 Build SHA:
+Engine package:      (ConduitCallEngine commit or version; n/a before the extraction)
 Build config:        Debug
 iOS version:
 Phone model:
