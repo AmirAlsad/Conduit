@@ -23,6 +23,9 @@ REGISTER_BODY = {
 }
 
 
+NAMED_BODY = {**REGISTER_BODY, "display_name": "Ada", "handle": "ada@conduit.example"}
+
+
 class FakeApns:
     def __init__(self, result: ApnsResult | None = None):
         self.result = result or ApnsResult(status=200, apns_id="apns-1")
@@ -46,6 +49,24 @@ def test_register_stores_token():
         assert stored.voip_token == "ab12cd34"
         assert stored.app_agent_id == APP_UUID
         assert stored.bundle_id == "com.example.Conduit"
+
+
+def test_register_stores_display_name_and_handle():
+    with TestClient(app) as c:
+        r = c.post("/inbound/register/loopback", json=NAMED_BODY, headers=AUTH)
+        assert r.status_code == 200, r.text
+        stored = app.state.registry._get_voip("loopback")
+        assert stored is not None
+        assert stored.display_name == "Ada"
+        assert stored.handle == "ada@conduit.example"
+
+
+def test_register_rejects_overlong_display_name_and_handle():
+    with TestClient(app) as c:
+        long_name = {**REGISTER_BODY, "display_name": "x" * 129}
+        assert c.post("/inbound/register/loopback", json=long_name, headers=AUTH).status_code == 422
+        long_handle = {**REGISTER_BODY, "handle": "x" * 257}
+        assert c.post("/inbound/register/loopback", json=long_handle, headers=AUTH).status_code == 422
 
 
 def test_register_unknown_agent_404s():
@@ -81,6 +102,38 @@ def test_ring_pairing_mode_sends_credential_free_push():
         assert "room_url" not in payload and "token" not in payload
         # Nothing provisioned or billed until the user answers and the app pairs.
         assert app.state.dispatcher.calls == []
+
+
+def test_ring_echoes_registered_display_name_and_handle():
+    with TestClient(app) as c:
+        app.state.apns = FakeApns()
+        assert c.post("/inbound/register/loopback", json=NAMED_BODY, headers=AUTH).status_code == 200
+
+        r = c.post("/admin/ring/loopback", headers=AUTH)
+        assert r.status_code == 200, r.text
+        assert r.json()["display_name"] == "Ada"
+
+        ((_, _, payload),) = app.state.apns.sends
+        assert payload["display_name"] == "Ada"
+        assert payload["handle"] == "ada@conduit.example"
+        assert payload["agent_id"] == APP_UUID
+
+
+def test_ring_legacy_registration_omits_name_keys():
+    # An older app build registers without display_name/handle: still 200, and the
+    # push must not invent a server-side name.
+    with TestClient(app) as c:
+        app.state.apns = FakeApns()
+        r = c.post("/inbound/register/loopback", json=REGISTER_BODY, headers=AUTH)
+        assert r.status_code == 200, r.text
+
+        r = c.post("/admin/ring/loopback", headers=AUTH)
+        assert r.status_code == 200, r.text
+        assert r.json()["display_name"] is None
+
+        ((_, _, payload),) = app.state.apns.sends
+        assert "display_name" not in payload
+        assert "handle" not in payload
 
 
 def test_ring_inline_mode_provisions_and_embeds_creds():

@@ -101,8 +101,14 @@ In Conduit → Add/Edit Agent:
    you'll usually just change `connect` to `inbound/register`.
 
 The app POSTs its token immediately and on every launch; you should see
-`inbound.registered` in the engine logs. Deleting the agent in the app sends a
-best-effort `DELETE` to the same endpoint — the engine drops the registration
+`inbound.registered` in the engine logs. Newer app builds also send the agent's
+`display_name` and `handle` (the caller name and CallKit handle); the engine stores
+them with the token and echoes them in every ring push. Older builds omit them, and
+the push then omits the keys too — the app rings under its own name for the agent.
+`scripts/ring.py` prints the name it rang as. Existing registry databases pick up
+the two new columns automatically on the next start.
+
+Deleting the agent in the app sends a best-effort `DELETE` to the same endpoint — the engine drops the registration
 (`inbound.unregistered`) and `/admin/ring` returns 404 from then on.
 
 ## Ringing the device
@@ -120,9 +126,10 @@ curl -s -X POST https://<host>/admin/ring/live \
 
 Two modes:
 
-- **Pairing (default)** — the push carries only `agent_id` + `call_id`; the app
-  resolves `/connect/{agent_id}` after the user **answers**. Nothing sensitive
-  rides the push, and **a declined ring costs nothing** (no room, no bot).
+- **Pairing (default)** — the push carries no credentials, only `agent_id` +
+  `call_id` (and `status_url`, plus the caller `display_name` and `handle` when the
+  app registered them); the app resolves `/connect/{agent_id}` after the user
+  **answers**. Nothing sensitive rides the push, and **a declined ring costs nothing** (no room, no bot).
 - **Inline (`--inline` / `{"inline": true}`)** — the engine provisions a room and
   embeds `room_url` + `token` in the push. The bot is **dispatched before the user
   answers**, so the agent is already in the room on pickup — but a declined ring

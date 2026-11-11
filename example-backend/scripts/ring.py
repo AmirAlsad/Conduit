@@ -7,7 +7,9 @@ call me** toggle must be on, which registers the token at
 ``/inbound/register/{agent}``). Default mode sends a credential-free push — the
 app resolves the pairing endpoint after the user answers, so a declined ring
 costs nothing. ``--inline`` provisions a room + token up-front and embeds them
-in the push (the bot is dispatched before the answer).
+in the push (the bot is dispatched before the answer). The push also carries the
+caller ``display_name`` (and ``handle``) the app registered, when it sent them;
+the script prints the name it rang as.
 
 Usage:
   uv run python scripts/ring.py --agent live
@@ -118,6 +120,10 @@ def main() -> None:
         return
 
     print(f"\nRinging '{args.agent}' (call_id {body['call_id']}, {body['mode']} mode)")
+    if name := body.get("display_name"):
+        print(f"Rang as: {name}")
+    else:
+        print("No caller name: this registration predates names, so the app will show its own.")
     print("APNs accepted the push — the device should be ringing now.")
     if body["mode"] == "inline":
         print("NOTE: inline mode already dispatched the bot; a decline leaves it")

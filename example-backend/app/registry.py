@@ -45,6 +45,9 @@ class VoipRegistration:
     voip_token: str  # hex APNs VoIP device token
     platform: str
     bundle_id: str  # apns-topic = bundle_id + ".voip"
+    # Sent by newer app builds; None for registrations from older builds.
+    display_name: str | None = None
+    handle: str | None = None
 
 
 @runtime_checkable
@@ -94,7 +97,16 @@ class SQLiteRegistry:
                     updated_at       TEXT NOT NULL
                 )"""
             )
+            self._migrate_voip_tokens()
             self._conn.commit()
+
+    def _migrate_voip_tokens(self) -> None:
+        # CREATE TABLE IF NOT EXISTS leaves a database created by an older build
+        # untouched, so add any columns it predates. Caller holds the lock.
+        existing = {row[1] for row in self._conn.execute("PRAGMA table_info(voip_tokens)")}
+        for column in ("display_name", "handle"):
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE voip_tokens ADD COLUMN {column} TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -140,24 +152,40 @@ class SQLiteRegistry:
     def _get_voip(self, backend_agent_id: str) -> VoipRegistration | None:
         with self._lock:
             row = self._conn.execute(
-                """SELECT backend_agent_id, app_agent_id, voip_token, platform, bundle_id
+                """SELECT backend_agent_id, app_agent_id, voip_token, platform, bundle_id,
+                          display_name, handle
                    FROM voip_tokens WHERE backend_agent_id = ?""",
                 (backend_agent_id,),
             ).fetchone()
-        return VoipRegistration(*row) if row else None
+        if row is None:
+            return None
+        return VoipRegistration(
+            backend_agent_id=row[0],
+            app_agent_id=row[1],
+            voip_token=row[2],
+            platform=row[3],
+            bundle_id=row[4],
+            display_name=row[5],
+            handle=row[6],
+        )
 
     async def register_voip(self, registration: VoipRegistration) -> None:
         # Latest registration per backend agent wins (the VoIP token is per-install,
         # app-wide; the app re-registers on every launch).
         with self._lock:
             self._conn.execute(
-                "INSERT OR REPLACE INTO voip_tokens VALUES (?, ?, ?, ?, ?, ?)",
+                """INSERT OR REPLACE INTO voip_tokens
+                       (backend_agent_id, app_agent_id, voip_token, platform, bundle_id,
+                        display_name, handle, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     registration.backend_agent_id,
                     registration.app_agent_id,
                     registration.voip_token,
                     registration.platform,
                     registration.bundle_id,
+                    registration.display_name,
+                    registration.handle,
                     _now(),
                 ),
             )

@@ -57,6 +57,12 @@ async def ring(
         # URLs behind a TLS-terminating proxy need uvicorn's --proxy-headers.
         "status_url": str(request.url_for("ring_status", agent_id=agent_id)),
     }
+    # The user names agents locally, so only a name the app registered is echoed;
+    # absent, the keys are omitted and the app rings under its own fallback name.
+    if reg.display_name is not None:
+        payload["display_name"] = reg.display_name
+    if reg.handle is not None:
+        payload["handle"] = reg.handle
     mode = "pairing"
     if req.inline:
         # Provision NOW and ride the creds in the push: the bot is dispatched
@@ -91,6 +97,7 @@ async def ring(
     return RingResponse(
         call_id=payload["call_id"],
         agent_id=reg.app_agent_id,
+        display_name=reg.display_name,
         mode=mode,
         apns_status=result.status,
         apns_id=result.apns_id,

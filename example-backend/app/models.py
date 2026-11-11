@@ -33,12 +33,18 @@ class DisconnectRequest(BaseModel):
 class VoipRegisterRequest(BaseModel):
     """POST /inbound/register/{agent_id} — the Conduit app registering its VoIP push
     token (docs/INBOUND_CALLS.md §1). The path names OUR agent; the body's
-    ``agent_id`` is the app's own UUID for it, echoed back in the push payload."""
+    ``agent_id`` is the app's own UUID for it, echoed back in the push payload.
+
+    ``display_name`` and ``handle`` (the caller's name and CallKit handle) are sent
+    by newer app builds and omitted by older ones; they are stored and echoed in
+    the push only when present."""
 
     voip_token: str = Field(..., min_length=1)
     platform: str = "ios"
     bundle_id: str = Field(..., min_length=1)
     agent_id: str = Field(..., min_length=1)
+    display_name: str | None = Field(default=None, max_length=128)
+    handle: str | None = Field(default=None, max_length=256)
 
 
 class RingRequest(BaseModel):
@@ -57,6 +63,7 @@ class RingRequest(BaseModel):
 class RingResponse(BaseModel):
     call_id: str
     agent_id: str  # the app-side UUID the push was addressed to
+    display_name: str | None = None  # the caller name the app registered, if any
     mode: Literal["pairing", "inline"]
     apns_status: int
     apns_id: str | None = None

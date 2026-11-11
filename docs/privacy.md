@@ -1,6 +1,6 @@
 # Privacy Policy
 
-_Last updated: 19 June 2026_
+_Last updated: 11 November 2026_
 
 Conduit is a **bring-your-own-agent** voice calling app for iOS. It connects your
 iPhone to a voice agent **you** run, and gets out of the way. This policy explains
@@ -21,6 +21,12 @@ usage. The app phones home to nobody.
 **Connection credentials.** The endpoint URLs, API keys, and tokens you enter to
 reach your agent are stored in the iOS **Keychain** on your device. They never
 leave your phone except to authenticate with the server you pointed the app at.
+
+**Inbound calls (optional).** If you turn on "Let this agent call me" for an agent,
+the app sends that agent's registration endpoint your device's VoIP push token, the
+app's bundle id, the agent's id, and the agent's display name and call handle, so
+the agent can ring you. That endpoint is one you chose, and nothing goes anywhere
+else.
 
 **Your voice during a call.** While a call is connected, microphone audio is sent
 in real time, over an encrypted WebRTC connection, **only** to the agent endpoint

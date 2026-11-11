@@ -52,9 +52,16 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
   "voip_token": "<hex APNs VoIP token>",
   "platform": "ios",
   "bundle_id": "<the app's bundle id>",
-  "agent_id": "<the agent's UUID in the app>"
+  "agent_id": "<the agent's UUID in the app>",
+  "display_name": "<optional>",          // the caller name the user gave the agent in the app
+  "handle": "<optional>"                 // the CallKit handle the app uses for it
 }
 ```
+
+- `display_name` and `handle` are optional, sent by app builds from late 2026;
+  omitted by older builds. Store them with the token and echo them in the ring push
+  (§2). Only the app knows them — the user names agents locally — so don't invent
+  your own.
 
 - The **VoIP token is per-install, app-wide** (not per-agent, not per-transport). The
   same token is registered with every agent the user opted in — each of your servers
@@ -94,11 +101,18 @@ authorization: bearer <APNs JWT signed with your .p8>
 {
   "agent_id": "<the agent's UUID>",     // required — which agent is calling
   "call_id":  "<a UUID you mint>",       // used as the CallKit call id
+  "display_name": "<optional>",          // the caller name stored at registration
+  "handle":   "<optional>",              // the CallKit handle stored at registration
   "room_url": "<optional>",              // inline credentials (see hybrid below)
   "token":    "<optional>",
   "status_url": "<optional>"             // ring-status receipts (see §4)
 }
 ```
+
+`display_name` and `handle` are the values the app sent when it registered its token
+(§1); include them whenever you stored them and omit the keys otherwise. When they
+are absent the app rings under a generic caller name and corrects it once it has
+matched the `agent_id` locally.
 
 ### Credentials: hybrid (inline **or** pairing)
 
@@ -119,7 +133,8 @@ agent's transport — same shapes as the pairing response.
 
 1. **Push received** → Conduit reports an incoming call to CallKit and rings
    (`incomingRinging`). It must report synchronously, so the push need only carry
-   `agent_id` + `call_id`; credentials are used later.
+   `agent_id` + `call_id` (add `display_name` + `handle` so it can ring under the
+   right name straight away); credentials are used later.
 2. **User answers** → Conduit connects the transport (inline creds, else pairing
    resolve), transitions to `connecting` → `connected`, and the call behaves exactly
    like an outgoing one (mute, routing, reconnection, interruptions).

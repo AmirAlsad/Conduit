@@ -3,7 +3,8 @@
 The Conduit app POSTs its device VoIP token here when the user enables "Let this
 agent call me" (and on every app launch thereafter). The stored token is what
 /admin/ring sends the push to. Latest registration per agent wins — the token is
-per-install, app-wide.
+per-install, app-wide. Newer app builds also send the caller's display name and
+CallKit handle, which are stored and echoed in the ring push.
 
 /inbound/status is the receipt channel: each ring's push carries a status_url
 pointing here, and the app reports how the ring ended (answered / declined /
@@ -38,6 +39,8 @@ async def register(agent_id: str, req: VoipRegisterRequest, request: Request):
             voip_token=req.voip_token,
             platform=req.platform,
             bundle_id=req.bundle_id,
+            display_name=req.display_name,
+            handle=req.handle,
         )
     )
     return {"ok": True}
