@@ -50,6 +50,7 @@ jobs:
         run: |
           xcodebuild \
             -scheme Conduit \
+            -disableAutomaticPackageResolution \
             -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.6' \
             -resultBundlePath TestResults.xcresult \
             test 2>&1 | tee xcodebuild.log

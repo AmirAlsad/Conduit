@@ -8,6 +8,7 @@ options:
   groupSortPosition: top
   generateEmptyDirectories: true
   transitivelyLinkDependencies: true
+  postGenCommand: mkdir -p Conduit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm && cp Package.resolved Conduit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 settings:
   base:
@@ -91,6 +92,10 @@ settings:
 # DailyTransport.tracks() KVO). Pinned by revision; to take an upstream release,
 # rebase the fork's livekit-webrtc branch and bump the pin. LiveKit's manual-
 # audio API (AudioManager.setEngineAvailability) lets CallKit own the session.
+#
+# The `from:` ranges are floors; the exact versions come from the tracked
+# Package.resolved (copied in by options.postGenCommand), because the generated
+# .xcodeproj is gitignored and would otherwise float to newer, unverified SDKs.
 packages:
   PipecatClientIOS:
     url: https://github.com/pipecat-ai/pipecat-client-ios.git
