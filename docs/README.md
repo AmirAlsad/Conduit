@@ -54,8 +54,7 @@ each builds on the last instead of grepping blindly:
 - **Build:** XcodeGen. `project.yml` is the source of truth; the `.xcodeproj` is
   generated and gitignored, so you must run `xcodegen generate` after any
   `project.yml` change or fresh clone. Scheme: `Conduit`. The `ConduitCallEngine`
-  package is a local path dependency (`../ConduitCallEngine`), so a fresh clone
-  also needs that checkout next to this repo until it is consumed by version.
+  package resolves from GitHub by version like the other dependencies.
   The tracked root `Package.resolved` pins the SDKs.
 - **Structure:** `Conduit/{App, Core, Features, Shared, Resources}`; the call
   engine lives in the `ConduitCallEngine` package (state machine, CallKit,

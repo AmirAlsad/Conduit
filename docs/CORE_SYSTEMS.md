@@ -9,9 +9,9 @@ and a fake, so everything above them is testable at sim speed.
 ## Where the code lives
 
 The call engine is the Swift package **`ConduitCallEngine`**, extracted from this
-app. Today it is a sibling checkout at `../ConduitCallEngine`, referenced by path in
-`project.yml`, so a fresh clone needs it next to this repo; it is meant to be
-consumed by version from `github.com/AmirAlsad/ConduitCallEngine` later. The app
+app. `project.yml` consumes it by version from
+`github.com/AmirAlsad/ConduitCallEngine` (0.1.x only), pinned in the tracked
+`Package.resolved`. The app
 links four of its products:
 
 | Product | Holds |
@@ -416,6 +416,10 @@ tone instead of speaking. The real `SpeechSpokenStateAnnouncer` uses
 `AVSpeechSynthesizer` and the system-sound server for the tone; it must mix with
 (never deactivate) the CallKit-owned session — that ducking/session wiring is
 finalized in WS-3. `AgentCallHost` drives it from engine transitions.
+
+Known limitation (device-observed): the spoken cues are audible on LiveKit calls
+but not during Daily calls, and they go silent during the final retry phase of a
+LiveKit outage; the cause is not yet established.
 
 ## Audio-session / CallKit integration (built, M3)
 

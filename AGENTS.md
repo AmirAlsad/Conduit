@@ -7,7 +7,7 @@
   - `Features/`: feature modules (Views, ViewModels, Models, Services, Coordinators).
   - `Shared/`: reusable components and navigation helpers.
   - `Resources/` and `Assets.xcassets`: fonts, JSON/audio, and xcassets.
-- `../ConduitCallEngine/`: the call engine (state machine, CallKit, PushKit, reconnection, Daily/LiveKit adapters, fakes) as a separate Swift package, referenced by local path in `project.yml` until it is consumed by version from `github.com/AmirAlsad/ConduitCallEngine`. It is its own checkout next to this repo; its tests live in its `Tests/`.
+- `ConduitCallEngine` (package): the call engine (state machine, CallKit, PushKit, reconnection, Daily/LiveKit adapters, fakes) as a separate Swift package, consumed by version from `github.com/AmirAlsad/ConduitCallEngine` in `project.yml`. Its source and tests live in its own repo.
 - `Config/`: shared build settings (`Base.xcconfig`) and per-developer local overrides.
 - `ConduitTests/` and `ConduitUITests/`: test targets.
 - `docs/`: architecture, conventions, and feature guides (see `docs/README.md` for load order).
@@ -15,7 +15,7 @@
 - `example-backend/`: self-hosted reference backend (Pipecat/FastAPI dispatcher + bot) a developer runs under their own keys — an independent Python project with its own `CLAUDE.md`, not part of the iOS build.
 
 ## Build, Test, and Development Commands
-- After cloning, check out the `ConduitCallEngine` package next to this repo (`../ConduitCallEngine`; `project.yml` points at it by path until the dependency moves to a version), then generate the project before opening or building:
+- After cloning, generate the project before opening or building (the `ConduitCallEngine` package resolves from GitHub by version, so no sibling checkout is needed):
   - `xcodegen generate` (reads `project.yml`, copies the tracked root `Package.resolved` into the project). The `.xcodeproj` is not committed.
 - Open `Conduit.xcodeproj` in Xcode and run the `Conduit` scheme.
 - For agent-driven builds/tests/runs: prefer XcodeBuildMCP tools (`mcp__xcodebuildmcp__build_sim`, `mcp__xcodebuildmcp__test_sim`, `mcp__xcodebuildmcp__build_run_sim`). The MCP server is project-scoped via `.mcp.json`, and the `xcodebuildmcp` skill at `.claude/skills/xcodebuildmcp/` documents which tool to reach for in each situation.

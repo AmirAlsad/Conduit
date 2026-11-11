@@ -8,7 +8,7 @@ Conduit is a **bring-your-own-agent voice calling app** for iOS: a thin, faithfu
 
 There is **no backend of ours, no Firebase, and no analytics.** Connection credentials are bring-your-own and live in the Keychain. Full vision, scope, and the CallKit↔WebRTC seam: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and [`docs/CORE_SYSTEMS.md`](./docs/CORE_SYSTEMS.md) — read them before touching call/transport code.
 
-The **call engine** — state machine, CallKit, PushKit, reconnection, ring-status receipts, and the Daily and LiveKit adapters — is a separate Swift package, **`ConduitCallEngine`**, extracted from this app. `project.yml` consumes it through a local path (`../ConduitCallEngine`); it is meant to be consumed by version from `github.com/AmirAlsad/ConduitCallEngine` later. The app keeps agents and history, the Keychain, pairing, contacts, Siri, the SmallWebRTC adapter, and all UI, and reaches the engine through `Core/Services/AgentCalls/` (`Agent+CallTarget`, `AgentCallHost`). The package has its own `Sources/`, `Tests/`, and README; it is a separate checkout, so changes there are committed there.
+The **call engine** — state machine, CallKit, PushKit, reconnection, ring-status receipts, and the Daily and LiveKit adapters — is a separate Swift package, **`ConduitCallEngine`**, extracted from this app. `project.yml` consumes it by version from `github.com/AmirAlsad/ConduitCallEngine` (`minorVersion: "0.1.0"`, i.e. 0.1.x only), pinned in the tracked `Package.resolved`. The app keeps agents and history, the Keychain, pairing, contacts, Siri, the SmallWebRTC adapter, and all UI, and reaches the engine through `Core/Services/AgentCalls/` (`Agent+CallTarget`, `AgentCallHost`). The package has its own `Sources/`, `Tests/`, and README; it is a separate checkout, so changes there are committed there.
 
 A **self-hosted reference backend** — the agent side a developer runs under their own keys, *not* operated by us — lives in [`example-backend/`](./example-backend) (a self-contained Pipecat/FastAPI project with its own `CLAUDE.md`). It's reference code, not part of the iOS build.
 
@@ -18,10 +18,10 @@ Uses **XcodeBuildMCP** (configured at project scope in `.mcp.json`). **Load the 
 
 **XcodeGen.** The `.xcodeproj` is generated from `project.yml` and is **gitignored** — a fresh clone must run `xcodegen generate` first. Re-run it after editing `project.yml` or adding/removing source files; plain edits to existing files don't need it. `xcodegen generate` also copies the tracked root `Package.resolved` into the generated project; that file pins the SDK versions, so change a pin deliberately.
 
-**Sibling package.** Until the engine dependency moves to a version, `project.yml` points at `../ConduitCallEngine`, so a fresh clone needs the package checked out there, next to this repo, before `xcodegen generate` and any build. After any SDK or pin change, run `scripts/check-bundle.sh <path-to-Conduit.app>` (no second un-prefixed WebRTC next to Daily's) and regression-call Daily.
+**Engine package.** `ConduitCallEngine` resolves from GitHub by version like any other dependency; a fresh clone needs no sibling checkout. To work on both repos at once, temporarily swap the `ConduitCallEngine` entry in `project.yml` to `path: ../ConduitCallEngine` (a checkout next to this repo) and re-run `xcodegen generate`; don't commit that, and restore the URL entry before committing. After any SDK or pin change, run `scripts/check-bundle.sh <path-to-Conduit.app>` (no second un-prefixed WebRTC next to Daily's) and regression-call Daily.
 
 - **Build:** `build_sim` (Debug). Release → `extraArgs: ["-configuration", "Release"]`.
-- **Test:** `test_sim`, **pinned to iPhone 16 / iOS 18.6** (see pin below). Single test → `extraArgs: ["-only-testing", "ConduitTests/Suite/test"]`. Engine tests run in the package, from `../ConduitCallEngine`: `xcodebuild -scheme ConduitCallEngine-Package -destination '<sim>' test`.
+- **Test:** `test_sim`, **pinned to iPhone 16 / iOS 18.6** (see pin below). Single test → `extraArgs: ["-only-testing", "ConduitTests/Suite/test"]`. Engine tests run in a `ConduitCallEngine` checkout: `xcodebuild -scheme ConduitCallEngine-Package -destination '<sim>' test`.
 - Build nuances (clean policy), the flow-testing procedure, UI-verification steps, the reporting contract, and the shell fallback live in **[`docs/AGENT_WORKFLOW.md`](./docs/AGENT_WORKFLOW.md)** — read it before running or flow-testing the app.
 
 > **Test sim pin.** CI runs tests on **iPhone 16 / iOS 18.6**, not the iOS 26 simulator: iOS 26's accessibility subsystem reports the app frame as `0x0` with no children, so every XCUITest query times out though screens render fine. The development Mac's Xcode 27.2 can't install any iOS 18 runtime, so local runs there use **iPhone 17 / iOS 27.2**, where XCUITest queries were confirmed to work. Re-verify on future sim bumps.
@@ -30,7 +30,7 @@ Uses **XcodeBuildMCP** (configured at project scope in `.mcp.json`). **Load the 
 
 | If you touched | Run |
 |---|---|
-| Engine code in the package (`CallEngine`, reconnection, push/ring handling, the CallKit/audio seams, the Daily/LiveKit adapters' logic) | **The package's tests** (from `../ConduitCallEngine`, against its fakes) — most call bugs live here; then build the app, and run `ConduitTests` if the engine's public surface changed |
+| Engine code in the package (`CallEngine`, reconnection, push/ring handling, the CallKit/audio seams, the Daily/LiveKit adapters' logic) | **The package's tests** (from a `ConduitCallEngine` checkout, against its fakes) — most call bugs live here; then build the app, and run `ConduitTests` if the engine's public surface changed |
 | Host glue in `Core/Services/AgentCalls/` (`Agent+CallTarget`, `AgentCallHost`) | `ConduitTests/AgentCalls/` and `AppWiringTests` (they drive the engine through `CallEngine.simulated`) |
 | Connection/pairing parsing, transport selection, error handling, any pure logic/model in the app | **Unit tests on the sim** (`ConduitTests`) |
 | One logic file in `Features/<X>/` | The `ConduitTests/` test(s) mapping to `<X>` |
@@ -81,7 +81,7 @@ Conduit/
 └── Resources/            # Assets, audio
 ConduitTests/             # Host unit tests (agent glue, pairing, Siri, view models — run in sim)
 ConduitUITests/           # UI tests (iPhone 16 / iOS 18.6 in CI)
-../ConduitCallEngine/     # Sibling Swift package: the call engine
+ConduitCallEngine (package)  # Swift package consumed by version: the call engine
 ├── Sources/ConduitCallEngine/         # CallEngine, CallKit/, Push/, Transport/ (CallTransport + events), Models/
 ├── Sources/ConduitCallEngineDaily/    # PipecatDailyTransport
 ├── Sources/ConduitCallEngineLiveKit/  # LiveKitTransport

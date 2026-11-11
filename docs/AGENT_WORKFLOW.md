@@ -18,9 +18,9 @@ generate`, after dependency or `Config/` changes (including edits to the
 `ConduitCallEngine` package checkout), or when symptoms match cached-artifact
 failure (mysterious link errors, "module compiled with different version").
 
-The engine package is a local path dependency (`../ConduitCallEngine`, until it is
-consumed by version), so a fresh clone needs that checkout next to the repo before
-`xcodegen generate` can resolve packages. SDK versions come from the tracked root
+The engine package resolves from GitHub by version (`minorVersion: "0.1.0"` in
+`project.yml`) like any other dependency, so a fresh clone needs no sibling checkout.
+SDK versions come from the tracked root
 `Package.resolved`, which `xcodegen generate` copies into the project; don't let a
 build re-resolve to newer ones. After any pin change, run
 `scripts/check-bundle.sh <path-to-Conduit.app>` on the built app.
@@ -101,7 +101,7 @@ xcodebuild -scheme Conduit -destination 'platform=iOS Simulator,name=iPhone 16,O
 xcodebuild -scheme Conduit -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.6' \
   -only-testing:ConduitTests/SomeSuite/someTest test
 
-# Engine tests, from the package checkout (../ConduitCallEngine)
+# Engine tests, from a ConduitCallEngine checkout
 xcodebuild -scheme ConduitCallEngine-Package \
   -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.6' test
 ```

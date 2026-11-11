@@ -10,6 +10,15 @@
       }
     },
     {
+      "identity": "conduitcallengine",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/AmirAlsad/ConduitCallEngine.git",
+      "state": {
+        "revision": "a2946d0ddfdf6252112e794559ff557451d72184",
+        "version": "0.1.0"
+      }
+    },
+    {
       "identity": "daily-client-ios",
       "kind": "remoteSourceControl",
       "location": "https://github.com/daily-co/daily-client-ios.git",

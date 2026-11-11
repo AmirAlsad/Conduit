@@ -19,15 +19,12 @@ the connection contract, and the example backend. Internal architecture docs sta
 # 1. Prerequisites
 brew install xcodegen          # Xcode 26+ also required
 
-# 2. The call engine package must sit next to this repo as ../ConduitCallEngine
-#    (project.yml references it by path until it is consumed by version)
-
-# 3. Per-developer build settings (team id + bundle id)
+# 2. Per-developer build settings (team id + bundle id)
 cp Config/local.xcconfig.template Config/local.xcconfig
 #   …then edit Config/local.xcconfig with your DEVELOPMENT_TEAM and APP_BUNDLE_IDENTIFIER.
 #   This file is gitignored. Simulator builds work without it; device builds need it.
 
-# 4. Generate and open the project
+# 3. Generate and open the project
 xcodegen generate
 open Conduit.xcodeproj
 ```
@@ -56,7 +53,6 @@ Conduit/
   Shared/     Reusable components and navigation helpers
   Resources/  Fonts, JSON, assets
 Config/       Base.xcconfig (committed) + local.xcconfig (gitignored, per-developer)
-../ConduitCallEngine/  The call engine as a Swift package (sibling checkout, referenced by path)
 docs/         Architecture, conventions, core-systems guides (start at docs/README.md)
 example-backend/  Self-hosted reference backend (Pipecat / FastAPI) — its own README + CLAUDE.md
 project.yml   XcodeGen project definition (the .xcodeproj is generated from this)

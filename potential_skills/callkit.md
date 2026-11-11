@@ -5,7 +5,7 @@ round-trips and its activation timing are driven by the system, not your call si
 and the in-app fakes don't model that round-trip, so these bugs pass the sim suite and
 only appear on device. Read before touching `CallEngine`, `SystemCallProvider`,
 or a `CallTransport` adapter's connect/audio path. All of it is in the
-`ConduitCallEngine` package (`../ConduitCallEngine`): `CallEngine` in
+`ConduitCallEngine` package (github.com/AmirAlsad/ConduitCallEngine): `CallEngine` in
 `Sources/ConduitCallEngine/Call/`, `SystemCallProvider` in `…/CallKit/`, the Daily
 and LiveKit adapters in `Sources/ConduitCallEngineDaily` / `…LiveKit`. The app's
 SmallWebRTC adapter is `Conduit/Core/Services/Transport/`.

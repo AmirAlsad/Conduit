@@ -103,10 +103,9 @@ Related hazards to design for (detailed in [CORE_SYSTEMS](./CORE_SYSTEMS.md)):
 
 ## Folder Structure
 
-The call engine is the **`ConduitCallEngine`** Swift package, consumed through a
-local path (`../ConduitCallEngine`, set in `project.yml`); it is meant to be
-consumed by version from `github.com/AmirAlsad/ConduitCallEngine` later. Until
-then a fresh clone needs it checked out next to this repo. It holds layers (1) and (2)
+The call engine is the **`ConduitCallEngine`** Swift package, consumed by
+version from `github.com/AmirAlsad/ConduitCallEngine` (set in `project.yml`, 0.1.x
+only). It holds layers (1) and (2)
 and their fakes; the app holds the agents, the UI, and the glue that joins them.
 
 ```
@@ -127,7 +126,7 @@ Conduit/
 ├── Debug/          # DEBUG-only device spikes and call trace
 └── Resources/      # Assets, audio, data files
 
-../ConduitCallEngine/            # the package
+ConduitCallEngine (package)      # consumed by version
 ├── Sources/ConduitCallEngine/         # core: Call/ (CallEngine, CallTarget,
 │                                      #   CallEngineDelegate), CallKit/, Push/,
 │                                      #   Transport/ (CallTransport + event

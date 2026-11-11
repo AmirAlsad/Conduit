@@ -97,11 +97,13 @@ settings:
 # Package.resolved (copied in by options.postGenCommand), because the generated
 # .xcodeproj is gitignored and would otherwise float to newer, unverified SDKs.
 packages:
-  # The call engine and its Daily/LiveKit adapters, from a sibling checkout. The
-  # Daily and LiveKit entries below stay declared (no target links them directly)
-  # so their floors and the tracked Package.resolved pins still apply.
+  # The call engine and its Daily/LiveKit adapters, consumed by version (0.1.x
+  # only: a 0.x minor may break). The Daily and LiveKit entries below stay
+  # declared (no target links them directly) so their floors and the tracked
+  # Package.resolved pins still apply.
   ConduitCallEngine:
-    path: ../ConduitCallEngine
+    url: https://github.com/AmirAlsad/ConduitCallEngine.git
+    minorVersion: "0.1.0"
   PipecatClientIOS:
     url: https://github.com/pipecat-ai/pipecat-client-ios.git
     from: "1.2.0"

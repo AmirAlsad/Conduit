@@ -17,8 +17,8 @@ audio-interruption seam, and the **full inbound (agent-initiated) call plumbing*
 Both call directions exist in code — and **M8's on-ramp is built** (QR/deep-link
 pairing, staged connection diagnostics, persisted failure reasons, decluttered
 in-app copy). The call engine (state machine, CallKit, PushKit, the Daily and
-LiveKit adapters) lives in the `ConduitCallEngine` Swift package, consumed by path
-from `../ConduitCallEngine` until it is consumed by version. See
+LiveKit adapters) lives in the `ConduitCallEngine` Swift package, consumed by version
+from `github.com/AmirAlsad/ConduitCallEngine`. See
 [ARCHITECTURE](./ARCHITECTURE.md) and [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 **The one fact that shapes this roadmap:** a large share of what's "built" is verified
