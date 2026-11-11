@@ -4,7 +4,7 @@
 //
 //  The app's three-tab shell, modeled on the Phone app: Recents (home), Contacts,
 //  Settings. The in-call surface presents over the whole shell as a full-screen
-//  overlay whenever a call is active (`callSession.state.isActive`) and not
+//  overlay whenever a call is active (`callEngine.state.isActive`) and not
 //  minimized — an app-owned overlay (not a modal cover) so its dismiss transition
 //  is ours to control (a user-end vanishes instantly; see `syncInCallCover`).
 //
@@ -82,7 +82,7 @@ struct RootTabView: View {
             // Returning to the foreground (e.g. tapping the CallKit Dynamic Island /
             // status-bar pill) re-presents a minimized, still-active call.
             if new == .active, old != .active,
-               environment.callSession.state.isActive,
+               environment.callEngine.state.isActive,
                environment.isCallScreenMinimized {
                 environment.isCallScreenMinimized = false
             }
@@ -91,10 +91,10 @@ struct RootTabView: View {
         // "Call Ended" page shows — or when a call ends while minimized (no in-call
         // view is up to do it). A remote hangup or failure on the presented screen is
         // left terminal so its page stays until the user taps Close.
-        .onChange(of: environment.callSession.state.isTerminal) { _, isTerminal in
+        .onChange(of: environment.callEngine.state.isTerminal) { _, isTerminal in
             guard isTerminal else { return }
-            if environment.callSession.endedByUser || environment.isCallScreenMinimized {
-                environment.callSession.reset()
+            if environment.callEngine.endedByUser || environment.isCallScreenMinimized {
+                environment.callEngine.reset()
                 environment.isCallScreenMinimized = false
             }
         }
@@ -112,7 +112,7 @@ struct RootTabView: View {
             Log.info(.call, "Siri dial dropped — request expired unconsumed")
             return
         }
-        guard !environment.callSession.state.isActive else {
+        guard !environment.callEngine.state.isActive else {
             Log.info(.call, "Siri dial dropped — a call is already active")
             return
         }
@@ -127,9 +127,9 @@ struct RootTabView: View {
     /// Whether the in-call cover should be shown: an active call the user hasn't
     /// minimized or just ended.
     private var callShouldPresent: Bool {
-        environment.callSession.state.isActive
+        environment.callEngine.state.isActive
             && !environment.isCallScreenMinimized
-            && !environment.callSession.endedByUser
+            && !environment.callEngine.endedByUser
     }
 
     /// Drive the in-call overlay's `@State` to match. Present and minimize animate;

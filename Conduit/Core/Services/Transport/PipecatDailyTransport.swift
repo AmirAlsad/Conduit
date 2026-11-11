@@ -13,7 +13,7 @@
 //  Audio-session note: the Daily SDK manages `AVAudioSession` itself and has no
 //  documented hook to defer activation to CallKit (this is the M3 spike). For now
 //  we join with the mic DISABLED and only enable capture via `setMicEnabled` —
-//  which the coordinator calls after CallKit activation — so the mic is never hot
+//  which the engine calls after CallKit activation — so the mic is never hot
 //  before activation. `attachAudioSession`/`detachAudioSession` are no-ops here
 //  because Daily owns the session; they exist to satisfy the seam.
 //

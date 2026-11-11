@@ -118,11 +118,6 @@ final class SystemCallProvider: NSObject, CallProviding, CXProviderDelegate {
         try? await callController.request(CXTransaction(action: action))
     }
 
-    func setOnHold(_ id: UUID, held: Bool) async {
-        let action = CXSetHeldCallAction(call: id, onHold: held)
-        try? await callController.request(CXTransaction(action: action))
-    }
-
     // MARK: - CXProviderDelegate (system → app)
     //
     // CXProvider delivers on the main queue (delegate queue is nil), so these
@@ -135,7 +130,7 @@ final class SystemCallProvider: NSObject, CallProviding, CXProviderDelegate {
     }
 
     nonisolated func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
-        // The connection is kicked off by the coordinator; do NOT start audio here.
+        // The connection is kicked off by the engine; do NOT start audio here.
         action.fulfill()
     }
 

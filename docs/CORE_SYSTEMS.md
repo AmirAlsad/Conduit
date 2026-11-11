@@ -105,9 +105,9 @@ instead — the iOS SDK can't reconnect in place; a retry re-pairs to a fresh bo
 `Core/Services/AppEnvironment.swift` — a `@MainActor @Observable` container that
 owns the SwiftData `ModelContainer`, the protocol-typed services, a
 `transportFactory: (TransportKind) -> CallTransport`, the app-wide
-`CallSessionCoordinator`, and its delegate `AgentCallHost`. UI places calls through
+`CallEngine`, and its delegate `AgentCallHost`. UI places calls through
 `AppEnvironment.placeCall(_ agent:)` and reads the live call's agent (name, avatar,
-color) from `activeCallAgent`, looked up by `callSession.activeCall?.targetID`. `inMemory()` wires the fakes + an in-memory store
+color) from `activeCallAgent`, looked up by `callEngine.activeCall?.targetID`. `inMemory()` wires the fakes + an in-memory store
 (previews, tests). `live()` (what `ConduitApp` runs on) wires the real services —
 `KeychainService`, a persistent SwiftData store, and `SpeechSpokenStateAnnouncer`.
 CallKit (`SystemCallProvider`) and the Daily transport can't run in the simulator,
@@ -180,9 +180,9 @@ caveats:* the contact persists after the agent is deleted or the app is uninstal
 and iOS gives no uninstall hook); a user who deletes the contact in the Contacts
 app leaves a stale `contactIdentifier`.
 
-## Call state machine — `CallSessionCoordinator`
+## Call state machine — `CallEngine`
 
-`Core/Services/Call/CallSessionCoordinator.swift` — a `@MainActor @Observable`
+`Core/Services/Call/CallEngine.swift` — a `@MainActor @Observable`
 type that is the single source of truth for a call and the orchestration point
 between the CallKit and transport seams. It lives in `Core/Services/Call/` (not in
 `Features/InCall/`) because it is an app-wide service owned by `AppEnvironment` and
@@ -264,15 +264,17 @@ Key behaviors:
   returns to `.idle`; both post a quiet local notification (`MissedCallNotifying`,
   provisional auth). If the push carried a `status_url`, the coordinator reports the
   ring's terminal status back (`RingStatusReporting`: answered / declined / busy /
-  suppressed_by_focus). Token registration fires on app launch (`VoIPPushService`) *and*
-  at agent save (`InboundRegistering`); deleting an agent best-effort **unregisters**
+  suppressed_by_focus). The engine owns PushKit (`startPushRegistration()` at launch,
+  `voipPushToken`); token registration fires on each token update
+  (`AgentCallHost`, via `didUpdateVoIPPushToken`) *and* at agent save
+  (`InboundRegistering`), sending the agent's name and synthetic email with the token; deleting an agent best-effort **unregisters**
   (DELETE on the registration endpoint, `PushTokenRegistrar.unregister`).
   Push/CallKit-incoming/entitlement are device-only; the coordinator paths + payload
   parsing are unit-tested. See [INBOUND_CALLS](./INBOUND_CALLS.md).
 
 ## In-call surface — `InCallView`
 
-`Features/InCall/InCallView.swift` is a pure projection of `CallSessionCoordinator`
+`Features/InCall/InCallView.swift` is a pure projection of `CallEngine`
 — it owns no call logic; every control forwards intent to the coordinator. It
 presents as a `.fullScreenCover` from `RootTabView`, gated on
 `state.isActive && !environment.isCallScreenMinimized`.

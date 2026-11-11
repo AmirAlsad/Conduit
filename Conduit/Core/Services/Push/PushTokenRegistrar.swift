@@ -14,6 +14,8 @@ enum PushTokenRegistrar {
     static func register(
         token: String,
         agentID: UUID,
+        displayName: String,
+        handle: String,
         endpoint: URL,
         apiKey: String,
         bundleID: String = Bundle.main.bundleIdentifier ?? "",
@@ -30,6 +32,8 @@ enum PushTokenRegistrar {
             "platform": "ios",
             "bundle_id": bundleID,
             "agent_id": agentID.uuidString,
+            "display_name": displayName,
+            "handle": handle,
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 

@@ -4,10 +4,11 @@
 //
 //  Conduit's side of the call engine: turns agents into call targets and reacts
 //  to what the engine reports — writing the call log, speaking connection state,
-//  donating outgoing calls to Siri, posting missed-call notifications, and
-//  supplying the API key that authenticates ring-status receipts. The engine
-//  identifies calls only by target id; this looks the agent up, and a target
-//  with no agent (unknown or deleted) records nothing.
+//  donating outgoing calls to Siri, posting missed-call notifications, supplying
+//  the API key that authenticates ring-status receipts, and registering the
+//  device's VoIP token with every agent that lets itself call the user. The
+//  engine identifies calls only by target id; this looks the agent up, and a
+//  target with no agent (unknown or deleted) records nothing.
 //
 
 import Foundation
@@ -21,6 +22,10 @@ final class AgentCallHost: CallEngineDelegate {
     private let interactionDonor: CallInteractionDonating
     private let transportFactory: (TransportKind) -> CallTransport
     private let pairingResolver: PairingResolving
+    private let registrationSession: URLSession
+    /// The engine whose VoIP token `registerInbound(for:)` sends.
+    weak var engine: CallEngine?
+    private var registrationTask: Task<Void, Never>?
 
     init(
         repository: AgentRepository,
@@ -29,7 +34,8 @@ final class AgentCallHost: CallEngineDelegate {
         missedCallNotifier: MissedCallNotifying,
         interactionDonor: CallInteractionDonating = CallInteractionDonor(),
         transportFactory: @escaping (TransportKind) -> CallTransport,
-        pairingResolver: @escaping PairingResolving = Agent.livePairingResolver
+        pairingResolver: @escaping PairingResolving = Agent.livePairingResolver,
+        registrationSession: URLSession = .shared
     ) {
         self.repository = repository
         self.keychain = keychain
@@ -38,6 +44,7 @@ final class AgentCallHost: CallEngineDelegate {
         self.interactionDonor = interactionDonor
         self.transportFactory = transportFactory
         self.pairingResolver = pairingResolver
+        self.registrationSession = registrationSession
     }
 
     func target(for agent: Agent, inlineConnection: CallConnection? = nil) -> CallTarget {
@@ -55,11 +62,11 @@ final class AgentCallHost: CallEngineDelegate {
 
     // MARK: - CallEngineDelegate
 
-    func callEngine(_ engine: CallSessionCoordinator, targetForIncomingCall call: IncomingCall) -> CallTarget? {
+    func callEngine(_ engine: CallEngine, targetForIncomingCall call: IncomingCall) -> CallTarget? {
         agent(id: call.targetID).map { target(for: $0, inlineConnection: call.connection) }
     }
 
-    func callEngine(_ engine: CallSessionCoordinator, didChangeStateFrom old: CallState, to new: CallState) {
+    func callEngine(_ engine: CallEngine, didChangeStateFrom old: CallState, to new: CallState) {
         switch new {
         case .connecting:
             announcer.startRepeating(.connecting)
@@ -88,7 +95,7 @@ final class AgentCallHost: CallEngineDelegate {
         }
     }
 
-    func callEngine(_ engine: CallSessionCoordinator, didFinish record: CallRecord) {
+    func callEngine(_ engine: CallEngine, didFinish record: CallRecord) {
         guard let agent = agent(id: record.targetID) else { return }
         repository.addCallLogEntry(CallLogEntry(
             agent: agent,
@@ -106,8 +113,49 @@ final class AgentCallHost: CallEngineDelegate {
         }
     }
 
-    func callEngine(_ engine: CallSessionCoordinator, ringStatusBearerForTarget id: UUID) -> String? {
+    func callEngine(_ engine: CallEngine, ringStatusBearerForTarget id: UUID) -> String? {
         guard let agent = agent(id: id) else { return nil }
         return (try? keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef))) ?? nil
+    }
+
+    func callEngine(_ engine: CallEngine, didUpdateVoIPPushToken token: Data) {
+        registrationTask = Task { [weak self] in await self?.registerToken(token) }
+    }
+
+    // MARK: - VoIP token registration
+
+    /// Test hook: await the registration pass a token update started.
+    func awaitPendingRegistration() async {
+        await registrationTask?.value
+    }
+
+    private func registerToken(_ token: Data) async {
+        let agents = ((try? repository.fetchAll()) ?? []).filter { $0.inboundRegistrationURL != nil }
+        for agent in agents {
+            await register(token: token, agent: agent)
+        }
+    }
+
+    private func register(token: Data, agent: Agent) async {
+        guard let endpoint = agent.inboundRegistrationURL else { return }
+        let apiKey = (try? keychain.token(for: KeychainTokenRef(account: agent.keychainTokenRef))) ?? nil
+        await PushTokenRegistrar.register(
+            token: token.map { String(format: "%02x", $0) }.joined(),
+            agentID: agent.id,
+            displayName: agent.name,
+            handle: agent.syntheticEmail,
+            endpoint: endpoint,
+            apiKey: apiKey ?? "",
+            session: registrationSession
+        )
+    }
+}
+
+// MARK: - InboundRegistering (registration on toggle-save, not just app launch)
+
+extension AgentCallHost: InboundRegistering {
+    func registerInbound(for agent: Agent) async {
+        guard let token = engine?.voipPushToken, !token.isEmpty else { return }
+        await register(token: token, agent: agent)
     }
 }

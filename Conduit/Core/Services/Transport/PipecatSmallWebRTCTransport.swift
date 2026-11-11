@@ -16,7 +16,7 @@
 //  Audio-session note: the SDK configures `AVAudioSession` itself (category,
 //  mode, port overrides) with no manual-audio gate, so — like Daily — we join
 //  with the mic DISABLED and only enable capture via `setMicEnabled`, which the
-//  coordinator calls after CallKit activation. `attachAudioSession`/
+//  engine calls after CallKit activation. `attachAudioSession`/
 //  `detachAudioSession` are no-ops pending the on-device audio verdict.
 //
 
@@ -57,7 +57,7 @@ final class PipecatSmallWebRTCTransport: CallTransport, PipecatClientDelegate {
         do {
             // A pairing agent's connection is the offer URL plus a short-lived
             // bearer for it — the engine key itself never rides the offer leg.
-            // Each coordinator retry re-pairs and lands here with a fresh offer,
+            // Each engine retry re-pairs and lands here with a fresh offer,
             // which spawns a fresh bot server-side (context resets).
             // The SDK copies these headers onto both the offer POST and the
             // trickle-ICE PATCH.

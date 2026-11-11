@@ -22,7 +22,6 @@ final class FakeCallProvider: CallProviding {
     private(set) var endRequests: [UUID] = []
     private(set) var reportedEnded: [(id: UUID, reason: CallEndReason)] = []
     private(set) var muteStates: [UUID: Bool] = [:]
-    private(set) var holdStates: [UUID: Bool] = [:]
 
     /// When set, the next `startOutgoingCall` throws this.
     var startError: Error?
@@ -111,7 +110,6 @@ final class FakeCallProvider: CallProviding {
         reportedEnded.append((id, reason))
     }
     func setMuted(_ id: UUID, muted: Bool) async { muteStates[id] = muted }
-    func setOnHold(_ id: UUID, held: Bool) async { holdStates[id] = held }
 
     // MARK: - System → app drivers (for tests / debug path)
 

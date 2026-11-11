@@ -5,7 +5,7 @@
 //  The host side driven by the real engine: an AgentCallHost over an in-memory
 //  SwiftData repository with one agent, the Keychain, announcer, notifier, and
 //  donor fakes, and a suspendable pairing resolver — wired as the delegate of a
-//  CallSessionCoordinator that runs against the CallKit and transport fakes.
+//  CallEngine that runs against the CallKit and transport fakes.
 //
 
 import Foundation
@@ -61,6 +61,7 @@ final class AgentCallHostHarness {
     let provider = FakeCallProvider()
     let interruption = FakeAudioInterruptionObserver()
     let ringStatusReporter = FakeRingStatusReporter()
+    let pushRegistry = FakeVoIPPushRegistry()
     let keychain = InMemoryKeychain()
     let announcer = FakeSpokenStateAnnouncer()
     let missedNotifier = FakeMissedCallNotifier()
@@ -71,7 +72,7 @@ final class AgentCallHostHarness {
     let container: ModelContainer
     let repository: SwiftDataAgentRepository
     let host: AgentCallHost
-    let coordinator: CallSessionCoordinator
+    let engine: CallEngine
     let agent: Agent
     let callID = UUID()
     private(set) var pushCompletions = 0
@@ -124,26 +125,28 @@ final class AgentCallHostHarness {
                 transportRequests.kinds.append(kind)
                 return transports.make()
             },
-            pairingResolver: pairing.resolver
+            pairingResolver: pairing.resolver,
+            registrationSession: RecordingURLProtocol.session()
         )
-        coordinator = CallSessionCoordinator(
+        engine = CallEngine(
+            configuration: CallEngineConfiguration(unknownCallerName: "Agent"),
             callProvider: provider,
             interruptionObserver: interruption,
             ringStatusReporter: ringStatusReporter,
+            pushRegistry: pushRegistry,
             policy: policy,
             now: now,
-            sleep: { _ in },
-            isPushToTalkEnabled: { false },
-            unknownCallerName: "Agent"
+            sleep: { _ in }
         )
-        coordinator.delegate = host
+        engine.delegate = host
+        host.engine = engine
     }
 
     /// The live call's transport (or the next call's, before it is placed).
     var transport: FakeTransport { transports.current }
 
     func placeCall() async {
-        await coordinator.placeCall(host.target(for: agent))
+        await engine.placeCall(host.target(for: agent))
     }
 
     func loggedEntries() throws -> [CallLogEntry] {
@@ -151,7 +154,7 @@ final class AgentCallHostHarness {
     }
 
     /// Deliver a VoIP push the way Conduit's reference engine sends one (keyed by
-    /// `agent_id`), through the coordinator's PushKit entry.
+    /// `agent_id`), through the engine's PushKit entry.
     func ring(
         agentID: UUID? = nil,
         callID: UUID = UUID(),
@@ -170,6 +173,6 @@ final class AgentCallHostHarness {
         push["room_url"] = roomURL?.absoluteString
         push["token"] = token
         push["status_url"] = statusURL?.absoluteString
-        coordinator.handleIncomingPush(push) { [self] in pushCompletions += 1 }
+        engine.handleIncomingPush(push) { [self] in pushCompletions += 1 }
     }
 }

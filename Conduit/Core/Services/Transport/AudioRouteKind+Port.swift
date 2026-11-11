@@ -4,7 +4,7 @@
 //
 //  Maps a live `AVAudioSession` output port to an `AudioRouteKind`. Used to read
 //  the route that's ACTUALLY active (the source of truth) — for the in-call
-//  picker's checkmark, and so the coordinator can make the transport follow a
+//  picker's checkmark, and so the engine can make the transport follow a
 //  route the user picks from the native CallKit call screen.
 //
 

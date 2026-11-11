@@ -2,7 +2,7 @@
 //  CallState.swift
 //  Conduit
 //
-//  The call's lifecycle, owned by the call coordinator. Pure and Equatable so
+//  The call's lifecycle, owned by the call engine. Pure and Equatable so
 //  the state machine — the most-tested unit in the app — verifies against fakes
 //  at simulator speed.
 //

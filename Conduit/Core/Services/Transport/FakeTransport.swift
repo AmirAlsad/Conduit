@@ -4,7 +4,7 @@
 //
 //  In-app fake conforming to `CallTransport`. Lives in the app target (not the test
 //  target) so the unit suite, SwiftUI previews, and the CallKit-free debug path
-//  all share it. A test pushes events with `emit(_:)` and asserts the coordinator
+//  all share it. A test pushes events with `emit(_:)` and asserts the engine
 //  reacts.
 //
 

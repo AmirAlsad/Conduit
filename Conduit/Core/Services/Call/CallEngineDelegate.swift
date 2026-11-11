@@ -15,19 +15,19 @@ import Foundation
 protocol CallEngineDelegate: AnyObject {
     /// Once per ringing push, after CallKit accepted the report (so never before the
     /// call rings). nil means the target is unknown and the ring fails.
-    func callEngine(_ engine: CallSessionCoordinator, targetForIncomingCall call: IncomingCall) -> CallTarget?
+    func callEngine(_ engine: CallEngine, targetForIncomingCall call: IncomingCall) -> CallTarget?
     /// Only on real assignments, after the engine's own field batch for that transition.
-    func callEngine(_ engine: CallSessionCoordinator, didChangeStateFrom old: CallState, to new: CallState)
-    func callEngine(_ engine: CallSessionCoordinator, didFinish record: CallRecord)
+    func callEngine(_ engine: CallEngine, didChangeStateFrom old: CallState, to new: CallState)
+    func callEngine(_ engine: CallEngine, didFinish record: CallRecord)
     /// Asked at send time, only when the push carried a `status_url`.
-    func callEngine(_ engine: CallSessionCoordinator, ringStatusBearerForTarget id: UUID) -> String?
-    func callEngine(_ engine: CallSessionCoordinator, didUpdateVoIPPushToken token: Data)
+    func callEngine(_ engine: CallEngine, ringStatusBearerForTarget id: UUID) -> String?
+    func callEngine(_ engine: CallEngine, didUpdateVoIPPushToken token: Data)
 }
 
 extension CallEngineDelegate {
-    func callEngine(_ engine: CallSessionCoordinator, targetForIncomingCall call: IncomingCall) -> CallTarget? { nil }
-    func callEngine(_ engine: CallSessionCoordinator, didChangeStateFrom old: CallState, to new: CallState) {}
-    func callEngine(_ engine: CallSessionCoordinator, didFinish record: CallRecord) {}
-    func callEngine(_ engine: CallSessionCoordinator, ringStatusBearerForTarget id: UUID) -> String? { nil }
-    func callEngine(_ engine: CallSessionCoordinator, didUpdateVoIPPushToken token: Data) {}
+    func callEngine(_ engine: CallEngine, targetForIncomingCall call: IncomingCall) -> CallTarget? { nil }
+    func callEngine(_ engine: CallEngine, didChangeStateFrom old: CallState, to new: CallState) {}
+    func callEngine(_ engine: CallEngine, didFinish record: CallRecord) {}
+    func callEngine(_ engine: CallEngine, ringStatusBearerForTarget id: UUID) -> String? { nil }
+    func callEngine(_ engine: CallEngine, didUpdateVoIPPushToken token: Data) {}
 }

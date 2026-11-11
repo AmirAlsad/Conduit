@@ -22,7 +22,7 @@ struct IncomingPushTests {
     // MARK: - Report first
 
     @Test func reportComesBeforeAnyStateChangeOrDelegateCall() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         h.ring() // the fake completes before returning: the inconvenient order
 
         #expect(h.log.entries == [
@@ -31,7 +31,7 @@ struct IncomingPushTests {
     }
 
     @Test func reportComesFirstWhenCallKitCompletesLater() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         h.provider.completesIncomingReportsLater = true
         h.ring()
 
@@ -52,7 +52,7 @@ struct IncomingPushTests {
 
     @Test(arguments: Path.allCases)
     func pushCompletionFollowsTheReportsCompletion(path: Path) async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         if path == .busy { await h.placeCall() }
         let before = h.log.entries.count
         h.provider.completesIncomingReportsLater = true
@@ -81,17 +81,17 @@ struct IncomingPushTests {
     }
 
     @Test func answerBeforeResolutionDoesNothing() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         h.provider.completesIncomingReportsLater = true
         h.ring()
 
-        await h.coordinator.answer() // CallKit hasn't accepted the report yet
-        #expect(h.coordinator.state == .incomingRinging)
+        await h.engine.answer() // CallKit hasn't accepted the report yet
+        #expect(h.engine.state == .incomingRinging)
         #expect(h.target.makeTransportCount == 0)
 
         h.provider.completeIncomingReports()
-        await h.coordinator.answer()
-        #expect(h.coordinator.state.isConnecting)
+        await h.engine.answer()
+        #expect(h.engine.state.isConnecting)
         #expect(h.transport.connectCount == 1)
     }
 
@@ -99,7 +99,7 @@ struct IncomingPushTests {
 
     @Test(arguments: ["missing", "invalid"])
     func malformedPushIsReportedThenEndedWithoutTouchingTheEngine(targetID: String) async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         var push: [AnyHashable: Any] = [
             "call_id": UUID().uuidString, "status_url": statusEndpoint.absoluteString,
         ]
@@ -113,7 +113,7 @@ struct IncomingPushTests {
         #expect(h.provider.reportedEnded.map(\.id) == [reported.id])
         #expect(h.provider.reportedEnded.first?.reason == .failed)
         #expect(h.log.entries == ["report", "report-completed", "ended(failed)", "push-completed"])
-        #expect(h.coordinator.state == .idle)
+        #expect(h.engine.state == .idle)
         #expect(h.delegate.events.isEmpty)
         #expect(h.ringStatusReporter.reports.isEmpty)
     }
@@ -121,15 +121,15 @@ struct IncomingPushTests {
     // MARK: - Payload keys and identity
 
     @Test func agentIDAliasRingsTheSameTarget() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         h.deliverPush(["agent_id": h.target.id.uuidString, "call_id": UUID().uuidString])
 
         #expect(h.delegate.resolved.map(\.targetID) == [h.target.id])
-        #expect(h.coordinator.state == .incomingRinging)
+        #expect(h.engine.state == .incomingRinging)
     }
 
     @Test func targetIDWinsOverTheAgentIDAlias() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         h.deliverPush([
             "target_id": h.target.id.uuidString,
             "agent_id": UUID().uuidString,
@@ -137,11 +137,11 @@ struct IncomingPushTests {
         ])
 
         #expect(h.delegate.resolved.map(\.targetID) == [h.target.id])
-        #expect(h.coordinator.state == .incomingRinging)
+        #expect(h.engine.state == .incomingRinging)
     }
 
     @Test func ringUsesThePushedNameAndHandle() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         h.ring(displayName: "Registered Name", handle: "registered@conduit.invalid")
 
         let reported = try #require(h.provider.reportedIncoming.first)
@@ -155,7 +155,7 @@ struct IncomingPushTests {
     }
 
     @Test func ringFallsBackToTheUnknownCallerNameAndDefaultHandle() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         h.ring()
 
         let reported = try #require(h.provider.reportedIncoming.first)
@@ -164,7 +164,7 @@ struct IncomingPushTests {
     }
 
     @Test func matchingIdentityIsNotCorrected() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         h.ring(displayName: h.target.displayName, handle: h.target.handle)
 
         #expect(h.provider.updatedCalls.isEmpty)
@@ -172,7 +172,7 @@ struct IncomingPushTests {
     }
 
     @Test func busyRingIsCorrectedBeforeItEnds() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         await h.placeCall()
         let before = h.log.entries.count
         h.ring()
@@ -180,11 +180,11 @@ struct IncomingPushTests {
         #expect(Array(h.log.entries.dropFirst(before)) == [
             "report", "report-completed", "resolve", "update", "ended(unanswered)", "finish(noAnswer)", "push-completed",
         ])
-        #expect(h.coordinator.state.isConnecting) // the live call is untouched
+        #expect(h.engine.state.isConnecting) // the live call is untouched
     }
 
     @Test func busyRingWithMatchingIdentityIsNotCorrected() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         await h.placeCall()
         h.ring(displayName: h.target.displayName, handle: h.target.handle)
 
@@ -195,11 +195,11 @@ struct IncomingPushTests {
     // MARK: - Report results
 
     @Test func reportErrorFailsTheRingWithoutAReceipt() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         h.provider.reportIncomingError = .failed("boom")
         h.ring(statusURL: statusEndpoint)
 
-        #expect(h.coordinator.state.failureReason == .unknown)
+        #expect(h.engine.state.failureReason == .unknown)
         #expect(h.delegate.resolved.isEmpty) // never accepted, so never resolved
         #expect(h.delegate.records.map(\.outcome) == [.failed])
         #expect(h.ringStatusReporter.reports.isEmpty)
@@ -207,10 +207,10 @@ struct IncomingPushTests {
     }
 
     @Test func unknownTargetSendsNoReceipt() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         h.ring(targetID: UUID(), statusURL: statusEndpoint)
 
-        #expect(h.coordinator.state.failureReason == .unknown)
+        #expect(h.engine.state.failureReason == .unknown)
         #expect(h.ringStatusReporter.reports.isEmpty)
     }
 
@@ -218,41 +218,41 @@ struct IncomingPushTests {
 
     @Test(arguments: [false, true])
     func ringAfterAFinishedCallRings(endedInFailure: Bool) async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         await h.placeCall()
-        h.coordinator.handle(.connected)
+        h.engine.handle(.connected)
         if endedInFailure {
-            h.coordinator.handle(.disconnected(reason: .authFailed))
+            h.engine.handle(.disconnected(reason: .authFailed))
         } else {
-            h.coordinator.handle(.disconnected(reason: .botLeft))
+            h.engine.handle(.disconnected(reason: .botLeft))
         }
-        #expect(h.coordinator.state.isTerminal)
-        let terminal = h.coordinator.state.label
+        #expect(h.engine.state.isTerminal)
+        let terminal = h.engine.state.label
 
         let callID = UUID()
         h.ring(callID: callID)
 
-        #expect(h.coordinator.state == .incomingRinging)
+        #expect(h.engine.state == .incomingRinging)
         #expect(Array(h.delegate.transitions.suffix(2)) == ["\(terminal)→idle", "idle→incomingRinging"])
-        #expect(h.coordinator.activeCall?.direction == .incoming)
+        #expect(h.engine.activeCall?.direction == .incoming)
         #expect(!h.provider.reportedEnded.map(\.id).contains(callID)) // not treated as busy
     }
 
     @Test(arguments: [false, true])
     func placeCallAfterAFinishedCallDials(endedInFailure: Bool) async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         await h.placeCall()
-        h.coordinator.handle(.connected)
+        h.engine.handle(.connected)
         if endedInFailure {
-            h.coordinator.handle(.disconnected(reason: .authFailed))
+            h.engine.handle(.disconnected(reason: .authFailed))
         } else {
-            h.coordinator.handle(.disconnected(reason: .botLeft))
+            h.engine.handle(.disconnected(reason: .botLeft))
         }
-        let terminal = h.coordinator.state.label
+        let terminal = h.engine.state.label
 
         await h.placeCall()
 
-        #expect(h.coordinator.state.isConnecting)
+        #expect(h.engine.state.isConnecting)
         #expect(Array(h.delegate.transitions.suffix(3)) == ["\(terminal)→idle", "idle→dialing", "dialing→connecting"])
         #expect(h.transports.made.count == 2)
     }
@@ -261,7 +261,7 @@ struct IncomingPushTests {
 
     @Test(arguments: [false, true])
     func staleDialFromAReplacedCallEndsOnlyItsOwnCall(uiResetsFirst: Bool) async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         let firstID = UUID()
         let secondID = UUID()
         h.provider.suspendStart = true
@@ -270,15 +270,15 @@ struct IncomingPushTests {
         let first = Task { await h.placeCall() }
         await waitUntil { h.provider.pendingStartCount == 1 }
         #expect(h.provider.pendingStartCount == 1)
-        await h.coordinator.endCall()
+        await h.engine.endCall()
         // RootTabView resets a user-ended call at once; otherwise placeCall does.
-        if uiResetsFirst { h.coordinator.reset() }
+        if uiResetsFirst { h.engine.reset() }
 
         h.provider.nextCallID = secondID
         let second = Task { await h.placeCall() } // replaces the ended call
         await waitUntil { h.provider.pendingStartCount == 2 }
         #expect(h.provider.pendingStartCount == 2)
-        #expect(h.coordinator.state == .dialing)
+        #expect(h.engine.state == .dialing)
 
         h.provider.releaseStart()
         await first.value
@@ -286,27 +286,27 @@ struct IncomingPushTests {
 
         #expect(h.provider.endRequests == [firstID])
         #expect(h.provider.reportedConnecting == [secondID]) // B keeps its own CallKit id
-        #expect(h.coordinator.activeCall?.direction == .outgoing)
-        #expect(h.coordinator.state.isConnecting)
+        #expect(h.engine.activeCall?.direction == .outgoing)
+        #expect(h.engine.state.isConnecting)
         #expect(h.transports.made.count == 1)
         #expect(h.transport.connectCount == 1)
         #expect(h.delegate.records.map(\.outcome) == [.canceled])
     }
 
     @Test func startFailingAfterAProviderResetDoesNotFail() async throws {
-        let h = CoordinatorHarness()
+        let h = CallEngineHarness()
         h.provider.suspendStart = true
         let place = Task { await h.placeCall() }
         await waitUntil { h.provider.pendingStartCount == 1 }
         #expect(h.provider.pendingStartCount == 1)
 
-        h.coordinator.providerWasReset()
-        #expect(h.coordinator.state == .idle)
+        h.engine.providerWasReset()
+        #expect(h.engine.state == .idle)
         h.provider.startError = TransportError.connectionFailed("callkit refused")
         h.provider.releaseStart()
         await place.value
 
-        #expect(h.coordinator.state == .idle)
+        #expect(h.engine.state == .idle)
         #expect(h.delegate.transitions.last == "dialing→idle")
         #expect(h.delegate.records.isEmpty)
         #expect(h.provider.reportedEnded.isEmpty)

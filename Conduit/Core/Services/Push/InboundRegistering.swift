@@ -4,9 +4,9 @@
 //
 //  Re-registers the device's VoIP push token for one agent on demand — so enabling
 //  "Let this agent call me" takes effect at save, not at the next app launch.
-//  `VoIPPushService` is the real implementation (it holds the PushKit registry the
-//  cached token lives in); a no-op when no token has been issued yet, since the
-//  launch-time registration pass covers that case once PushKit delivers one.
+//  `AgentCallHost` is the real implementation (it reads the engine's current VoIP
+//  token); a no-op when no token has been issued yet, since the launch-time
+//  registration pass covers that case once PushKit delivers one.
 //
 
 import Foundation

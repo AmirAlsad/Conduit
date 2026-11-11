@@ -1,5 +1,5 @@
 //
-//  CallSessionCoordinator.swift
+//  CallEngine.swift
 //  Conduit
 //
 //  The call state machine and the heart of the app: it orchestrates the CallKit
@@ -20,7 +20,7 @@ import Foundation
 
 @MainActor
 @Observable
-final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObserverDelegate {
+final class CallEngine: CallProviderDelegate, AudioInterruptionObserverDelegate {
 
     // MARK: - Observed state (the InCall screen is a pure projection of these)
 
@@ -46,15 +46,19 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
 
     @ObservationIgnored weak var delegate: CallEngineDelegate?
 
+    private let configuration: CallEngineConfiguration
     private let callProvider: CallProviding
     private let interruptionObserver: AudioInterruptionObserving
     private let ringStatusReporter: RingStatusReporting
+    private let pushRegistry: VoIPPushRegistering
     private let policy: ReconnectionPolicy
     private let now: () -> Date
     private let sleep: (Duration) async throws -> Void
-    private let isPushToTalkEnabled: () -> Bool
+    private var isPushRegistrationStarted = false
+
     /// The caller name a ring shows until (unless) its target is resolved.
-    private let unknownCallerName: String
+    private var unknownCallerName: String { configuration.unknownCallerName }
+    private func isPushToTalkEnabled() -> Bool { configuration.isPushToTalkEnabled() }
 
     // MARK: - Live-call bookkeeping
 
@@ -79,27 +83,64 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
     /// continuation can tell it has been superseded (reset, or a newer call).
     private var dialToken = UUID()
 
+    /// The real engine: CallKit, the system audio-interruption observer, PushKit,
+    /// and HTTP ring-status receipts. Device-only (CallKit doesn't run in the simulator).
+    convenience init(configuration: CallEngineConfiguration = .init()) {
+        self.init(
+            configuration: configuration,
+            callProvider: SystemCallProvider(),
+            interruptionObserver: SystemAudioInterruptionObserver(),
+            ringStatusReporter: RingStatusReporter(),
+            pushRegistry: SystemVoIPPushRegistry(),
+            now: { .now },
+            sleep: { try await Task.sleep(for: $0) }
+        )
+    }
+
+    /// Every service injected — for tests and the simulator's fakes.
     init(
+        configuration: CallEngineConfiguration = .init(),
         callProvider: CallProviding,
         interruptionObserver: AudioInterruptionObserving,
         ringStatusReporter: RingStatusReporting,
+        pushRegistry: VoIPPushRegistering,
         policy: ReconnectionPolicy = .default,
         now: @escaping () -> Date,
-        sleep: @escaping (Duration) async throws -> Void,
-        isPushToTalkEnabled: @escaping () -> Bool,
-        unknownCallerName: String = "Unknown"
+        sleep: @escaping (Duration) async throws -> Void
     ) {
+        self.configuration = configuration
         self.callProvider = callProvider
         self.interruptionObserver = interruptionObserver
         self.ringStatusReporter = ringStatusReporter
+        self.pushRegistry = pushRegistry
         self.policy = policy
         self.now = now
         self.sleep = sleep
-        self.isPushToTalkEnabled = isPushToTalkEnabled
-        self.unknownCallerName = unknownCallerName
         callProvider.delegate = self
         interruptionObserver.delegate = self
     }
+
+    // MARK: - VoIP push registration
+
+    /// Start receiving VoIP pushes and request the token. Call once, early in
+    /// launch — before the first push can arrive; later calls do nothing.
+    func startPushRegistration() {
+        guard !isPushRegistrationStarted else { return }
+        isPushRegistrationStarted = true
+        pushRegistry.start(
+            onTokenUpdate: { [weak self] token in
+                guard let self else { return }
+                delegate?.callEngine(self, didUpdateVoIPPushToken: token)
+            },
+            onIncomingPush: { [weak self] payload, completion in
+                guard let self else { return completion() }
+                handleIncomingPush(payload, completion: completion)
+            }
+        )
+    }
+
+    /// The device's current VoIP push token, once PushKit has issued one.
+    var voipPushToken: Data? { pushRegistry.pushToken }
 
     // MARK: - Placing a call
 
@@ -629,7 +670,7 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         guard state.isActive, !state.isTerminal else { return }
         // Mark this as a local user-end: the UI dismisses immediately with no
         // "Call Ended" page (presentation lives in RootTabView), while the state
-        // still goes `.ended` (logged) per the coordinator contract. Going terminal
+        // still goes `.ended` (logged) per the engine contract. Going terminal
         // BEFORE the system round-trip also avoids the mid-`.connecting` race where a
         // teardown disconnect would be misread as `.failed`. `finishEnded` nils
         // `activeCallID`, so capture it first; the round-trip then no-ops on the

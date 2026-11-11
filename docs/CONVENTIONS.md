@@ -34,7 +34,7 @@ not all referenced files exist yet.)
 | Views | `*View` | `RecentsView`, `InCallView`, `AgentDetailView` |
 | ViewModels | `*ViewModel` | `InCallViewModel`, `ContactsViewModel` |
 | Services / Managers | `*Service`, `*Manager` | `TransportService`, `CallKitManager` |
-| Coordinators | `*Coordinator` | `CallSessionCoordinator` |
+| Coordinators | `*Coordinator` | `CallEngine` |
 | Sheets | `*Sheet` | `AddEditAgentSheet` |
 
 ### Files

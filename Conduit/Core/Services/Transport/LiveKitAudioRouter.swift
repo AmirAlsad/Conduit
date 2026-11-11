@@ -22,8 +22,8 @@ enum LiveKitAudioRouter {
     static func availableDevices() -> [AudioDeviceInfo] {
         let session = AVAudioSession.sharedInstance()
         var devices = [
-            AudioDeviceInfo(id: receiverID, name: AudioRouteKind.receiver.displayName),
-            AudioDeviceInfo(id: speakerID, name: AudioRouteKind.speaker.displayName),
+            AudioDeviceInfo(id: receiverID, name: "iPhone"),
+            AudioDeviceInfo(id: speakerID, name: "Speaker"),
         ]
         if let bt = externalInput(.bluetooth, in: session) {
             devices.append(AudioDeviceInfo(id: bluetoothID, name: bt.portName))

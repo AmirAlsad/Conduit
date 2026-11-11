@@ -2,7 +2,7 @@
 //  CallProviderDelegate.swift
 //  Conduit
 //
-//  The system → app direction of the CallKit seam. The coordinator conforms to
+//  The system → app direction of the CallKit seam. The engine conforms to
 //  this; the provider calls it. `providerDidActivate` is the audio-session
 //  ownership boundary — the one place media may attach.
 //
@@ -11,10 +11,10 @@ import Foundation
 
 @MainActor
 protocol CallProviderDelegate: AnyObject {
-    /// CallKit activated the audio session. The coordinator attaches media here
+    /// CallKit activated the audio session. The engine attaches media here
     /// (and nowhere else) and sets the hands-free default route.
     func providerDidActivate(_ audioSession: AudioSessionActivating)
-    /// CallKit deactivated the audio session. The coordinator detaches media.
+    /// CallKit deactivated the audio session. The engine detaches media.
     func providerDidDeactivate(_ audioSession: AudioSessionActivating)
     /// The user answered an agent-initiated incoming call from the system UI.
     func providerPerformAnswerCall(_ id: UUID)

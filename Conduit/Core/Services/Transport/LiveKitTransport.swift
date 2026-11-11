@@ -195,7 +195,7 @@ extension LiveKitTransport: RoomDelegate {
     }
 
     nonisolated func room(_ room: Room, didCompleteReconnectWithMode mode: ReconnectMode) {
-        // The coordinator's `.reconnecting` display recovers on a fresh `.connected`.
+        // The engine's `.reconnecting` display recovers on a fresh `.connected`.
         continuation.yield(.connected)
     }
 

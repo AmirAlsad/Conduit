@@ -1,11 +1,11 @@
 //
-//  CoordinatorHarness.swift
+//  CallEngineHarness.swift
 //  ConduitTests
 //
-//  Shared fixtures for the engine-side CallSessionCoordinator tests: the CallKit,
+//  Shared fixtures for the engine-side CallEngine tests: the CallKit,
 //  interruption, and receipt fakes, a scripted call target, a delegate that
 //  records everything the engine reports, and a controllable clock. The
-//  coordinator knows no agents, so nothing here needs SwiftData or the Keychain.
+//  engine knows no agents, so nothing here needs SwiftData or the Keychain.
 //
 
 import Foundation
@@ -21,7 +21,7 @@ final class MutableClock {
     func advance(_ seconds: TimeInterval) { current = current.addingTimeInterval(seconds) }
 }
 
-/// Hands each call its own FakeTransport, so the coordinator's transport-identity
+/// Hands each call its own FakeTransport, so the engine's transport-identity
 /// guards are exercised. `current` is the live call's transport — or, before the
 /// next call, the one it will get — so a test can configure it ahead of time.
 @MainActor
@@ -104,6 +104,7 @@ final class RecordingCallEngineDelegate: CallEngineDelegate {
         case finish(CallRecord)
         case resolve(IncomingCall)
         case bearer(UUID)
+        case pushToken(Data)
     }
 
     private(set) var events: [Event] = []
@@ -131,39 +132,45 @@ final class RecordingCallEngineDelegate: CallEngineDelegate {
         events.compactMap { if case .bearer(let id) = $0 { return id } else { return nil } }
     }
 
-    func callEngine(_ engine: CallSessionCoordinator, targetForIncomingCall call: IncomingCall) -> CallTarget? {
+    func callEngine(_ engine: CallEngine, targetForIncomingCall call: IncomingCall) -> CallTarget? {
         events.append(.resolve(call))
         log?.append("resolve")
         return targets[call.targetID]
     }
 
-    func callEngine(_ engine: CallSessionCoordinator, didChangeStateFrom old: CallState, to new: CallState) {
+    func callEngine(_ engine: CallEngine, didChangeStateFrom old: CallState, to new: CallState) {
         events.append(.transition(from: old, to: new))
         log?.append("T(\(old.label)→\(new.label))")
     }
 
-    func callEngine(_ engine: CallSessionCoordinator, didFinish record: CallRecord) {
+    func callEngine(_ engine: CallEngine, didFinish record: CallRecord) {
         events.append(.finish(record))
         log?.append("finish(\(record.outcome.rawValue))")
     }
 
-    func callEngine(_ engine: CallSessionCoordinator, ringStatusBearerForTarget id: UUID) -> String? {
+    func callEngine(_ engine: CallEngine, ringStatusBearerForTarget id: UUID) -> String? {
         events.append(.bearer(id))
         log?.append("bearer")
         return bearers[id]
     }
+
+    func callEngine(_ engine: CallEngine, didUpdateVoIPPushToken token: Data) {
+        events.append(.pushToken(token))
+        log?.append("push-token")
+    }
 }
 
 @MainActor
-final class CoordinatorHarness {
+final class CallEngineHarness {
     let provider = FakeCallProvider()
     let interruption = FakeAudioInterruptionObserver()
     let ringStatusReporter = FakeRingStatusReporter()
+    let pushRegistry = FakeVoIPPushRegistry()
     let transports = FakeTransportPool()
     let target: FakeTarget
     let delegate = RecordingCallEngineDelegate()
     let log = EventLog()
-    let coordinator: CallSessionCoordinator
+    let engine: CallEngine
     let callID = UUID()
     /// How many times PushKit's completion has run, across every ring.
     private(set) var pushCompletions = 0
@@ -182,28 +189,28 @@ final class CoordinatorHarness {
         provider.onEvent = { log.append($0) }
         ringStatusReporter.onEvent = { log.append($0) }
 
-        coordinator = CallSessionCoordinator(
+        engine = CallEngine(
+            configuration: CallEngineConfiguration(unknownCallerName: "Agent", isPushToTalkEnabled: { pushToTalk }),
             callProvider: provider,
             interruptionObserver: interruption,
             ringStatusReporter: ringStatusReporter,
+            pushRegistry: pushRegistry,
             policy: policy,
             now: now,
-            sleep: { _ in },
-            isPushToTalkEnabled: { pushToTalk },
-            unknownCallerName: "Agent"
+            sleep: { _ in }
         )
-        coordinator.delegate = delegate
+        engine.delegate = delegate
     }
 
     /// The live call's transport (or the next call's, before it is placed).
     var transport: FakeTransport { transports.current }
 
     func placeCall() async {
-        await coordinator.placeCall(target.callTarget)
+        await engine.placeCall(target.callTarget)
     }
 
     /// Deliver a VoIP push for this harness's target (or `targetID`, e.g. an
-    /// unknown one) through the coordinator's PushKit entry.
+    /// unknown one) through the engine's PushKit entry.
     func ring(
         targetID: UUID? = nil,
         callID: UUID = UUID(),
@@ -227,7 +234,7 @@ final class CoordinatorHarness {
 
     /// Deliver a raw push dictionary, recording PushKit's completion in the log.
     func deliverPush(_ push: [AnyHashable: Any]) {
-        coordinator.handleIncomingPush(push) { [self] in
+        engine.handleIncomingPush(push) { [self] in
             pushCompletions += 1
             log.append("push-completed")
         }

@@ -53,14 +53,14 @@ struct ContactsView: View {
             // A link that arrived while a sheet or a call was up is consumed
             // once the way is clear.
             .onChange(of: sheetRequest == nil) { _, _ in consumePendingLink() }
-            .onChange(of: environment.callSession.state.isActive) { _, _ in consumePendingLink() }
+            .onChange(of: environment.callEngine.state.isActive) { _, _ in consumePendingLink() }
     }
 
     /// Present the pending conduit:// link's sheet — unless another sheet or an
     /// active call is in the way, in which case it stays pending.
     private func consumePendingLink() {
         guard let link = environment.pendingAgentLink else { return }
-        guard sheetRequest == nil, !environment.callSession.state.isActive else { return }
+        guard sheetRequest == nil, !environment.callEngine.state.isActive else { return }
         environment.pendingAgentLink = nil
         let existing = agents.first {
             $0.pairingEndpoint?.absoluteString == link.pairingEndpoint.absoluteString

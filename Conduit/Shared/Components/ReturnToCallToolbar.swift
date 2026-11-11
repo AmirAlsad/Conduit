@@ -16,7 +16,7 @@ struct ReturnToCallToolbarModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content.toolbar {
-            if environment.callSession.state.isActive, environment.isCallScreenMinimized {
+            if environment.callEngine.state.isActive, environment.isCallScreenMinimized {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         environment.isCallScreenMinimized = false

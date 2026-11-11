@@ -4,7 +4,7 @@
 //
 //  Real `AudioInterruptionObserving` over `AVAudioSession.interruptionNotification`.
 //  Decodes the interruption type and the `.shouldResume` option and forwards them to
-//  the coordinator. The simulator never raises real interruptions, so the observed
+//  the engine. The simulator never raises real interruptions, so the observed
 //  behavior is device-only (the begin/resume logic is unit-tested via the fake).
 //
 

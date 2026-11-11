@@ -4,7 +4,7 @@
 //
 //  The exponential-backoff policy for recovering a dropped media connection while
 //  CallKit still believes the call is up. Pure and deterministic so it unit-tests
-//  in isolation; the coordinator runs the loop and injects the actual sleep.
+//  in isolation; the engine runs the loop and injects the actual sleep.
 //
 
 import Foundation

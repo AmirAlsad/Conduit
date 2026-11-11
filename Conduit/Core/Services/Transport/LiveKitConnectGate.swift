@@ -14,7 +14,7 @@ struct LiveKitConnectGate {
     private(set) var hasRemote = false
     private(set) var reportedConnected = false
     /// Set when the app initiates the disconnect, so a teardown isn't mistaken for a
-    /// network drop (which would trigger the coordinator's reconnect loop).
+    /// network drop (which would trigger the engine's reconnect loop).
     var userRequestedDisconnect = false
 
     mutating func roomDidConnect() -> TransportEvent? {

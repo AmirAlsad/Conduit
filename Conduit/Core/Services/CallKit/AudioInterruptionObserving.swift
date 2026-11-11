@@ -4,7 +4,7 @@
 //
 //  Observes AVAudioSession interruptions (Siri, a real phone call, a navigation
 //  takeover) during a live call. CallKit owns the session; this only *reports*
-//  begin/end so the coordinator can pause the mic and resume cleanly — it never
+//  begin/end so the engine can pause the mic and resume cleanly — it never
 //  touches the session itself. The real implementation wraps the interruption
 //  notification; the fake drives the callbacks in tests.
 //

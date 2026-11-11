@@ -3,7 +3,7 @@
 //  Conduit
 //
 //  DEBUG-only, env-driven device spike for the CallKit↔Daily audio-session seam —
-//  the riskiest boundary in the app. It drives the REAL CallSessionCoordinator
+//  the riskiest boundary in the app. It drives the REAL CallEngine
 //  wired with the REAL SystemCallProvider (CallKit) + PipecatDailyTransport +
 //  SystemAudioSession, placing an actual CallKit call to the engine, to answer
 //  empirically: does Daily's self-managed audio compose with CallKit owning
@@ -47,7 +47,7 @@ enum DebugCallKitSpike {
         }
         let repository = SwiftDataAgentRepository(context: container.mainContext)
 
-        // Exercise the real in-app pairing path: the coordinator POSTs this endpoint
+        // Exercise the real in-app pairing path: the host's target POSTs this endpoint
         // (via PairingClient) for a fresh room+token per call, rather than the spike
         // pre-fetching them. This is what the user-facing add-agent flow does.
         let pairingEndpoint = baseURL.appendingPathComponent("connect")
@@ -71,19 +71,11 @@ enum DebugCallKitSpike {
             missedCallNotifier: MissedCallNotifier(),
             transportFactory: { _ in PipecatDailyTransport() }
         )
-        let coordinator = CallSessionCoordinator(
-            callProvider: SystemCallProvider(),
-            interruptionObserver: SystemAudioInterruptionObserver(),
-            ringStatusReporter: RingStatusReporter(),
-            now: { .now },
-            sleep: { try await Task.sleep(for: $0) },
-            isPushToTalkEnabled: { false },
-            unknownCallerName: "Agent"
-        )
-        coordinator.delegate = host
+        let engine = CallEngine(configuration: CallEngineConfiguration(unknownCallerName: "Agent"))
+        engine.delegate = host
 
         record("placeCall")
-        await coordinator.placeCall(host.target(for: agent))
+        await engine.placeCall(host.target(for: agent))
 
         // Observe the call for ~45s: CallKit UI + didActivate + Daily connect +
         // the agent's greet. Records state and bot-speaking transitions.
@@ -91,24 +83,24 @@ enum DebugCallKitSpike {
         var lastSpeaking = false
         var lastActivated = false
         for _ in 0..<90 {
-            let state = String(describing: coordinator.state)
+            let state = String(describing: engine.state)
             if state != lastState { record("state=\(state)"); lastState = state }
-            if coordinator.isAudioActivated != lastActivated {
-                record("audioActivated=\(coordinator.isAudioActivated)")
-                lastActivated = coordinator.isAudioActivated
+            if engine.isAudioActivated != lastActivated {
+                record("audioActivated=\(engine.isAudioActivated)")
+                lastActivated = engine.isAudioActivated
             }
-            if coordinator.isBotSpeaking != lastSpeaking {
-                record("botSpeaking=\(coordinator.isBotSpeaking)")
-                lastSpeaking = coordinator.isBotSpeaking
+            if engine.isBotSpeaking != lastSpeaking {
+                record("botSpeaking=\(engine.isBotSpeaking)")
+                lastSpeaking = engine.isBotSpeaking
             }
             try? await Task.sleep(for: .milliseconds(500))
         }
 
         record("endCall")
-        await coordinator.endCall()
+        await engine.endCall()
         try? await Task.sleep(for: .seconds(2))
-        record("state=\(String(describing: coordinator.state))")
-        // The coordinator holds its delegate weakly.
+        record("state=\(String(describing: engine.state))")
+        // The engine holds its delegate weakly.
         withExtendedLifetime(host) {}
         record("SPIKE FINISHED")
     }

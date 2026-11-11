@@ -2,7 +2,7 @@
 //  InCallView.swift
 //  Conduit
 //
-//  The full-screen call surface — a pure projection of `CallSessionCoordinator`.
+//  The full-screen call surface — a pure projection of `CallEngine`.
 //  Presented via `.fullScreenCover` from RootTabView, so it owns no NavigationStack.
 //  Every control just forwards intent to the coordinator; all call logic lives there.
 //
@@ -17,7 +17,7 @@ struct InCallView: View {
     @State private var isHolding = false
     @State private var activeRouteKind: AudioRouteKind = .other
 
-    private var coordinator: CallSessionCoordinator { environment.callSession }
+    private var coordinator: CallEngine { environment.callEngine }
 
     // MARK: - Adaptive call surface
     // The call screen follows the system appearance: white-on-dark in dark mode,

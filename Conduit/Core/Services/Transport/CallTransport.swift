@@ -4,11 +4,11 @@
 //
 //  The seam over the Pipecat iOS client. Concrete adapters (DailyTransport,
 //  later LiveKitTransport) live in this folder and conform here; nothing outside
-//  references an SDK type. The call coordinator drives a `CallTransport` and
+//  references an SDK type. The call engine drives a `CallTransport` and
 //  consumes its `events`.
 //
 //  AUDIO-SESSION INVARIANT: a transport must NOT seize the microphone or activate
-//  the audio session on its own. Media attaches only when the coordinator calls
+//  the audio session on its own. Media attaches only when the engine calls
 //  `attachAudioSession()`, which it does only after CallKit's `providerDidActivate`.
 //  CallKit owns the session; the transport attaches to it.
 //

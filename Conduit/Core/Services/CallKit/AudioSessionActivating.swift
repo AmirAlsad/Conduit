@@ -3,7 +3,7 @@
 //  Conduit
 //
 //  Abstraction over the `AVAudioSession` CallKit activates for a call, exposing
-//  only the operations the coordinator performs during the activation handshake.
+//  only the operations the engine performs during the activation handshake.
 //  The real implementation wraps `AVAudioSession`; the fake lets the
 //  route-decision logic be unit-tested without a live session.
 //
@@ -16,7 +16,7 @@ import Foundation
 @MainActor
 protocol AudioSessionActivating: AnyObject {
     /// Whether an external output (Bluetooth / CarPlay / car) is the current
-    /// route, so the coordinator avoids forcing speaker over a connected car.
+    /// route, so the engine avoids forcing speaker over a connected car.
     var hasExternalAudioRoute: Bool { get }
 
     /// Force output to the built-in speaker — the hands-free default when no

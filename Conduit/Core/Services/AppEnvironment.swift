@@ -21,17 +21,16 @@ final class AppEnvironment {
     let modelContainer: ModelContainer
     let keychain: KeychainStoring
     let contactSync: ContactSyncing
-    let callProvider: CallProviding
     let agentRepository: AgentRepository
     let announcer: SpokenStateAnnouncing
-    let interruptionObserver: AudioInterruptionObserving
     let transportFactory: (TransportKind) -> CallTransport
-    let callSession: CallSessionCoordinator
-    /// The engine's delegate: call targets, history, spoken cues, Siri donation.
+    let callEngine: CallEngine
+    /// The engine's delegate: call targets, history, spoken cues, Siri donation,
+    /// VoIP token registration.
     let callHost: AgentCallHost
-    /// Set by the AppDelegate once PushKit is up (`VoIPPushService` is the real
+    /// Set by the AppDelegate once PushKit is up (`AgentCallHost` is the real
     /// implementation), so saving an inbound-enabled agent registers immediately
-    /// instead of waiting for the next launch. Weak: the delegate owns the service.
+    /// instead of waiting for the next launch.
     weak var inboundRegistrar: InboundRegistering?
     /// A parsed conduit:// add-agent link awaiting consumption. Set by onOpenURL
     /// at the app root; consumed by ContactsView when it can present the sheet
@@ -45,27 +44,24 @@ final class AppEnvironment {
     var pendingSiriCall: PendingSiriCall?
     /// Whether the user minimized the in-call surface (the call stays fully alive;
     /// only the projection is dismissed). RootTabView gates the in-call cover on
-    /// this and clears it to re-present on return. Never touches the coordinator.
+    /// this and clears it to re-present on return. Never touches the engine.
     var isCallScreenMinimized: Bool = false
 
     init(
         modelContainer: ModelContainer,
         keychain: KeychainStoring,
         contactSync: ContactSyncing,
-        callProvider: CallProviding,
         agentRepository: AgentRepository,
         announcer: SpokenStateAnnouncing,
-        interruptionObserver: AudioInterruptionObserving,
         transportFactory: @escaping (TransportKind) -> CallTransport,
-        isPushToTalkEnabled: @escaping () -> Bool = { false }
+        isPushToTalkEnabled: @escaping @MainActor () -> Bool = { false },
+        makeCallEngine: (CallEngineConfiguration) -> CallEngine
     ) {
         self.modelContainer = modelContainer
         self.keychain = keychain
         self.contactSync = contactSync
-        self.callProvider = callProvider
         self.agentRepository = agentRepository
         self.announcer = announcer
-        self.interruptionObserver = interruptionObserver
         self.transportFactory = transportFactory
         self.callHost = AgentCallHost(
             repository: agentRepository,
@@ -74,26 +70,22 @@ final class AppEnvironment {
             missedCallNotifier: MissedCallNotifier(),
             transportFactory: transportFactory
         )
-        self.callSession = CallSessionCoordinator(
-            callProvider: callProvider,
-            interruptionObserver: interruptionObserver,
-            ringStatusReporter: RingStatusReporter(),
-            now: { .now },
-            sleep: { try await Task.sleep(for: $0) },
-            isPushToTalkEnabled: isPushToTalkEnabled,
-            unknownCallerName: "Agent"
-        )
-        callSession.delegate = callHost
+        self.callEngine = makeCallEngine(CallEngineConfiguration(
+            unknownCallerName: "Agent",
+            isPushToTalkEnabled: isPushToTalkEnabled
+        ))
+        callEngine.delegate = callHost
+        callHost.engine = callEngine
     }
 
     func placeCall(_ agent: Agent) async {
-        await callSession.placeCall(callHost.target(for: agent))
+        await callEngine.placeCall(callHost.target(for: agent))
     }
 
     /// The agent behind the live call, for its name, avatar, and color. nil when
     /// the call's target is unknown (the UI falls back to a generic caller).
     var activeCallAgent: Agent? {
-        guard let id = callSession.activeCall?.targetID else { return nil }
+        guard let id = callEngine.activeCall?.targetID else { return nil }
         if let cached = activeCallAgentCache, cached.id == id { return cached.agent }
         let agent = callHost.agent(id: id)
         activeCallAgentCache = (id, agent)
@@ -131,13 +123,23 @@ final class AppEnvironment {
             )
         }
 
-        let callProvider: CallProviding
+        let makeCallEngine: (CallEngineConfiguration) -> CallEngine
         let transportFactory: (TransportKind) -> CallTransport
         #if targetEnvironment(simulator)
-        callProvider = FakeCallProvider()
+        makeCallEngine = { configuration in
+            CallEngine(
+                configuration: configuration,
+                callProvider: FakeCallProvider(),
+                interruptionObserver: SystemAudioInterruptionObserver(),
+                ringStatusReporter: RingStatusReporter(),
+                pushRegistry: SystemVoIPPushRegistry(),
+                now: { .now },
+                sleep: { try await Task.sleep(for: $0) }
+            )
+        }
         transportFactory = { _ in FakeTransport() }
         #else
-        callProvider = SystemCallProvider()
+        makeCallEngine = { CallEngine(configuration: $0) }
         transportFactory = { kind in
             switch kind {
             case .daily: PipecatDailyTransport()
@@ -151,18 +153,17 @@ final class AppEnvironment {
             modelContainer: container,
             keychain: KeychainService(),
             contactSync: ContactSyncService(),
-            callProvider: callProvider,
             agentRepository: SwiftDataAgentRepository(context: container.mainContext),
             announcer: SpeechSpokenStateAnnouncer(),
-            interruptionObserver: SystemAudioInterruptionObserver(),
             transportFactory: transportFactory,
-            isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) }
+            isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) },
+            makeCallEngine: makeCallEngine
         )
     }
 
     /// The process-wide live environment. The SwiftUI `App` and the UIKit
     /// `AppDelegate` (PushKit) reach the same instance, so an inbound VoIP push
-    /// routes into the same coordinator the UI observes.
+    /// routes into the same engine the UI observes.
     static let shared = live()
 
     /// All-fakes environment over an in-memory SwiftData store.
@@ -180,12 +181,21 @@ final class AppEnvironment {
             modelContainer: container,
             keychain: InMemoryKeychain(),
             contactSync: FakeContactSync(),
-            callProvider: FakeCallProvider(),
             agentRepository: SwiftDataAgentRepository(context: container.mainContext),
             announcer: FakeSpokenStateAnnouncer(),
-            interruptionObserver: FakeAudioInterruptionObserver(),
             transportFactory: { _ in FakeTransport() },
-            isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) }
+            isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) },
+            makeCallEngine: { configuration in
+                CallEngine(
+                    configuration: configuration,
+                    callProvider: FakeCallProvider(),
+                    interruptionObserver: FakeAudioInterruptionObserver(),
+                    ringStatusReporter: RingStatusReporter(),
+                    pushRegistry: FakeVoIPPushRegistry(),
+                    now: { .now },
+                    sleep: { try await Task.sleep(for: $0) }
+                )
+            }
         )
     }
 }

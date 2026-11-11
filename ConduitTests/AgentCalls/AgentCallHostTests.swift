@@ -2,7 +2,7 @@
 //  AgentCallHostTests.swift
 //  ConduitTests
 //
-//  Conduit's side of the call engine, driven by the real coordinator against
+//  Conduit's side of the call engine, driven by the real engine against
 //  fakes: the call-log rows it writes from each record, the spoken cues it derives
 //  from transitions, Siri donation, missed-call notifications, the receipt bearer,
 //  and the agent targets it hands the engine (direct, pairing, inline push).
@@ -24,9 +24,9 @@ struct AgentCallHostTests {
         let clock = MutableClock()
         let h = try AgentCallHostHarness(now: clock.now)
         await h.placeCall()
-        h.coordinator.handle(.connected)
+        h.engine.handle(.connected)
         clock.advance(60)
-        await h.coordinator.endCall()
+        await h.engine.endCall()
 
         let entries = try h.loggedEntries()
         #expect(entries.count == 1)
@@ -44,7 +44,7 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness(token: nil)
         await h.placeCall()
 
-        #expect(h.coordinator.state.failureReason == .badToken)
+        #expect(h.engine.state.failureReason == .badToken)
         #expect(h.transport.connectCount == 0)
         let entries = try h.loggedEntries()
         #expect(entries.count == 1)
@@ -65,7 +65,7 @@ struct AgentCallHostTests {
     @Test func endBeforeConnectWritesCanceledRow() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
-        await h.coordinator.endCall()
+        await h.engine.endCall()
 
         #expect(try h.loggedEntries().map(\.outcome) == [.canceled])
     }
@@ -73,8 +73,8 @@ struct AgentCallHostTests {
     @Test func systemEndWritesOneCompletedRow() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
-        h.coordinator.handle(.connected)
-        h.coordinator.providerPerformEndCall(h.callID)
+        h.engine.handle(.connected)
+        h.engine.providerPerformEndCall(h.callID)
 
         #expect(try h.loggedEntries().map(\.outcome) == [.completed])
     }
@@ -82,9 +82,9 @@ struct AgentCallHostTests {
     @Test func answeredCallWritesIncomingRow() async throws {
         let h = try AgentCallHostHarness()
         h.ring()
-        await h.coordinator.answer()
-        h.coordinator.handle(.connected)
-        await h.coordinator.endCall()
+        await h.engine.answer()
+        h.engine.handle(.connected)
+        await h.engine.endCall()
 
         let entry = try #require(try h.loggedEntries().first)
         #expect(entry.direction == .incoming)
@@ -97,7 +97,7 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness()
         let callID = UUID()
         h.ring(callID: callID)
-        h.coordinator.providerPerformEndCall(callID)
+        h.engine.providerPerformEndCall(callID)
 
         let entry = try #require(try h.loggedEntries().first)
         #expect(entry.direction == .incoming)
@@ -109,11 +109,11 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness()
         h.ring(agentID: UUID())
 
-        #expect(h.coordinator.state.failureReason == .unknown)
+        #expect(h.engine.state.failureReason == .unknown)
         #expect(try h.loggedEntries().isEmpty) // no agent to attribute the row to
         #expect(h.missedNotifier.missedAgentNames.isEmpty)
 
-        h.host.callEngine(h.coordinator, didFinish: CallRecord(
+        h.host.callEngine(h.engine, didFinish: CallRecord(
             targetID: UUID(), direction: .incoming, startedAt: .now, duration: 0,
             outcome: .noAnswer, missedReason: .busy
         ))
@@ -143,7 +143,7 @@ struct AgentCallHostTests {
         h.provider.reportIncomingError = IncomingCallReportError.filteredByFocus
         h.ring()
 
-        #expect(h.coordinator.state == .idle)
+        #expect(h.engine.state == .idle)
         let entries = try h.loggedEntries()
         #expect(entries.count == 1)
         #expect(entries.first?.direction == .incoming)
@@ -154,10 +154,10 @@ struct AgentCallHostTests {
     @Test func remoteEndBeforeConnectWritesNoAnswerWithoutNotification() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
-        h.coordinator.handle(.disconnected(reason: .botLeft))
+        h.engine.handle(.disconnected(reason: .botLeft))
 
         // Preserved as-is: the state says completed while the row says no answer.
-        #expect(h.coordinator.state.endedOutcome == .completed)
+        #expect(h.engine.state.endedOutcome == .completed)
         #expect(try h.loggedEntries().map(\.outcome) == [.noAnswer])
         #expect(h.missedNotifier.missedAgentNames.isEmpty) // not a missed ring
     }
@@ -165,7 +165,7 @@ struct AgentCallHostTests {
     @Test func rowRecordsTheAgentsTransportKind() async throws {
         let h = try AgentCallHostHarness(transportKind: .livekit)
         await h.placeCall()
-        await h.coordinator.endCall()
+        await h.engine.endCall()
 
         #expect(try h.loggedEntries().first?.transportKind == .livekit)
     }
@@ -178,7 +178,7 @@ struct AgentCallHostTests {
         #expect(h.announcer.startedRepeating == [.connecting])
         #expect(h.announcer.repeatingPhrase == .connecting)
 
-        h.coordinator.handle(.connected)
+        h.engine.handle(.connected)
         #expect(h.announcer.announced == [.connected])
         #expect(h.announcer.repeatingPhrase == nil)
         #expect(h.announcer.stopRepeatingCount == 1)
@@ -187,17 +187,17 @@ struct AgentCallHostTests {
     @Test func dropAndRecoveryCuesDisconnectedOnceThenConnected() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
-        h.coordinator.handle(.connected)
+        h.engine.handle(.connected)
 
-        h.coordinator.handle(.disconnected(reason: .networkDropped))
+        h.engine.handle(.disconnected(reason: .networkDropped))
         #expect(h.announcer.announced.contains(.disconnected))
         #expect(h.announcer.startedRepeating.contains(.retrying))
-        await h.coordinator.awaitPendingReconnect()
+        await h.engine.awaitPendingReconnect()
 
-        h.coordinator.handle(.disconnected(reason: .networkDropped)) // attempt 2: no new cue
-        await h.coordinator.awaitPendingReconnect()
+        h.engine.handle(.disconnected(reason: .networkDropped)) // attempt 2: no new cue
+        await h.engine.awaitPendingReconnect()
 
-        h.coordinator.handle(.connected)
+        h.engine.handle(.connected)
         #expect(h.announcer.repeatingPhrase == nil)
         #expect(h.announcer.announced == [.connected, .disconnected, .connected])
         #expect(h.announcer.startedRepeating == [.connecting, .retrying])
@@ -206,13 +206,13 @@ struct AgentCallHostTests {
     @Test func selfHealThenDropAnnouncesDisconnectedTwice() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
-        h.coordinator.handle(.connected)
+        h.engine.handle(.connected)
 
-        h.coordinator.handle(.reconnecting) // the transport self-heals (display only)
+        h.engine.handle(.reconnecting) // the transport self-heals (display only)
         #expect(h.announcer.announced.contains(.disconnected))
         #expect(h.announcer.startedRepeating.contains(.retrying))
 
-        h.coordinator.handle(.disconnected(reason: .networkDropped)) // then drops for real
+        h.engine.handle(.disconnected(reason: .networkDropped)) // then drops for real
         #expect(h.announcer.announced == [.connected, .disconnected, .disconnected])
         #expect(h.announcer.startedRepeating == [.connecting, .retrying, .retrying])
     }
@@ -220,8 +220,8 @@ struct AgentCallHostTests {
     @Test func duplicateConnectedAnnouncesOnce() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
-        h.coordinator.handle(.connected)
-        h.coordinator.handle(.connected)
+        h.engine.handle(.connected)
+        h.engine.handle(.connected)
 
         #expect(h.announcer.announced.filter { $0 == .connected }.count == 1)
     }
@@ -231,7 +231,7 @@ struct AgentCallHostTests {
         await h.placeCall()
         #expect(h.announcer.repeatingPhrase == .connecting)
 
-        await h.coordinator.endCall()
+        await h.engine.endCall()
         #expect(h.announcer.repeatingPhrase == nil)
         #expect(h.announcer.stopRepeatingCount == 1)
     }
@@ -240,10 +240,10 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness()
         await h.placeCall()
 
-        h.coordinator.providerWasReset()
+        h.engine.providerWasReset()
 
         // Preserved as-is: a provider reset neither stops the cue nor writes history.
-        #expect(h.coordinator.state == .idle)
+        #expect(h.engine.state == .idle)
         #expect(h.announcer.repeatingPhrase == .connecting)
         #expect(h.announcer.stopRepeatingCount == 0)
         #expect(try h.loggedEntries().isEmpty)
@@ -263,13 +263,13 @@ struct AgentCallHostTests {
 
         h.provider.releaseStart()
         await waitUntil { h.transport.connectCount == 1 }
-        #expect(h.coordinator.state.isConnecting)
+        #expect(h.engine.state.isConnecting)
         #expect(h.interactionDonor.donatedAgentIDs == [h.agent.id]) // on dialing → connecting
 
         h.transport.releaseConnect()
         await place.value
-        h.coordinator.handle(.connected)
-        await h.coordinator.endCall()
+        h.engine.handle(.connected)
+        await h.engine.endCall()
         #expect(h.interactionDonor.donatedAgentIDs == [h.agent.id])
     }
 
@@ -277,14 +277,14 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness(token: nil)
         await h.placeCall()
 
-        #expect(h.coordinator.state.failureReason == .badToken)
+        #expect(h.engine.state.failureReason == .badToken)
         #expect(h.interactionDonor.donatedAgentIDs == [h.agent.id])
     }
 
     @Test func answerStartsConnectingCueWithoutDonation() async throws {
         let h = try AgentCallHostHarness()
         h.ring()
-        await h.coordinator.answer()
+        await h.engine.answer()
 
         #expect(h.announcer.startedRepeating == [.connecting])
         #expect(h.interactionDonor.donatedAgentIDs.isEmpty)
@@ -294,11 +294,11 @@ struct AgentCallHostTests {
 
     @Test func bearerIsTheAgentsAPIKey() async throws {
         let h = try AgentCallHostHarness()
-        #expect(h.host.callEngine(h.coordinator, ringStatusBearerForTarget: h.agent.id) == nil) // none stored
+        #expect(h.host.callEngine(h.engine, ringStatusBearerForTarget: h.agent.id) == nil) // none stored
 
         try h.keychain.setToken("agent-api-key", for: KeychainTokenRef(account: h.agent.keychainTokenRef))
-        #expect(h.host.callEngine(h.coordinator, ringStatusBearerForTarget: h.agent.id) == "agent-api-key")
-        #expect(h.host.callEngine(h.coordinator, ringStatusBearerForTarget: UUID()) == nil)
+        #expect(h.host.callEngine(h.engine, ringStatusBearerForTarget: h.agent.id) == "agent-api-key")
+        #expect(h.host.callEngine(h.engine, ringStatusBearerForTarget: UUID()) == nil)
     }
 
     @Test func answerReportsAnsweredReceiptWithBearer() async throws {
@@ -306,7 +306,7 @@ struct AgentCallHostTests {
         try h.keychain.setToken("agent-api-key", for: KeychainTokenRef(account: h.agent.keychainTokenRef))
         let callID = UUID()
         h.ring(callID: callID, statusURL: statusEndpoint)
-        await h.coordinator.answer()
+        await h.engine.answer()
 
         #expect(h.ringStatusReporter.reports == [
             .init(status: .answered, callID: callID, endpoint: statusEndpoint, apiKey: "agent-api-key")
@@ -320,9 +320,9 @@ struct AgentCallHostTests {
         let callID = UUID()
         h.ring(callID: callID)
 
-        #expect(h.coordinator.state == .incomingRinging)
-        #expect(h.coordinator.activeCall?.targetID == h.agent.id)
-        #expect(h.coordinator.activeCall?.displayName == h.agent.name)
+        #expect(h.engine.state == .incomingRinging)
+        #expect(h.engine.activeCall?.targetID == h.agent.id)
+        #expect(h.engine.activeCall?.displayName == h.agent.name)
         #expect(h.provider.reportedIncoming.map(\.id) == [callID])
         #expect(h.provider.updatedCalls.first?.handle == h.agent.callHandle)
     }
@@ -348,25 +348,25 @@ struct AgentCallHostTests {
 
         #expect(h.provider.reportedIncoming.first?.handle == h.agent.callHandle)
         #expect(h.provider.updatedCalls.isEmpty)
-        #expect(h.coordinator.state == .incomingRinging)
+        #expect(h.engine.state == .incomingRinging)
     }
 
     @Test func answerConnectsViaAgentDirectConfig() async throws {
         let h = try AgentCallHostHarness()
         h.ring()
-        await h.coordinator.answer()
+        await h.engine.answer()
 
         #expect(h.transport.connectCount == 1)
         #expect(h.transport.lastConnection?.token == "valid-token")
         #expect(h.transport.lastConnection?.url == h.agent.connectionURL)
-        #expect(h.coordinator.state.isConnecting)
+        #expect(h.engine.state.isConnecting)
     }
 
     @Test func answerWithInlineCredentialsJoinsDirectly() async throws {
         let h = try AgentCallHostHarness(pairingEndpoint: endpoint) // inline wins over pairing
         let room = URL(string: "https://example.daily.co/inbound-room")!
         h.ring(roomURL: room, token: "push-token")
-        await h.coordinator.answer()
+        await h.engine.answer()
 
         #expect(h.transport.lastConnection?.url == room)
         #expect(h.transport.lastConnection?.token == "push-token")
@@ -376,12 +376,12 @@ struct AgentCallHostTests {
     @Test func directCredentialsRepeatOnEveryAttempt() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
-        h.coordinator.handle(.connected)
+        h.engine.handle(.connected)
         let first = try #require(h.transport.lastConnection)
         #expect(first == CallConnection(url: try #require(h.agent.connectionURL), token: "valid-token"))
 
-        h.coordinator.handle(.disconnected(reason: .networkDropped))
-        await h.coordinator.awaitPendingReconnect()
+        h.engine.handle(.disconnected(reason: .networkDropped))
+        await h.engine.awaitPendingReconnect()
 
         #expect(h.transport.connectCount == 2)
         #expect(h.transport.lastConnection == first)
@@ -392,11 +392,11 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness()
         let room = URL(string: "https://example.daily.co/inbound-room")!
         h.ring(roomURL: room, token: "push-token")
-        await h.coordinator.answer()
-        h.coordinator.handle(.connected)
+        await h.engine.answer()
+        h.engine.handle(.connected)
 
-        h.coordinator.handle(.disconnected(reason: .networkDropped))
-        await h.coordinator.awaitPendingReconnect()
+        h.engine.handle(.disconnected(reason: .networkDropped))
+        await h.engine.awaitPendingReconnect()
 
         #expect(h.transport.connectCount == 2)
         #expect(h.transport.lastConnection == CallConnection(url: room, token: "push-token"))
@@ -408,11 +408,11 @@ struct AgentCallHostTests {
     @Test func pairingRePairsOnEveryReconnectAttempt() async throws {
         let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
         await h.placeCall()
-        h.coordinator.handle(.connected)
-        h.coordinator.handle(.disconnected(reason: .networkDropped))
-        await h.coordinator.awaitPendingReconnect()
-        h.coordinator.handle(.disconnected(reason: .networkDropped))
-        await h.coordinator.awaitPendingReconnect()
+        h.engine.handle(.connected)
+        h.engine.handle(.disconnected(reason: .networkDropped))
+        await h.engine.awaitPendingReconnect()
+        h.engine.handle(.disconnected(reason: .networkDropped))
+        await h.engine.awaitPendingReconnect()
 
         let expected = FakePairingResolver.Request(endpoint: endpoint, apiKey: "valid-token", kind: .daily)
         #expect(h.pairing.requests == Array(repeating: expected, count: 3))
@@ -427,7 +427,7 @@ struct AgentCallHostTests {
         h.pairing.result = .failure(PairingError.unauthorized)
         await h.placeCall()
 
-        #expect(h.coordinator.state.failureReason == .badToken)
+        #expect(h.engine.state.failureReason == .badToken)
         #expect(h.transport.connectCount == 0)
         #expect(try h.loggedEntries().first?.failureReason == .badToken)
     }
@@ -438,7 +438,7 @@ struct AgentCallHostTests {
         h.pairing.result = .failure(error)
         await h.placeCall()
 
-        #expect(h.coordinator.state.failureReason == .transportError)
+        #expect(h.engine.state.failureReason == .transportError)
         #expect(h.transport.connectCount == 0)
     }
 
@@ -450,6 +450,92 @@ struct AgentCallHostTests {
         #expect(h.transport.lastConnection == CallConnection(
             url: URL(string: "https://example.daily.co/paired")!, token: "paired-token"
         ))
-        #expect(h.coordinator.state.isConnecting)
+        #expect(h.engine.state.isConnecting)
+    }
+
+    // MARK: - VoIP token registration
+
+    private func inboundAgent(named name: String, in h: AgentCallHostHarness, apiKey: String) throws -> Agent {
+        let agent = Agent(
+            name: name, transportKind: .daily,
+            pairingEndpoint: URL(string: "https://engine.example.com/connect/\(name)")!,
+            inboundRegistrationURL: RecordingURLProtocol.uniqueEndpoint()
+        )
+        h.repository.insert(agent)
+        try h.repository.save()
+        try h.keychain.setToken(apiKey, for: KeychainTokenRef(account: agent.keychainTokenRef))
+        return agent
+    }
+
+    private func body(_ request: RecordingURLProtocol.Captured) throws -> [String: String] {
+        try #require(try JSONSerialization.jsonObject(with: request.body) as? [String: String])
+    }
+
+    @Test func tokenUpdateRegistersWithEveryInboundAgent() async throws {
+        let h = try AgentCallHostHarness() // the harness agent has no inbound URL
+        let nova = try inboundAgent(named: "Nova", in: h, apiKey: "nova-key")
+        let atlas = try inboundAgent(named: "Atlas", in: h, apiKey: "atlas-key")
+        h.engine.startPushRegistration()
+
+        h.pushRegistry.simulateTokenUpdate(Data([0xAB, 0x01]))
+        await h.host.awaitPendingRegistration()
+
+        for (agent, key) in [(nova, "nova-key"), (atlas, "atlas-key")] {
+            let host = try #require(agent.inboundRegistrationURL?.host())
+            let requests = RecordingURLProtocol.requests(host: host)
+            #expect(requests.count == 1)
+            let request = try #require(requests.first)
+            #expect(request.method == "POST")
+            #expect(request.headers["Authorization"] == "Bearer \(key)")
+            let fields = try body(request)
+            #expect(fields["voip_token"] == "ab01")
+            #expect(fields["agent_id"] == agent.id.uuidString)
+            #expect(fields["display_name"] == agent.name)
+            #expect(fields["handle"] == agent.syntheticEmail)
+        }
+    }
+
+    @Test func registerInboundUsesTheEnginesCurrentToken() async throws {
+        let h = try AgentCallHostHarness()
+        let nova = try inboundAgent(named: "Nova", in: h, apiKey: "nova-key")
+        let host = try #require(nova.inboundRegistrationURL?.host())
+
+        await h.host.registerInbound(for: nova) // PushKit hasn't issued a token yet
+        #expect(RecordingURLProtocol.requests(host: host).isEmpty)
+
+        h.pushRegistry.pushToken = Data([0x0F, 0xA0])
+        await h.host.registerInbound(for: nova)
+
+        let requests = RecordingURLProtocol.requests(host: host)
+        #expect(requests.count == 1)
+        #expect(try requests.first.map(body)?["voip_token"] == "0fa0")
+    }
+
+    @Test func registrationBodyCarriesAllSixKeys() async throws {
+        let endpoint = RecordingURLProtocol.uniqueEndpoint()
+        let agentID = UUID()
+        await PushTokenRegistrar.register(
+            token: "ab01",
+            agentID: agentID,
+            displayName: "Nova",
+            handle: "nova@conduit.invalid",
+            endpoint: endpoint,
+            apiKey: "nova-key",
+            bundleID: "com.example.conduit",
+            session: RecordingURLProtocol.session()
+        )
+
+        let host = try #require(endpoint.host())
+        let request = try #require(RecordingURLProtocol.requests(host: host).first)
+        #expect(try body(request) == [
+            "voip_token": "ab01",
+            "platform": "ios",
+            "bundle_id": "com.example.conduit",
+            "agent_id": agentID.uuidString,
+            "display_name": "Nova",
+            "handle": "nova@conduit.invalid",
+        ])
+        #expect(request.headers["Authorization"] == "Bearer nova-key")
+        #expect(request.headers["Content-Type"] == "application/json")
     }
 }
