@@ -201,9 +201,9 @@ final class CallEngine: CallProviderDelegate, AudioInterruptionObserverDelegate 
     /// The PushKit entry point. iOS terminates the app if a VoIP push doesn't
     /// report an incoming call before the push callback returns, so this reports
     /// FIRST — synchronously, under the identity the push itself carries — and only
-    /// then touches state or the delegate. The target is resolved when CallKit
-    /// accepts the report, and the ring is corrected if the target's name or handle
-    /// differ. `completion` (PushKit's) runs after the report's completion, on
+    /// then touches state or the delegate. The target is resolved right after the
+    /// report is issued; once CallKit accepts it, the ring is corrected if the
+    /// target's name or handle differ. `completion` (PushKit's) runs after the report's completion, on
     /// every path.
     func handleIncomingPush(_ dictionary: [AnyHashable: Any], completion: @escaping () -> Void) {
         guard let payload = IncomingCallPayload(dictionary: dictionary) else {
@@ -239,11 +239,12 @@ final class CallEngine: CallProviderDelegate, AudioInterruptionObserverDelegate 
         // completes synchronously); hold it until the ring is set up.
         var ringIsSetUp = false
         var earlyResult: IncomingCallReportError??
+        var ringTarget: CallTarget?
         let finishRing: (IncomingCallReportError?) -> Void = { [self] result in
             if isBusy {
                 completeBusyRing(incoming, payload: payload, result: result)
             } else {
-                completeRing(incoming, payload: payload, result: result)
+                completeRing(incoming, target: ringTarget, result: result)
             }
             completion()
         }
@@ -258,29 +259,47 @@ final class CallEngine: CallProviderDelegate, AudioInterruptionObserverDelegate 
         if isBusy {
             Log.warning(.call, "Busy on VoIP push; reported call \(incoming.callID), ending it")
         } else {
-            beginRing(incoming, payload: payload)
+            ringTarget = beginRing(incoming, payload: payload)
         }
         ringIsSetUp = true
         if let earlyResult { finishRing(earlyResult) }
     }
 
-    private func beginRing(_ incoming: IncomingCall, payload: IncomingCallPayload) {
+    /// Set up the ring once its report is issued. The target is resolved here,
+    /// not when CallKit completes the report, because the user can answer before
+    /// that completion reaches the main actor.
+    private func beginRing(_ incoming: IncomingCall, payload: IncomingCallPayload) -> CallTarget? {
         // A finished call still on screen gives way to the ring.
         if state.isTerminal { resetState() }
+        let target = delegate?.callEngine(self, targetForIncomingCall: incoming)
+        currentTarget = target
         activeCallID = incoming.callID
         recordTargetID = incoming.targetID
-        activeCall = ActiveCall(targetID: incoming.targetID, displayName: incoming.displayName, direction: .incoming)
+        activeCall = ActiveCall(
+            targetID: incoming.targetID,
+            displayName: target?.displayName ?? incoming.displayName,
+            direction: .incoming
+        )
         callDirection = .incoming
         callStartedAt = now()
         ringStatusURL = payload.statusURL
         transition(to: .incomingRinging)
         interruptionObserver.startObserving()
+        return target
     }
 
-    private func completeRing(_ incoming: IncomingCall, payload: IncomingCallPayload, result: IncomingCallReportError?) {
-        // The ring may already be over (declined, or the provider reset).
-        guard activeCallID == incoming.callID, case .incomingRinging = state else { return }
+    /// CallKit's verdict on the report. By now the call may already be answered;
+    /// only what depends on the verdict happens here.
+    private func completeRing(_ incoming: IncomingCall, target: CallTarget?, result: IncomingCallReportError?) {
+        // The ring may already be over (declined, the provider reset) or replaced.
+        guard activeCallID == incoming.callID else { return }
 
+        if result != nil {
+            // A ring that was filtered or rejected never reached the user, so it
+            // can't have been answered — but never let a late verdict touch a call
+            // that is past ringing.
+            guard case .incomingRinging = state else { return }
+        }
         switch result {
         case .filteredByFocus:
             // The system suppressed the ring (Focus/DND) — a missed call, not a
@@ -298,22 +317,24 @@ final class CallEngine: CallProviderDelegate, AudioInterruptionObserverDelegate 
             fail(.unknown)
 
         case nil:
-            guard let target = delegate?.callEngine(self, targetForIncomingCall: incoming) else {
+            guard let target else {
                 Log.error(.call, "Incoming call for unknown target \(incoming.targetID)")
                 fail(.unknown)
                 return
             }
-            currentTarget = target
-            activeCall = ActiveCall(targetID: incoming.targetID, displayName: target.displayName, direction: .incoming)
             correctRingIfNeeded(incoming, to: target)
         }
     }
 
     private func completeBusyRing(_ incoming: IncomingCall, payload: IncomingCallPayload, result: IncomingCallReportError?) {
-        if result == nil, let target = delegate?.callEngine(self, targetForIncomingCall: incoming) {
-            correctRingIfNeeded(incoming, to: target)
+        if result == nil {
+            if let target = delegate?.callEngine(self, targetForIncomingCall: incoming) {
+                correctRingIfNeeded(incoming, to: target)
+            }
+            // Only a call CallKit created can be ended. A failed report created
+            // nothing, and its id may even be the live call's (a duplicate push).
+            callProvider.reportCallEnded(incoming.callID, reason: .unanswered)
         }
-        callProvider.reportCallEnded(incoming.callID, reason: .unanswered)
         delegate?.callEngine(self, didFinish: CallRecord(
             targetID: incoming.targetID,
             direction: .incoming,

@@ -249,10 +249,13 @@ Key behaviors:
   `reportNewIncomingCall` before returning and completes later), under the push's own
   identity: `display_name` else the configured unknown-caller name ("Agent"), `handle`
   else `CallTarget.defaultHandle(for:)`. Only then does it touch state (`incomingRinging`)
-  or the delegate. In the report's completion it asks the delegate for the target
-  (`IncomingCall` carries the push's inline room, if any), corrects the ring with
-  `updateCall` when the target's name or handle differ, and fails gracefully for an
-  unknown target; PushKit's completion runs after that on every path. A malformed push
+  or the delegate: right after the report it asks the delegate for the target
+  (`IncomingCall` carries the push's inline room, if any), so an answer that beats
+  CallKit's completion still connects. In the report's completion it corrects the ring
+  with `updateCall` when the target's name or handle differ (applied to that call id
+  even if it was already answered), and fails gracefully for an unknown target;
+  PushKit's completion runs after that on every path. A busy push is resolved and
+  corrected only once CallKit accepts it, and ended only if the report succeeded. A malformed push
   (no valid `target_id`/`agent_id`) is reported under a minted id and ended, with no
   state change. A push or `placeCall` arriving while a finished call is still terminal
   first resets to idle; one during a live or ringing call takes the busy path. On `providerPerformAnswerCall` → `answer()` reuses the shared

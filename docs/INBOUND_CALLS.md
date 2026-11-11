@@ -136,10 +136,10 @@ agent's transport — same shapes as the pairing response.
 1. **Push received** → Conduit reports an incoming call to CallKit **first**,
    synchronously inside the PushKit callback and before anything else, under the
    identity the push carries: `display_name`, else the generic name "Agent"; `handle`,
-   else a handle derived from the id. Then it rings (`incomingRinging`). Once CallKit
-   accepts the report, Conduit matches `agent_id` to a local agent and, if the agent's
-   name or handle differ from what rang, updates the ring to show them. PushKit's
-   completion is called after that, on every path. Credentials are used later.
+   else a handle derived from the id. Right after reporting it matches `agent_id` to a
+   local agent and rings (`incomingRinging`). Once CallKit accepts the report, if the
+   agent's name or handle differ from what rang, it updates the ring to show them.
+   PushKit's completion is called after that, on every path. Credentials are used later.
    A push it can't parse (no valid `agent_id`) is still reported, then ended at once.
 2. **User answers** → Conduit connects the transport (inline creds, else pairing
    resolve), transitions to `connecting` → `connected`, and the call behaves exactly

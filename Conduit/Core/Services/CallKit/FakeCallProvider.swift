@@ -44,6 +44,13 @@ final class FakeCallProvider: CallProviding {
     private(set) var pendingStartCount = 0
     private var startContinuations: [CheckedContinuation<Void, Never>] = []
 
+    /// Resume only the oldest suspended `startOutgoingCall`.
+    func releaseFirstStart() {
+        guard !startContinuations.isEmpty else { return }
+        pendingStartCount -= 1
+        startContinuations.removeFirst().resume()
+    }
+
     func releaseStart() {
         let waiting = startContinuations
         startContinuations = []

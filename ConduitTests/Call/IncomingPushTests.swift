@@ -26,7 +26,7 @@ struct IncomingPushTests {
         h.ring() // the fake completes before returning: the inconvenient order
 
         #expect(h.log.entries == [
-            "report", "report-completed", "T(idle→incomingRinging)", "resolve", "update", "push-completed",
+            "report", "report-completed", "resolve", "T(idle→incomingRinging)", "update", "push-completed",
         ])
     }
 
@@ -35,14 +35,15 @@ struct IncomingPushTests {
         h.provider.completesIncomingReportsLater = true
         h.ring()
 
-        #expect(h.log.entries == ["report", "T(idle→incomingRinging)"])
-        #expect(h.delegate.resolved.isEmpty) // not resolved until CallKit accepts
+        // Resolved as soon as the report is issued, so an early answer can connect;
+        // the correction waits for CallKit's verdict.
+        #expect(h.log.entries == ["report", "resolve", "T(idle→incomingRinging)"])
         #expect(h.pushCompletions == 0)
 
         h.provider.completeIncomingReports()
 
         #expect(h.log.entries == [
-            "report", "T(idle→incomingRinging)", "report-completed", "resolve", "update", "push-completed",
+            "report", "resolve", "T(idle→incomingRinging)", "report-completed", "update", "push-completed",
         ])
     }
 
@@ -80,19 +81,81 @@ struct IncomingPushTests {
         #expect(h.provider.reportedIncoming.count == 1) // every push reports a call
     }
 
-    @Test func answerBeforeResolutionDoesNothing() async throws {
+    @Test func answerBeforeCallKitCompletesTheReportConnects() async throws {
         let h = CallEngineHarness()
         h.provider.completesIncomingReportsLater = true
-        h.ring()
+        let callID = UUID()
+        h.ring(callID: callID)
 
-        await h.engine.answer() // CallKit hasn't accepted the report yet
+        // CXAnswerCallAction can reach the engine before the report's completion.
+        await h.engine.answer()
+        #expect(h.engine.state.isConnecting)
+        #expect(h.transport.connectCount == 1)
+        #expect(h.provider.updatedCalls.isEmpty)
+
+        h.provider.completeIncomingReports()
+
+        #expect(h.provider.updatedCalls.map(\.id) == [callID]) // corrected exactly once
+        #expect(h.engine.state.isConnecting) // the connecting call is undisturbed
+        #expect(h.transport.connectCount == 1)
+        #expect(h.delegate.records.isEmpty)
+        #expect(h.pushCompletions == 1)
+    }
+
+    @Test func answerForAnUnknownTargetDoesNothingAndTheVerdictFailsIt() async throws {
+        let h = CallEngineHarness()
+        h.provider.completesIncomingReportsLater = true
+        h.ring(targetID: UUID())
+
+        await h.engine.answer()
         #expect(h.engine.state == .incomingRinging)
         #expect(h.target.makeTransportCount == 0)
 
         h.provider.completeIncomingReports()
-        await h.engine.answer()
-        #expect(h.engine.state.isConnecting)
-        #expect(h.transport.connectCount == 1)
+        #expect(h.engine.state.failureReason == .unknown)
+        #expect(h.pushCompletions == 1)
+    }
+
+    enum StaleRing: String, CaseIterable, Sendable {
+        case declined, providerReset, replacedByAnotherRing
+    }
+
+    @Test(arguments: StaleRing.allCases)
+    func heldCompletionForAFinishedRingLeavesTheEngineAlone(stale: StaleRing) async throws {
+        let h = CallEngineHarness()
+        h.provider.completesIncomingReportsLater = true
+        let first = UUID()
+        h.ring(callID: first)
+
+        let second = UUID()
+        switch stale {
+        case .declined:
+            h.engine.providerPerformEndCall(first)
+        case .providerReset:
+            h.engine.providerWasReset()
+        case .replacedByAnotherRing:
+            h.engine.providerWasReset()
+            h.ring(callID: second)
+        }
+        let stateBefore = h.engine.state
+        let transitionsBefore = h.delegate.transitions
+        let recordsBefore = h.delegate.records
+
+        h.provider.completeIncomingReports() // the first ring's verdict arrives late
+
+        #expect(!h.provider.updatedCalls.map(\.id).contains(first))
+        #expect(!h.provider.reportedEnded.map(\.id).contains(first) || stale == .declined)
+        if stale == .replacedByAnotherRing {
+            // The second ring's own verdict still applies to it.
+            #expect(h.provider.updatedCalls.map(\.id) == [second])
+            #expect(h.engine.state == .incomingRinging)
+            #expect(h.pushCompletions == 2)
+        } else {
+            #expect(h.engine.state == stateBefore)
+            #expect(h.delegate.transitions == transitionsBefore)
+            #expect(h.delegate.records == recordsBefore)
+            #expect(h.pushCompletions == 1)
+        }
     }
 
     // MARK: - Malformed pushes
@@ -168,7 +231,7 @@ struct IncomingPushTests {
         h.ring(displayName: h.target.displayName, handle: h.target.handle)
 
         #expect(h.provider.updatedCalls.isEmpty)
-        #expect(h.log.entries == ["report", "report-completed", "T(idle→incomingRinging)", "resolve", "push-completed"])
+        #expect(h.log.entries == ["report", "report-completed", "resolve", "T(idle→incomingRinging)", "push-completed"])
     }
 
     @Test func busyRingIsCorrectedBeforeItEnds() async throws {
@@ -181,6 +244,20 @@ struct IncomingPushTests {
             "report", "report-completed", "resolve", "update", "ended(unanswered)", "finish(noAnswer)", "push-completed",
         ])
         #expect(h.engine.state.isConnecting) // the live call is untouched
+    }
+
+    @Test func busyRingWhoseReportFailsIsNotEnded() async throws {
+        let h = CallEngineHarness()
+        await h.placeCall()
+        h.provider.reportIncomingError = .failed("duplicate")
+        // A duplicate delivery of the live call's own id: ending it would end the live call.
+        h.ring(callID: h.callID, statusURL: URL(string: "https://engine.example.com/inbound/status/live")!)
+
+        #expect(h.provider.reportedEnded.isEmpty)
+        #expect(h.engine.state.isConnecting)
+        #expect(h.delegate.records.map(\.missedReason) == [.busy]) // record and receipt as before
+        #expect(h.ringStatusReporter.reports.map(\.status) == [.busy])
+        #expect(h.pushCompletions == 1)
     }
 
     @Test func busyRingWithMatchingIdentityIsNotCorrected() async throws {
@@ -200,7 +277,7 @@ struct IncomingPushTests {
         h.ring(statusURL: statusEndpoint)
 
         #expect(h.engine.state.failureReason == .unknown)
-        #expect(h.delegate.resolved.isEmpty) // never accepted, so never resolved
+        #expect(h.provider.updatedCalls.isEmpty) // never accepted, so never corrected
         #expect(h.delegate.records.map(\.outcome) == [.failed])
         #expect(h.ringStatusReporter.reports.isEmpty)
         #expect(h.pushCompletions == 1)
@@ -290,6 +367,35 @@ struct IncomingPushTests {
         #expect(h.engine.state.isConnecting)
         #expect(h.transports.made.count == 1)
         #expect(h.transport.connectCount == 1)
+        #expect(h.delegate.records.map(\.outcome) == [.canceled])
+    }
+
+    @Test func firstCallsStartFailingWhileASecondCallDialsLeavesTheSecondAlone() async throws {
+        let h = CallEngineHarness()
+        let secondID = UUID()
+        h.provider.suspendStart = true
+
+        let first = Task { await h.placeCall() }
+        await waitUntil { h.provider.pendingStartCount == 1 }
+        #expect(h.provider.pendingStartCount == 1)
+        await h.engine.endCall()
+        h.engine.reset()
+
+        h.provider.nextCallID = secondID
+        let second = Task { await h.placeCall() }
+        await waitUntil { h.provider.pendingStartCount == 2 }
+        #expect(h.provider.pendingStartCount == 2)
+
+        h.provider.startError = TransportError.connectionFailed("callkit refused")
+        h.provider.releaseFirstStart() // only the first call's start returns, and throws
+        await first.value
+        #expect(h.engine.state == .dialing) // the second call is not failed
+
+        h.provider.startError = nil
+        h.provider.releaseStart()
+        await second.value
+        #expect(h.engine.state.isConnecting)
+        #expect(h.provider.reportedConnecting == [secondID])
         #expect(h.delegate.records.map(\.outcome) == [.canceled])
     }
 
