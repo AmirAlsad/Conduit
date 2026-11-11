@@ -11,6 +11,7 @@
 //  target with no agent (unknown or deleted) records nothing.
 //
 
+import ConduitCallEngine
 import Foundation
 
 @MainActor

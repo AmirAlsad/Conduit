@@ -12,6 +12,10 @@
 //  `live()` factory selects them and a persistent store.
 //
 
+import ConduitCallEngine
+import ConduitCallEngineDaily
+import ConduitCallEngineLiveKit
+import ConduitCallEngineTesting
 import Foundation
 import SwiftData
 
@@ -126,17 +130,7 @@ final class AppEnvironment {
         let makeCallEngine: (CallEngineConfiguration) -> CallEngine
         let transportFactory: (TransportKind) -> CallTransport
         #if targetEnvironment(simulator)
-        makeCallEngine = { configuration in
-            CallEngine(
-                configuration: configuration,
-                callProvider: FakeCallProvider(),
-                interruptionObserver: SystemAudioInterruptionObserver(),
-                ringStatusReporter: RingStatusReporter(),
-                pushRegistry: SystemVoIPPushRegistry(),
-                now: { .now },
-                sleep: { try await Task.sleep(for: $0) }
-            )
-        }
+        makeCallEngine = { CallEngine.simulated(configuration: $0, system: SimulatedCallSystem()) }
         transportFactory = { _ in FakeTransport() }
         #else
         makeCallEngine = { CallEngine(configuration: $0) }
@@ -185,17 +179,7 @@ final class AppEnvironment {
             announcer: FakeSpokenStateAnnouncer(),
             transportFactory: { _ in FakeTransport() },
             isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) },
-            makeCallEngine: { configuration in
-                CallEngine(
-                    configuration: configuration,
-                    callProvider: FakeCallProvider(),
-                    interruptionObserver: FakeAudioInterruptionObserver(),
-                    ringStatusReporter: RingStatusReporter(),
-                    pushRegistry: FakeVoIPPushRegistry(),
-                    now: { .now },
-                    sleep: { try await Task.sleep(for: $0) }
-                )
-            }
+            makeCallEngine: { CallEngine.simulated(configuration: $0, system: SimulatedCallSystem()) }
         )
     }
 }

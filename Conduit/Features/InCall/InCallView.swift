@@ -8,6 +8,7 @@
 //
 
 import AVFoundation
+import ConduitCallEngine
 import SwiftUI
 
 struct InCallView: View {

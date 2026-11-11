@@ -2,15 +2,12 @@
 //  Agent+Handle.swift
 //  Conduit
 //
-//  Minting and use of the agent's synthetic call handle.
+//  Minting the agent's synthetic call handle.
 //
 
 import Foundation
 
 extension Agent {
-    /// The handle a call to this agent is placed against.
-    var callHandle: CallHandle { CallHandle(value: syntheticEmail) }
-
     /// Mints the synthetic handle used as the call's email-type CXHandle and the
     /// matching contact's email. Minted once at creation and stored, so it's stable
     /// across renames.

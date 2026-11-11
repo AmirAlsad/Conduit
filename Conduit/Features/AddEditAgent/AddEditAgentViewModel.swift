@@ -13,6 +13,7 @@
 //  `Agent`, never persisted in SwiftData, and never logged.
 //
 
+import ConduitCallEngine
 import Foundation
 
 @MainActor

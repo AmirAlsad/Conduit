@@ -10,6 +10,8 @@
 import Foundation
 import Testing
 @testable import Conduit
+import ConduitCallEngine
+import ConduitCallEngineTesting
 
 @MainActor
 struct AgentCallTargetTests {

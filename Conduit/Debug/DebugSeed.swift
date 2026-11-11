@@ -9,6 +9,7 @@
 //
 
 #if DEBUG
+import ConduitCallEngine
 import Foundation
 
 @MainActor

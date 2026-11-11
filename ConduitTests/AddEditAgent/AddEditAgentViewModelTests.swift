@@ -11,6 +11,8 @@ import Foundation
 import SwiftData
 import Testing
 @testable import Conduit
+import ConduitCallEngine
+import ConduitCallEngineTesting
 
 @MainActor
 struct AddEditAgentViewModelTests {

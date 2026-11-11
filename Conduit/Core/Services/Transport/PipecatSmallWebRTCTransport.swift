@@ -20,6 +20,7 @@
 //  `detachAudioSession` are no-ops pending the on-device audio verdict.
 //
 
+import ConduitCallEngine
 import Foundation
 import PipecatClientIOS
 import PipecatClientIOSSmallWebrtc

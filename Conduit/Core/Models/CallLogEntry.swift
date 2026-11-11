@@ -7,6 +7,7 @@
 //  removes only the row (history removed, agent kept).
 //
 
+import ConduitCallEngine
 import Foundation
 import SwiftData
 

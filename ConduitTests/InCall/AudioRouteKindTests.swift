@@ -2,31 +2,16 @@
 //  AudioRouteKindTests.swift
 //  ConduitTests
 //
-//  The device-id → route-kind mapping (label / icon / order). Mapping by id, not
-//  name, is the whole point: Daily's Bluetooth device NAME contains "Speaker".
+//  How the in-call route picker labels and orders each route kind
+//  (`AudioRouteKind+Display`). The device-id mapping itself is tested in the
+//  ConduitCallEngine package.
 //
 
 import Testing
 @testable import Conduit
+import ConduitCallEngine
 
 struct AudioRouteKindTests {
-    @Test(arguments: [
-        ("speakerphone", AudioRouteKind.speaker),
-        ("bluetooth", AudioRouteKind.bluetooth),
-        ("earpiece", AudioRouteKind.receiver),
-        ("wired", AudioRouteKind.wired),
-        ("usb-something", AudioRouteKind.other),
-    ])
-    func deviceIDMapsToKind(id: String, expected: AudioRouteKind) {
-        #expect(AudioRouteKind(deviceID: id) == expected)
-    }
-
-    @Test func bluetoothIdMapsToBluetoothNotSpeaker() {
-        // Daily's bluetooth device is named "Bluetooth Speaker & Mic" — mapping by
-        // name would mislabel it "Speaker". The id "bluetooth" must win.
-        #expect(AudioRouteKind(deviceID: "bluetooth") == .bluetooth)
-    }
-
     @Test func displayNamesAreFriendly() {
         #expect(AudioRouteKind.receiver.displayName == "iPhone")
         #expect(AudioRouteKind.speaker.displayName == "Speaker")

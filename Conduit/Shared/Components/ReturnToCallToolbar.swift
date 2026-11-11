@@ -9,6 +9,7 @@
 //  it never collides with a back/cancel button. Tinted in the agent's color.
 //
 
+import ConduitCallEngine
 import SwiftUI
 
 struct ReturnToCallToolbarModifier: ViewModifier {

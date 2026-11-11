@@ -8,6 +8,7 @@
 //  but not the stack itself.
 //
 
+import ConduitCallEngine
 import SwiftData
 import SwiftUI
 

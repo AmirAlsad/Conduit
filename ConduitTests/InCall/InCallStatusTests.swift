@@ -9,6 +9,7 @@
 import Foundation
 import Testing
 @testable import Conduit
+import ConduitCallEngine
 
 struct InCallStatusTests {
     @Test func connectedAndIdleHaveNoStaticText() {

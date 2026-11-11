@@ -7,6 +7,7 @@
 //  has no string here — the view renders a live timer in its place.
 //
 
+import ConduitCallEngine
 import Foundation
 
 enum InCallStatus {

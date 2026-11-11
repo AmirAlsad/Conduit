@@ -6,6 +6,7 @@
 //  order (iPhone, Speaker, then external routes).
 //
 
+import ConduitCallEngine
 import Foundation
 
 extension AudioRouteKind {

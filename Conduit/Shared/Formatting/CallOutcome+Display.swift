@@ -7,6 +7,7 @@
 //  models stay free of SwiftUI.
 //
 
+import ConduitCallEngine
 import SwiftUI
 
 extension CallOutcome {

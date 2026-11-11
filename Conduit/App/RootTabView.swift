@@ -9,6 +9,7 @@
 //  is ours to control (a user-end vanishes instantly; see `syncInCallCover`).
 //
 
+import ConduitCallEngine
 import SwiftUI
 
 struct RootTabView: View {

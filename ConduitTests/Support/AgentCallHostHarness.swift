@@ -12,6 +12,8 @@ import Foundation
 import SwiftData
 import Testing
 @testable import Conduit
+import ConduitCallEngine
+import ConduitCallEngineTesting
 
 /// Stands in for `PairingClient.resolve`: records every request and can hold each
 /// one open until `release()`, so a test can act while credentials are in flight.
@@ -58,10 +60,7 @@ final class TransportRequestLog {
 
 @MainActor
 final class AgentCallHostHarness {
-    let provider = FakeCallProvider()
-    let interruption = FakeAudioInterruptionObserver()
-    let ringStatusReporter = FakeRingStatusReporter()
-    let pushRegistry = FakeVoIPPushRegistry()
+    let system = SimulatedCallSystem()
     let keychain = InMemoryKeychain()
     let announcer = FakeSpokenStateAnnouncer()
     let missedNotifier = FakeMissedCallNotifier()
@@ -74,13 +73,11 @@ final class AgentCallHostHarness {
     let host: AgentCallHost
     let engine: CallEngine
     let agent: Agent
-    let callID = UUID()
     private(set) var pushCompletions = 0
 
     /// `pairingEndpoint` makes the agent pairing-mode: `token` is then its API key
     /// and every connect attempt goes through `pairing`.
     init(
-        policy: ReconnectionPolicy = .default,
         token: String? = "valid-token",
         pairingEndpoint: URL? = nil,
         transportKind: TransportKind = .daily,
@@ -91,7 +88,6 @@ final class AgentCallHostHarness {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         repository = SwiftDataAgentRepository(context: container.mainContext)
-        provider.nextCallID = callID
 
         let agent = Agent(
             name: "Echo Bot",
@@ -128,18 +124,15 @@ final class AgentCallHostHarness {
             pairingResolver: pairing.resolver,
             registrationSession: RecordingURLProtocol.session()
         )
-        engine = CallEngine(
+        engine = CallEngine.simulated(
             configuration: CallEngineConfiguration(unknownCallerName: "Agent"),
-            callProvider: provider,
-            interruptionObserver: interruption,
-            ringStatusReporter: ringStatusReporter,
-            pushRegistry: pushRegistry,
-            policy: policy,
+            system: system,
             now: now,
             sleep: { _ in }
         )
         engine.delegate = host
         host.engine = engine
+        engine.startPushRegistration()
     }
 
     /// The live call's transport (or the next call's, before it is placed).
@@ -154,7 +147,7 @@ final class AgentCallHostHarness {
     }
 
     /// Deliver a VoIP push the way Conduit's reference engine sends one (keyed by
-    /// `agent_id`), through the engine's PushKit entry.
+    /// `agent_id`), as PushKit would.
     func ring(
         agentID: UUID? = nil,
         callID: UUID = UUID(),
@@ -173,6 +166,6 @@ final class AgentCallHostHarness {
         push["room_url"] = roomURL?.absoluteString
         push["token"] = token
         push["status_url"] = statusURL?.absoluteString
-        engine.handleIncomingPush(push) { [self] in pushCompletions += 1 }
+        system.deliverPush(push) { [self] in pushCompletions += 1 }
     }
 }

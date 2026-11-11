@@ -11,6 +11,7 @@
 //  `TransportError`s, which the engine maps to a failure reason.
 //
 
+import ConduitCallEngine
 import Foundation
 
 typealias PairingResolving = @Sendable (URL, String, TransportKind) async throws -> PairingCredentials

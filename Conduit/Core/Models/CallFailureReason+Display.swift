@@ -7,6 +7,7 @@
 //  is verified by unit tests at simulator speed.
 //
 
+import ConduitCallEngine
 import Foundation
 
 extension CallFailureReason {

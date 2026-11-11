@@ -8,6 +8,7 @@
 //  calling-domain handler for in-app intent handling (see `SiriCallHandler`).
 //
 
+import ConduitCallEngine
 import Intents
 import UIKit
 
