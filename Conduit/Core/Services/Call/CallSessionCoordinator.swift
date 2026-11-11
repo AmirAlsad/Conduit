@@ -10,8 +10,9 @@
 //  protocols, so the whole machine runs in the simulator against fakes.
 //
 //  AUDIO-SESSION OWNERSHIP INVARIANT: `transport.attachAudioSession()` is called
-//  from exactly one place — `activate(_:)`, reached only via the CallKit
-//  `providerDidActivate` callback — and the mic is never enabled before activation.
+//  only once CallKit has activated the session — from `activate(_:)` (the
+//  `providerDidActivate` callback), or when a transport is created after that
+//  activation already happened — and the mic is never enabled before activation.
 //  CallKit owns the session; the transport attaches to it.
 //
 
@@ -115,6 +116,14 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         } catch {
             Log.error(.callkit, "startOutgoingCall failed: \(error)")
             fail(.unknown)
+            return
+        }
+        // The user may have ended the call while CallKit was starting it. That end
+        // already finished and recorded the call; don't leave the system holding
+        // the call it just started, and don't join the room.
+        guard case .dialing = state else {
+            Log.info(.call, "Call ended while dialing; ending the started CallKit call")
+            await callProvider.endCall(id)
             return
         }
         activeCallID = id
@@ -242,11 +251,14 @@ final class CallSessionCoordinator: CallProviderDelegate, AudioInterruptionObser
         let transport = target.makeTransport()
         self.transport = transport
         subscribe(to: transport)
+        // CallKit can activate before the transport exists (while dialing, or
+        // before `answer()` runs); that activation found no transport to attach.
+        if isAudioActivated { await transport.attachAudioSession() }
 
         do {
             let connection = try await target.connect()
             // The call may have ended while credentials were in flight.
-            guard self.transport === transport, !Task.isCancelled else { return }
+            guard self.transport === transport else { return }
             try await transport.connect(connection)
         } catch {
             Log.error(.transport, "connect failed: \(error)")

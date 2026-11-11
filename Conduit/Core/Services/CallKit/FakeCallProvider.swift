@@ -30,7 +30,24 @@ final class FakeCallProvider: CallProviding {
     /// The UUID handed back from the next `startOutgoingCall`.
     var nextCallID = UUID()
 
+    /// When true, `startOutgoingCall` suspends until `releaseStart()` — lets a test
+    /// act while CallKit is still starting the call.
+    var suspendStart = false
+    private(set) var pendingStartCount = 0
+    private var startContinuations: [CheckedContinuation<Void, Never>] = []
+
+    func releaseStart() {
+        let waiting = startContinuations
+        startContinuations = []
+        pendingStartCount = 0
+        waiting.forEach { $0.resume() }
+    }
+
     func startOutgoingCall(handle: CallHandle, displayName: String) async throws -> UUID {
+        if suspendStart {
+            pendingStartCount += 1
+            await withCheckedContinuation { startContinuations.append($0) }
+        }
         if let startError { throw startError }
         let id = nextCallID
         startedCalls.append(id)

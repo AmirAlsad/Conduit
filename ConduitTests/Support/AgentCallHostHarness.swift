@@ -65,7 +65,7 @@ final class AgentCallHostHarness {
     let announcer = FakeSpokenStateAnnouncer()
     let missedNotifier = FakeMissedCallNotifier()
     let interactionDonor = FakeCallInteractionDonor()
-    let transport = FakeTransport()
+    let transports = FakeTransportPool()
     let pairing = FakePairingResolver()
     let transportRequests = TransportRequestLog()
     let container: ModelContainer
@@ -111,7 +111,7 @@ final class AgentCallHostHarness {
             try keychain.setToken(token, for: ref)
         }
 
-        let transport = self.transport
+        let transports = self.transports
         let transportRequests = self.transportRequests
         host = AgentCallHost(
             repository: repository,
@@ -121,7 +121,7 @@ final class AgentCallHostHarness {
             interactionDonor: interactionDonor,
             transportFactory: { kind in
                 transportRequests.kinds.append(kind)
-                return transport
+                return transports.make()
             },
             pairingResolver: pairing.resolver
         )
@@ -136,6 +136,9 @@ final class AgentCallHostHarness {
         )
         coordinator.delegate = host
     }
+
+    /// The live call's transport (or the next call's, before it is placed).
+    var transport: FakeTransport { transports.current }
 
     func placeCall() async {
         await coordinator.placeCall(host.target(for: agent))

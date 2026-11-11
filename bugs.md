@@ -7,6 +7,27 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### Awaits in the call path outlived the call (phantom CallKit call, lost activation)
+First seen: 2026-11-11 (code review of the engine-boundary refactor; not yet seen on device)
+
+**Pattern:** Each `await` in `placeCall` / `connectTransport` / `retryConnect` is a
+point where the call can end or CallKit can activate. (1) End tapped while
+`startOutgoingCall` was suspended: `finishEnded` recorded the call, then the await
+returned and `placeCall` overwrote the terminal state with `.connecting` and joined
+the room — a live call behind a dismissed UI, with CallKit holding the call.
+(2) Activation landing before the transport existed (while dialing, or before
+`answer()` ran) set `isAudioActivated` but attached nothing, so LiveKit's connect
+asserted `.none` (dead mic). (3) A credential fetch or retry resolving after the
+call ended joined the room or flipped the call back to `.reconnecting`.
+
+**Rule:** After every await on the call path, re-check that this is still the
+same call (state, transport identity) before mutating anything; when creating the
+transport, attach it at once if activation already happened. Each await is
+another instance of the unordered-edges rule in potential_skills/callkit.md.
+
+**Why it's missed:** The fakes resolve awaits immediately and in order, so the
+interleavings only exist where a test suspends them deliberately.
+
 ### iOS 26 Liquid Glass bled the blue background into the white icon pills (light mode)
 First seen: 2026-06-23 (App Store Connect + on-device; light mode only, dark looked fine)
 

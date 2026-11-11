@@ -8,8 +8,8 @@ or a `CallTransport` adapter's connect/audio path.
 
 ### System callbacks fire more than once and out of order vs. your code
 First seen: 2026-06-07
-Last seen: 2026-06-10
-Occurrences: 3
+Last seen: 2026-11-11
+Occurrences: 4
 
 **Pattern:** Logic that assumes a single, ordered sequence breaks when CallKit
 re-enters or reorders. (1) Ending a call by requesting the system end AND driving the
@@ -19,7 +19,9 @@ BEFORE the transport finished connecting (a slow pairing fetch), so a one-shot
 `setMicEnabled` no-op'd on a not-yet-joined client (dead mic). (3) `LiveKitTransport.connect()`
 unconditionally reset `setEngineAvailability(.none)` after its pairing fetch, stomping
 an activation that had already attached (`.default`) mid-fetch — dead mic on the first
-call after a cold launch, where the fetch is slowest.
+call after a cold launch, where the fetch is slowest. (4) An activation that landed before
+the coordinator had created the transport (while dialing, or before `answer()`) attached
+nothing, and an End during `startOutgoingCall` was overwritten when the await returned.
 
 **Rule:**
 - Make every terminal transition idempotent (`guard !state.isTerminal`) and clear
@@ -29,6 +31,8 @@ call after a cold launch, where the fetch is slowest.
   `isAudioActivated` flag, so whichever lands last leaves the correct state.
 - Never assume "I requested X, so X happens once, now." The system decides when and
   how many times.
+- After every `await` on the call path, re-check it is still the same call (state,
+  transport identity) before acting; a transport created after activation attaches at once.
 
 **Why it's missed:** The fakes (`FakeCallProvider`, `FakeTransport`) don't round-trip
 through the delegate and aren't connection-gated, so the unit suite shows one clean

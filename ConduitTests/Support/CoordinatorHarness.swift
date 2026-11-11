@@ -21,6 +21,24 @@ final class MutableClock {
     func advance(_ seconds: TimeInterval) { current = current.addingTimeInterval(seconds) }
 }
 
+/// Hands each call its own FakeTransport, so the coordinator's transport-identity
+/// guards are exercised. `current` is the live call's transport — or, before the
+/// next call, the one it will get — so a test can configure it ahead of time.
+@MainActor
+final class FakeTransportPool {
+    private(set) var made: [FakeTransport] = []
+    private var next = FakeTransport()
+
+    var current: FakeTransport { made.last ?? next }
+
+    func make() -> FakeTransport {
+        let transport = next
+        made.append(transport)
+        next = FakeTransport()
+        return transport
+    }
+}
+
 /// A call target whose transport and credential step are scripted: it counts
 /// `makeTransport` and `connect` calls, and `connect` can fail or be held open
 /// until `release()` so a test can act while credentials are in flight.
@@ -33,24 +51,22 @@ final class FakeTarget {
     var error: (any Error)?
     var suspend = false
 
-    private(set) var makeTransportCount = 0
     private(set) var connectCount = 0
-    private let transport: FakeTransport
+    let transports: FakeTransportPool
     private var pending: [CheckedContinuation<Void, Never>] = []
 
-    init(transport: FakeTransport) {
-        self.transport = transport
+    init(transports: FakeTransportPool) {
+        self.transports = transports
     }
+
+    var makeTransportCount: Int { transports.made.count }
 
     var callTarget: CallTarget {
         CallTarget(
             id: id,
             displayName: displayName,
             handle: handle,
-            makeTransport: { [self] in
-                makeTransportCount += 1
-                return transport
-            },
+            makeTransport: { [self] in transports.make() },
             connect: { [self] in try await connect() }
         )
     }
@@ -130,7 +146,7 @@ final class CoordinatorHarness {
     let provider = FakeCallProvider()
     let interruption = FakeAudioInterruptionObserver()
     let ringStatusReporter = FakeRingStatusReporter()
-    let transport = FakeTransport()
+    let transports = FakeTransportPool()
     let target: FakeTarget
     let delegate = RecordingCallEngineDelegate()
     let coordinator: CallSessionCoordinator
@@ -142,7 +158,7 @@ final class CoordinatorHarness {
         now: @escaping () -> Date = { Date() }
     ) {
         provider.nextCallID = callID
-        target = FakeTarget(transport: transport)
+        target = FakeTarget(transports: transports)
         // The host knows this target, so an incoming push for it resolves.
         delegate.targets[target.id] = target.callTarget
 
@@ -157,6 +173,9 @@ final class CoordinatorHarness {
         )
         coordinator.delegate = delegate
     }
+
+    /// The live call's transport (or the next call's, before it is placed).
+    var transport: FakeTransport { transports.current }
 
     func placeCall() async {
         await coordinator.placeCall(target.callTarget)

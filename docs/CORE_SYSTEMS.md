@@ -220,9 +220,10 @@ rings, CallKit's system UI is primary, so the app shows no surface until answer.
 
 Key behaviors:
 
-- **Audio-session ownership invariant.** `transport.attachAudioSession()` is
-  reachable from exactly one place — `activate(_:)`, entered only via the CallKit
-  `providerDidActivate` callback — and the mic is never enabled before activation.
+- **Audio-session ownership invariant.** `transport.attachAudioSession()` runs only
+  after CallKit's `providerDidActivate` — from `activate(_:)`, or when the transport
+  is created after activation already landed (e.g. CallKit activated while dialing
+  or before `answer()` ran) — and the mic is never enabled before activation.
   On activation the coordinator forces speaker only when no external (car/Bluetooth)
   route is present, so it never yanks audio off a connected car.
 - **`.connected` requires both** transport-ready and bot-ready (the transport

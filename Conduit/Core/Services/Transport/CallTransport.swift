@@ -9,7 +9,7 @@
 //
 //  AUDIO-SESSION INVARIANT: a transport must NOT seize the microphone or activate
 //  the audio session on its own. Media attaches only when the coordinator calls
-//  `attachAudioSession()`, which it does solely from CallKit's `providerDidActivate`.
+//  `attachAudioSession()`, which it does only after CallKit's `providerDidActivate`.
 //  CallKit owns the session; the transport attaches to it.
 //
 
@@ -30,8 +30,8 @@ protocol CallTransport: AnyObject {
     func selectedAudioDevice() async -> AudioDeviceInfo?
     func setAudioDevice(_ id: String) async
 
-    /// Start media on the CallKit-activated session. Called ONLY from the
-    /// coordinator's `providerDidActivate` handling.
+    /// Start media on the CallKit-activated session. Called ONLY once CallKit has
+    /// activated it (on activation, or on creation if activation came first).
     func attachAudioSession() async
     /// Stop media when CallKit deactivates the session or the call ends.
     func detachAudioSession() async

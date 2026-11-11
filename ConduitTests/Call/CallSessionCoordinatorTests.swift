@@ -500,6 +500,9 @@ struct CallSessionCoordinatorTests {
 
         #expect(h.coordinator.state.isConnected)
         #expect(!h.coordinator.isMuted)
-        #expect(h.transport.connectCount == 2)
+        // Each call gets its own transport; the first was torn down.
+        #expect(h.transports.made.map(\.connectCount) == [1, 1])
+        await waitUntil { h.transports.made.first?.disconnectCount == 1 }
+        #expect(h.transports.made.first?.disconnectCount == 1)
     }
 }
