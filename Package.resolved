@@ -14,8 +14,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/AmirAlsad/ConduitCallEngine.git",
       "state": {
-        "revision": "a2946d0ddfdf6252112e794559ff557451d72184",
-        "version": "0.1.0"
+        "revision": "5d5cb3bcb6852426f30faa383cc3e237e2903e05",
+        "version": "0.1.1"
       }
     },
     {
