@@ -138,12 +138,13 @@ final class PipecatSmallWebRTCTransport: CallTransport {
     }
 
     /// Delivers a call-control signal to the agent, best effort.
-    func send(_ signal: CallSignal) async {
+    @discardableResult
+    func send(_ signal: CallSignal) async -> CallSignalDelivery {
         guard let client = session?.client else {
             Log.info(.transport, "SmallWebRTC client message \(signal.rawValue) dropped: no session")
-            return
+            return .failed
         }
-        Self.sendClientMessage(signal.rawValue, on: client)
+        return Self.sendClientMessage(signal.rawValue, on: client) ? .sent : .failed
     }
 
     /// Sends an RTVI client message (`{"id", "label": "rtvi-ai", "type": "client-message",

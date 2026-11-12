@@ -234,6 +234,7 @@ struct AgentCallHostTests {
     @Test func outgoingCallCuesConnectingThenConnected() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
+        await h.system.activateAudioSession()
         #expect(h.announcer.startedRepeating == [.connecting])
         #expect(h.announcer.repeatingPhrase == .connecting)
 
@@ -243,9 +244,28 @@ struct AgentCallHostTests {
         #expect(h.announcer.stopRepeatingCount == 1)
     }
 
+    @Test func connectedBeforeActivationIsAnnouncedAtTheActivation() async throws {
+        let h = try AgentCallHostHarness()
+        await h.placeCall()
+
+        h.system.deliverTransportEvent(.connected)
+        guard case .connected = h.engine.state else {
+            Issue.record("Expected connected, got \(h.engine.state)")
+            return
+        }
+        #expect(h.announcer.announced.isEmpty) // CallKit has not activated the audio yet
+        #expect(h.announcer.repeatingPhrase == nil)
+        #expect(h.announcer.stopRepeatingCount == 1)
+
+        await h.system.activateAudioSession()
+        #expect(h.announcer.announced == [.connected])
+        #expect(h.announcer.stopRepeatingCount == 1)
+    }
+
     @Test func dropAndRecoveryCuesDisconnectedOnceThenConnected() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
+        await h.system.activateAudioSession()
         h.system.deliverTransportEvent(.connected)
 
         h.system.deliverTransportEvent(.disconnected(reason: .networkDropped))
@@ -265,6 +285,7 @@ struct AgentCallHostTests {
     @Test func selfHealThatEscalatesAnnouncesDisconnectedOnce() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
+        await h.system.activateAudioSession()
         h.system.deliverTransportEvent(.connected)
 
         h.system.deliverTransportEvent(.reconnecting) // the transport self-heals (display only)
@@ -285,6 +306,7 @@ struct AgentCallHostTests {
     @Test func duplicateConnectedAnnouncesOnce() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
+        await h.system.activateAudioSession()
         h.system.deliverTransportEvent(.connected)
         h.system.deliverTransportEvent(.connected)
 
@@ -640,9 +662,9 @@ struct AgentCallHostTests {
     @Test func aRingWithoutPreconnectPairsOnlyAfterTheAnswer() async throws {
         let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
         h.ring()
+        #expect(await h.system.awaitRingPreparation() == .idle)
         await waitUntil(ticks: 50) { !h.pairing.requests.isEmpty }
         #expect(h.pairing.requests.isEmpty)
-        #expect(h.engine.ringPreparationPhase == .idle)
 
         await h.system.answerIncomingCall()
         #expect(h.pairing.requests.map(\.ring) == [nil])
@@ -652,7 +674,7 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
         let callID = UUID()
         h.ring(callID: callID, preconnect: "credentials")
-        await waitUntil { h.engine.ringPreparationPhase == .credentialsReady }
+        #expect(await h.system.awaitRingPreparation() == .credentialsReady)
 
         #expect(h.engine.state == .incomingRinging)
         #expect(h.pairing.requests == [FakePairingResolver.Request(
@@ -673,10 +695,10 @@ struct AgentCallHostTests {
         h.transport.canConnectWhileRinging = true
         let callID = UUID()
         h.ring(callID: callID, preconnect: "media")
-        await waitUntil { h.transport.connectCount == 1 }
+        #expect(await h.system.awaitRingPreparation() == .connecting)
 
+        #expect(h.transport.connectCount == 1)
         #expect(h.pairing.requests.map(\.ring) == [PairingRing(callID: callID, awaitAnswer: true)])
-        #expect(h.engine.ringPreparationPhase == .connecting)
         #expect(!h.transport.isAudioAttached)
         h.system.deliverTransportEvent(.connected)
         #expect(h.engine.ringPreparationPhase == .ready)
@@ -701,7 +723,7 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
         let callID = UUID()
         h.ring(callID: callID, preconnect: "media")
-        await waitUntil { h.engine.ringPreparationPhase == .credentialsReady }
+        #expect(await h.system.awaitRingPreparation() == .credentialsReady)
 
         #expect(h.pairing.requests.map(\.ring) == [PairingRing(callID: callID, awaitAnswer: false)])
         #expect(h.transports.made.allSatisfy { $0.connectCount == 0 })
@@ -711,7 +733,7 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
         let room = URL(string: "https://example.daily.co/inbound-room")!
         h.ring(roomURL: room, token: "push-token", preconnect: "credentials")
-        await waitUntil { h.engine.ringPreparationPhase == .credentialsReady }
+        #expect(await h.system.awaitRingPreparation() == .credentialsReady)
 
         await h.system.answerIncomingCall()
         #expect(h.pairing.requests.isEmpty)
