@@ -252,6 +252,36 @@ confirm after `xcodegen generate` and a package resolve.
 
 Copy one block per run.
 
+### Recorded runs
+
+```text
+Run:                 After (call-engine extraction); the Before column was run only for the rows noted below
+Date:                2026-11-11
+Build SHA:           f790fd3 (smoke test); the full sheet ran on 2bb344b, same engine source
+Engine package:      ConduitCallEngine 0.1.1 (5d5cb3b); the full sheet ran on 1758453, same sources
+Build config:        Debug, Xcode 27.2
+iOS version:         27.0 (24A437)
+Phone model:         iPhone 17
+Backend deployment:  example-backend run locally on the Mac (LAN), SQLite registry file
+Agents used:         Daily=loopback echo   LiveKit=loopback echo   SmallWebRTC=loopback echo
+Network:             Wi-Fi (LAN)
+Notes / surprises:
+  Passed: O1-O9 (O6/O7 on Daily and LiveKit), I1-I5, I7-I9, S1, L1, L2, M1, B1, B2, N1-N6.
+  O10 (interruption): Siri cannot be invoked during a call. Placing a cellular call ENDED the
+      Conduit call (cleanly, end-call signal sent); it was not paused or held. The engine has no
+      hold support. Same on the pre-extraction build by code; not compared on device.
+  I6 (Focus): Do Not Disturb did not filter rings on this iOS version, on the pre-extraction
+      build or the new one, so the suppressed_by_focus path was not exercised.
+  S2/S3 (SiriKit "Call <agent>"): not run; the test agent was not in Contacts. Code unchanged.
+  Compared against the pre-extraction build on device: audio route switching, rings under
+      Do Not Disturb. Both behaved the same on the two builds.
+  Found and fixed during the run: SmallWebRTC pinning the audio route after a LAN call;
+      LiveKit reporting connected after an abandoned reconnect; the missed-call notice dropped
+      while the app was in front; Daily not reporting short network drops.
+  Open: spoken cues are inaudible during Daily calls and during the last retry phase of a
+      LiveKit outage. Ringback is silent when the phone is in silent mode (system sound).
+```
+
 ```text
 Run:                 Before / After
 Date:

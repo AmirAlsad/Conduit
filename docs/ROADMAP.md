@@ -250,6 +250,23 @@ surface rather than a moving one.
   subsystem is broken); a Mac that can't install an iOS 18 runtime uses iPhone 17 /
   iOS 27.2 locally, where XCUITest queries work.
 
+## Follow-ups from the November 2026 device run
+
+- **Spoken cues on Daily** — "Connected", "Disconnected" and "Retrying connection" are
+  audible on LiveKit calls but not during Daily calls, and they go silent in the last
+  retry phase of a LiveKit outage. Needs an announcer that does not depend on the
+  transport's audio being up, and its own device pass.
+- **Call hold** — placing or taking a cellular call ends the Conduit call instead of
+  holding it. Tracked on the engine package (no `CXSetHeldCallAction` handling).
+- **Focus-filtered rings** — re-check on device when iOS filters them again; the path is
+  unit-tested but was not exercised on iOS 27.0.
+- **SiriKit "Call <agent>"** — re-run with an agent that is in Contacts (unlocked and
+  from the lock screen).
+- **Test Connection on LiveKit** leaves the agent waiting out its grace window (no
+  end-call signal is sent that early). Tracked on the engine package.
+- **The `live` reference agent's keys** — the Groq key in the local engine config is
+  dead; device runs used the loopback echo agent.
+
 ## Deferred / explicitly not doing
 
 - **Agent design or iteration** — STT/LLM/TTS/voice/memory are the user's, out of scope.
