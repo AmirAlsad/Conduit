@@ -41,6 +41,7 @@ class DailyService:
             daily_api_url=settings.daily_api_url,
             aiohttp_session=aiohttp_session,
         )
+        self._session = aiohttp_session
 
     # --- rooms & tokens ---
 
@@ -70,6 +71,17 @@ class DailyService:
 
     def room_name_from_url(self, room_url: str) -> str:
         return self._helper.get_name_from_url(room_url)
+
+    async def human_in_room(self, room_name: str) -> bool:
+        """Whether anyone but the bot is in the room (Daily's presence API)."""
+        async with self._session.get(
+            f"{settings.daily_api_url}/rooms/{room_name}/presence",
+            headers={"Authorization": f"Bearer {settings.daily_api_key}"},
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"Daily presence returned HTTP {resp.status}")
+            body = await resp.json()
+        return any(p.get("userName") != settings.bot_name for p in body.get("data", []))
 
     # --- webhook ---
 

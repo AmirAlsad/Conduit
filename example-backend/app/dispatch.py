@@ -65,8 +65,14 @@ class Dispatcher:
         transport: str,
         bot_argv: list[str],
         cleanup: Callable[[], Awaitable[None]] | None = None,
+        control: bool = False,
     ) -> int | None:
         """Spawn a bot into ``room_key`` unless one is already active there.
+
+        ``control`` gives the bot a stdin pipe that ``send_control`` writes to (ring
+        bots read it for the receipt-driven "answered"). A pipe, not a signal: a
+        line written while the bot is still importing waits in the pipe, where a
+        signal would hit the default action and kill it.
 
         Returns the new pid, or None if an active bot made this a no-op.
         """
@@ -93,6 +99,7 @@ class Dispatcher:
                     *bot_argv,
                     env=os.environ.copy(),
                     cwd=_PROJECT_ROOT,
+                    stdin=asyncio.subprocess.PIPE if control else None,
                 )
             except Exception as e:
                 await self._registry.clear_active_bot(room_key)
@@ -127,6 +134,21 @@ class Dispatcher:
                 await cleanup()
             except Exception as e:  # cleanup is best-effort (e.g. delete ephemeral room)
                 event(self._log, "dispatch.cleanup_failed", room=room_key, error=str(e))
+
+    async def send_control(self, room_key: str, message: str) -> bool:
+        """Write one control line to a bot dispatched with ``control=True``.
+        True if it was written; False if there is no such bot or it has gone."""
+        proc = self._procs.get(room_key)
+        stdin = getattr(proc, "stdin", None)
+        if proc is None or proc.returncode is not None or stdin is None:
+            return False
+        try:
+            stdin.write(f"{message}\n".encode())
+            await stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            return False
+        event(self._log, "dispatch.control_sent", room=room_key, message=message)
+        return True
 
     async def disconnect(self, room_key: str) -> bool:
         """Force-end the bot in a room (admin drop test). True if one was signalled."""

@@ -220,10 +220,21 @@ def test_unregister_drops_registration_and_is_idempotent():
         assert c.delete("/inbound/register/loopback").status_code in (401, 403)
 
 
-def test_ring_status_rejects_unknown_agent_and_bad_status():
+def test_ring_status_rejects_unknown_agent_and_missing_status():
     with TestClient(app) as c:
         body = {"call_id": str(uuid.uuid4()), "status": "answered"}
         assert c.post("/inbound/status/nonexistent", json=body, headers=AUTH).status_code == 404
-        bad = {"call_id": str(uuid.uuid4()), "status": "exploded"}
-        assert c.post("/inbound/status/loopback", json=bad, headers=AUTH).status_code == 422
+        no_status = {"call_id": str(uuid.uuid4())}
+        assert c.post("/inbound/status/loopback", json=no_status, headers=AUTH).status_code == 422
+        empty = {"call_id": str(uuid.uuid4()), "status": ""}
+        assert c.post("/inbound/status/loopback", json=empty, headers=AUTH).status_code == 422
         assert c.post("/inbound/status/loopback", json=body).status_code in (401, 403)
+
+
+def test_ring_status_accepts_statuses_it_does_not_know():
+    # Servers must tolerate receipt statuses added after them (docs/INBOUND_CALLS.md §4).
+    with TestClient(app) as c:
+        for status in ("unanswered", "canceled", "exploded"):
+            body = {"call_id": str(uuid.uuid4()), "status": status}
+            r = c.post("/inbound/status/loopback", json=body, headers=AUTH)
+            assert r.status_code == 200, r.text

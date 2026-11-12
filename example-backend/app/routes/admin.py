@@ -5,6 +5,8 @@
   (design §2.1, §6 Layer 2).
 - POST /admin/ring/{agent_id} — agent-initiated inbound call: send a VoIP push
   to the device that registered via /inbound/register (docs/INBOUND_CALLS.md §2).
+- POST /admin/ring/{agent_id}/cancel — withdraw a ring that is still ringing:
+  in-band (the agent leaves the pre-connected room) or with a cancel push.
 """
 
 from __future__ import annotations
@@ -16,10 +18,19 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from app.agents import get_agent, resolve_transport
 from app.auth import require_engine_key
 from app.config import MissingSettingError, settings
-from app.models import DisconnectRequest, RingRequest, RingResponse
+from app.models import (
+    DisconnectRequest,
+    RingCancelRequest,
+    RingCancelResponse,
+    RingRequest,
+    RingResponse,
+)
+from app.obs import event, get_logger
 from app.provisioning import TransportUnavailable, provision_pairing
+from app.rings import TrackedRing, ring_bot_flags
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_engine_key)])
+_log = get_logger("admin")
 
 
 @router.post("/disconnect")
@@ -63,22 +74,123 @@ async def ring(
         payload["display_name"] = reg.display_name
     if reg.handle is not None:
         payload["handle"] = reg.handle
-    mode = "pairing"
+    # Push values are strings, like every other key.
+    if req.ring_timeout is not None:
+        payload["ring_timeout"] = str(req.ring_timeout)
+    if req.preconnect is not None:
+        payload["preconnect"] = req.preconnect
+    ring = TrackedRing(
+        call_id=payload["call_id"],
+        agent_id=agent_id,
+        mode="inline" if req.inline else "pairing",
+        preconnect=req.preconnect,
+        ring_timeout=req.ring_timeout,
+    )
     if req.inline:
         # Provision NOW and ride the creds in the push: the bot is dispatched
-        # before the user answers (and idles on a decline until timeouts reap it).
-        # Pairing mode instead defers everything to the app's /connect on answer.
-        mode = "inline"
+        # before the user answers. Pairing mode instead defers everything to the
+        # app's /connect on answer (or during the ring, with preconnect). A plain
+        # inline bot idles on a decline until timeouts reap it; with preconnect it
+        # is a ring bot, ended by its deadline or a non-answered receipt.
+        transport = resolve_transport(agent, req.transport)
+        ring_flags = None
+        if req.preconnect is not None:
+            ring_flags = ring_bot_flags(
+                ring_timeout=req.ring_timeout, await_answer=req.preconnect == "media"
+            )
         try:
             settings.require(*agent.required_settings)
-            creds = await provision_pairing(
-                state, agent.agent_id, resolve_transport(agent, req.transport)
+            creds, room_key = await provision_pairing(
+                state, agent.agent_id, transport, ring_flags=ring_flags
             )
         except (TransportUnavailable, MissingSettingError) as e:
             raise HTTPException(status_code=503, detail=str(e))
         payload["room_url"] = creds.connection["room_url"]
         payload["token"] = creds.connection["token"]
+        ring.room_key = room_key
+        ring.transport = transport
+        ring.ring_bot = ring_flags is not None
+        ring.awaits_answer = req.preconnect == "media"
 
+    result = await _push(state, agent_id, reg, payload)
+    state.rings.add(ring)
+    event(
+        _log,
+        "ring.sent",
+        agent=agent_id,
+        call_id=ring.call_id,
+        mode=ring.mode,
+        preconnect=ring.preconnect,
+        ring_timeout=ring.ring_timeout,
+    )
+
+    return RingResponse(
+        call_id=payload["call_id"],
+        agent_id=reg.app_agent_id,
+        display_name=reg.display_name,
+        mode=ring.mode,
+        apns_status=result.status,
+        apns_id=result.apns_id,
+    )
+
+
+@router.post("/ring/{agent_id}/cancel", response_model=RingCancelResponse)
+async def cancel_ring(
+    agent_id: str, req: RingCancelRequest, request: Request
+) -> RingCancelResponse:
+    state = request.app.state
+    ring = state.rings.get(req.call_id)
+    if ring is None or ring.agent_id != agent_id:
+        raise HTTPException(
+            status_code=404, detail=f"No ring {req.call_id!r} for agent {agent_id!r}."
+        )
+    if ring.status is not None:
+        # The ring is over (answered, declined, timed out, …): nothing to withdraw.
+        raise HTTPException(
+            status_code=409,
+            detail={"call_id": ring.call_id, "status": ring.status, "reason": "ring ended"},
+        )
+    if ring.canceled:
+        raise HTTPException(
+            status_code=409,
+            detail={"call_id": ring.call_id, "status": None, "reason": "already canceled"},
+        )
+
+    if ring.preconnect == "media" and ring.room_key and await _human_in_room(state, ring):
+        # In-band cancel: the phone is in the room with the agent, so the agent
+        # leaving IS the cancel. No push, so no flash on the lock screen.
+        ended = await state.dispatcher.disconnect(ring.room_key)
+        ring.canceled = True
+        event(_log, "ring.canceled", call_id=ring.call_id, method="in_band", bot_ended=ended)
+        return RingCancelResponse(call_id=ring.call_id, method="in_band", bot_ended=ended)
+
+    reg = await state.registry.get_voip(agent_id)
+    if reg is None:
+        raise HTTPException(
+            status_code=404, detail=f"No VoIP registration for agent {agent_id!r}."
+        )
+    # A cancel push carries no target_id/agent_id: a 0.1 app then takes it as
+    # malformed (a brief flash, then ended) instead of ringing it as a new call.
+    payload: dict = {"action": "cancel", "call_id": ring.call_id}
+    if reg.display_name is not None:
+        payload["display_name"] = reg.display_name
+    result = await _push(state, agent_id, reg, payload)
+    ring.canceled = True
+    # The ring's bot (if any) has no one to wait for now.
+    ended = bool(ring.room_key) and await state.dispatcher.disconnect(ring.room_key)
+    event(_log, "ring.canceled", call_id=ring.call_id, method="push", bot_ended=ended)
+    return RingCancelResponse(
+        call_id=ring.call_id,
+        method="push",
+        bot_ended=ended,
+        apns_status=result.status,
+        apns_id=result.apns_id,
+    )
+
+
+async def _push(state, agent_id: str, reg, payload: dict):
+    """Send a VoIP push; 503 without APNs config, 502 (and evict a dead token) on
+    an APNs rejection."""
     try:
         result = await state.apns.send_voip_push(
             voip_token=reg.voip_token, bundle_id=reg.bundle_id, payload=payload
@@ -93,12 +205,15 @@ async def ring(
         if result.hint:
             detail["hint"] = result.hint
         raise HTTPException(status_code=502, detail=detail)
+    return result
 
-    return RingResponse(
-        call_id=payload["call_id"],
-        agent_id=reg.app_agent_id,
-        display_name=reg.display_name,
-        mode=mode,
-        apns_status=result.status,
-        apns_id=result.apns_id,
-    )
+
+async def _human_in_room(state, ring: TrackedRing) -> bool:
+    service = getattr(state, ring.transport or "", None)
+    if service is None:
+        return False
+    try:
+        return await service.human_in_room(ring.room_key)
+    except Exception as e:  # can't tell: fall back to the cancel push
+        event(_log, "ring.presence_failed", call_id=ring.call_id, error=str(e))
+        return False

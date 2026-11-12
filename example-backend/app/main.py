@@ -19,6 +19,7 @@ from app.config import settings
 from app.dispatch import Dispatcher
 from app.obs import event, get_logger, setup_logging
 from app.registry import SQLiteRegistry
+from app.rings import RingTracker
 from app.routes import admin, connect, inbound, webhooks, webrtc
 from app.transports.daily import DailyService
 from app.transports.smallwebrtc import SmallWebRTCService
@@ -62,6 +63,7 @@ async def lifespan(app: FastAPI):
     # directly (LAN / self-hosted), not behind an HTTP-only ingress like Railway.
     app.state.smallwebrtc = SmallWebRTCService()
     app.state.apns = ApnsSender(apns_client)
+    app.state.rings = RingTracker()
 
     event(
         log,

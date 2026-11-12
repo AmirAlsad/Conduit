@@ -12,16 +12,40 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Transport = Literal["daily", "livekit", "smallwebrtc"]
+Preconnect = Literal["credentials", "media"]
+
+# The receipt statuses the app sends today (docs/INBOUND_CALLS.md §4). Receipts are
+# not validated against this set: a server must accept statuses it doesn't know.
+RING_STATUSES = (
+    "answered",
+    "declined",
+    "busy",
+    "suppressed_by_focus",
+    "unanswered",
+    "canceled",
+)
+
+
+class RingContext(BaseModel):
+    """The ring a pairing request is made for: the app sends it when it fetches
+    credentials while the phone is still ringing (``preconnect``)."""
+
+    call_id: str = Field(..., min_length=1)
+    # True when the app will join the room before the user answers ("media"):
+    # the bot must then stay silent until it hears call-answered.
+    await_answer: bool = False
 
 
 class ConnectRequest(BaseModel):
     """POST /connect (pairing) and POST /credentials (direct) share this body.
     ``transport`` omitted → fall back to the agent's default, then the engine default.
     The default agent is ``loopback`` so a bare deploy works with zero AI-provider
-    keys; the path routes (/connect/{agent_id}) override ``agent_id`` entirely."""
+    keys; the path routes (/connect/{agent_id}) override ``agent_id`` entirely.
+    ``ring`` is pairing-only and ignored by /credentials."""
 
     agent_id: str = "loopback"
     transport: Transport | None = None
+    ring: RingContext | None = None
 
 
 class DisconnectRequest(BaseModel):
@@ -58,6 +82,27 @@ class RingRequest(BaseModel):
 
     inline: bool = False
     transport: Transport | None = None
+    # Shortens this ring (whole seconds; the app clamps it to [10, its own timeout]).
+    ring_timeout: int | None = Field(default=None, gt=0)
+    # Ask the app to prepare during the ring: "credentials" fetches /connect while
+    # ringing, "media" also joins the room (the bot then waits for call-answered).
+    preconnect: Preconnect | None = None
+
+
+class RingCancelRequest(BaseModel):
+    """POST /admin/ring/{agent_id}/cancel — withdraw a ring that is still ringing."""
+
+    call_id: str = Field(..., min_length=1)
+
+
+class RingCancelResponse(BaseModel):
+    call_id: str
+    # "in_band": the agent left the pre-connected room (no push).
+    # "push": a cancel push was sent.
+    method: Literal["in_band", "push"]
+    bot_ended: bool
+    apns_status: int | None = None
+    apns_id: str | None = None
 
 
 class RingResponse(BaseModel):
@@ -72,10 +117,11 @@ class RingResponse(BaseModel):
 class RingStatusRequest(BaseModel):
     """POST /inbound/status/{agent_id} — the app reporting how a ring ended
     (docs/INBOUND_CALLS.md, ring-status receipts). Fire-and-forget on the app
-    side; the engine just logs it."""
+    side. ``status`` is any string: RING_STATUSES lists today's values, and newer
+    apps may send more."""
 
     call_id: str = Field(..., min_length=1)
-    status: Literal["answered", "declined", "busy", "suppressed_by_focus"]
+    status: str = Field(..., min_length=1, max_length=64)
 
 
 class ConnectionPayload(BaseModel):

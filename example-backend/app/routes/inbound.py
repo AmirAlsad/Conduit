@@ -8,8 +8,11 @@ CallKit handle, which are stored and echoed in the ring push.
 
 /inbound/status is the receipt channel: each ring's push carries a status_url
 pointing here, and the app reports how the ring ended (answered / declined /
-busy / suppressed_by_focus) — so an agent that really needed to reach the user
-knows whether the ring landed. The engine just logs the receipt.
+busy / suppressed_by_focus / unanswered / canceled, and any status a newer app
+adds) — so an agent that really needed to reach the user knows whether the ring
+landed. The engine logs every receipt and records it on the ring tracker. For a
+ring bot (one dispatched with the ring flags), "answered" tells the bot through
+its control pipe, and any other status ends it.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.agents import get_agent
 from app.auth import require_engine_key
-from app.models import RingStatusRequest, VoipRegisterRequest
+from app.models import RING_STATUSES, RingStatusRequest, VoipRegisterRequest
 from app.obs import event, get_logger
 from app.registry import VoipRegistration
 
@@ -60,10 +63,35 @@ async def unregister(agent_id: str, request: Request):
 
 
 @router.post("/status/{agent_id}")
-async def ring_status(agent_id: str, req: RingStatusRequest):
+async def ring_status(agent_id: str, req: RingStatusRequest, request: Request):
     try:
         get_agent(agent_id)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Unknown agent_id: {agent_id!r}")
-    event(_log, "inbound.ring_status", agent=agent_id, call_id=req.call_id, status=req.status)
+    fields = {"agent": agent_id, "call_id": req.call_id, "status": req.status}
+    if req.status not in RING_STATUSES:
+        fields["known"] = False
+    event(_log, "inbound.ring_status", **fields)
+
+    state = request.app.state
+    ring = state.rings.get(req.call_id)
+    # One receipt per ring: only the first one steers the ring's bot, so a stray
+    # duplicate can't end a call that was answered.
+    if ring is None or ring.agent_id != agent_id or ring.status is not None:
+        return {"ok": True}
+    ring.status = req.status
+    if ring.ring_bot and ring.room_key:
+        if req.status == "answered":
+            # Releases a bot awaiting the answer even if the app never sends
+            # call-answered (a 0.1 app ignores preconnect), and stops its deadline.
+            await state.dispatcher.send_control(ring.room_key, "answered")
+        else:
+            ended = await state.dispatcher.disconnect(ring.room_key)
+            event(
+                _log,
+                "inbound.ring_bot_ended",
+                call_id=req.call_id,
+                status=req.status,
+                ended=ended,
+            )
     return {"ok": True}

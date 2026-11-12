@@ -41,8 +41,18 @@ def _livekit_connection(server_url: str, token: str, room_name: str) -> dict:
 
 
 async def provision_pairing(
-    state, agent_id: str, transport: str, *, base_url: str | None = None
-) -> ConnectionPayload:
+    state,
+    agent_id: str,
+    transport: str,
+    *,
+    base_url: str | None = None,
+    ring_flags: list[str] | None = None,
+) -> tuple[ConnectionPayload, str | None]:
+    """Returns the payload and the room key the bot was dispatched into (None for
+    smallwebrtc, which has no room). ``ring_flags`` (app.rings.ring_bot_flags)
+    dispatch the bot for a ring: with a deadline and a control channel."""
+    extra = list(ring_flags or ())
+    control = bool(ring_flags)
     if transport == "daily":
         daily = _daily(state)
         room = await daily.create_room(exp_secs=settings.pairing_room_exp_secs)
@@ -54,7 +64,7 @@ async def provision_pairing(
         )
         argv = [
             "--transport", "daily", "--agent", agent_id,
-            "--room-url", room.url, "--token", bot_token,
+            "--room-url", room.url, "--token", bot_token, *extra,
         ]
 
         async def cleanup() -> None:
@@ -62,14 +72,14 @@ async def provision_pairing(
 
         await state.dispatcher.dispatch(
             room_key=room.name, agent_id=agent_id, transport="daily",
-            bot_argv=argv, cleanup=cleanup,
+            bot_argv=argv, cleanup=cleanup, control=control,
         )
         return ConnectionPayload(
             transport="daily",
             connection={"room_url": room.url, "token": app_token},
             agent_id=agent_id,
             expires_at=iso_expiry(settings.pairing_token_ttl_secs),
-        )
+        ), room.name
 
     if transport == "livekit":
         lk = _livekit(state)
@@ -78,18 +88,19 @@ async def provision_pairing(
         bot_token = lk.agent_token(room_name, ttl_secs=settings.pairing_token_ttl_secs)
         argv = [
             "--transport", "livekit", "--agent", agent_id,
-            "--url", lk.url, "--room-name", room_name, "--token", bot_token,
+            "--url", lk.url, "--room-name", room_name, "--token", bot_token, *extra,
         ]
         # LiveKit Cloud auto-closes empty rooms; no cleanup needed.
         await state.dispatcher.dispatch(
-            room_key=room_name, agent_id=agent_id, transport="livekit", bot_argv=argv,
+            room_key=room_name, agent_id=agent_id, transport="livekit",
+            bot_argv=argv, control=control,
         )
         return ConnectionPayload(
             transport="livekit",
             connection=_livekit_connection(lk.url, app_token, room_name),
             agent_id=agent_id,
             expires_at=iso_expiry(settings.pairing_token_ttl_secs),
-        )
+        ), room_name
 
     if transport == "smallwebrtc":
         # No room, no dispatch: the client's offer POST is the rendezvous and the
@@ -106,7 +117,7 @@ async def provision_pairing(
             connection={"room_url": f"{base}/webrtc/{agent_id}/offer", "token": token},
             agent_id=agent_id,
             expires_at=iso_expiry(settings.pairing_token_ttl_secs),
-        )
+        ), None
 
     raise TransportUnavailable(f"Unknown transport: {transport!r}")
 

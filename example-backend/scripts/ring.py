@@ -11,9 +11,17 @@ in the push (the bot is dispatched before the answer). The push also carries the
 caller ``display_name`` (and ``handle``) the app registered, when it sent them;
 the script prints the name it rang as.
 
+``--ring-timeout N`` shortens the ring (the app clamps it to at least 10 s).
+``--preconnect credentials|media`` asks the app to prepare during the ring.
+``--cancel CALL_ID`` withdraws a ring that is still ringing (no new ring);
+``--cancel-after SECONDS`` rings, waits, then cancels that ring.
+
 Usage:
   uv run python scripts/ring.py --agent live
   uv run python scripts/ring.py --agent loopback --inline --base-url https://<host>
+  uv run python scripts/ring.py --agent tone --inline --preconnect media --ring-timeout 30
+  uv run python scripts/ring.py --agent live --cancel-after 8
+  uv run python scripts/ring.py --agent live --cancel <call_id>
 
 ``--base-url`` defaults to ``PUBLIC_BASE_URL`` from ``.env``, else
 ``http://localhost:8000``. ``ENGINE_API_KEY`` is read from ``.env``. APNs setup
@@ -26,6 +34,7 @@ import argparse
 import json
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -44,12 +53,27 @@ except Exception:
     _SSL_CONTEXT = None
 
 
-def _post_ring(base_url: str, agent: str, inline: bool, transport: str | None):
-    settings.require("engine_api_key")
-    url = base_url.rstrip("/") + f"/admin/ring/{agent}"
+def ring_body(
+    *,
+    inline: bool,
+    transport: str | None = None,
+    ring_timeout: int | None = None,
+    preconnect: str | None = None,
+) -> dict:
+    """The /admin/ring body; options left unset are omitted (today's ring)."""
     body: dict = {"inline": inline}
     if transport:
         body["transport"] = transport
+    if ring_timeout is not None:
+        body["ring_timeout"] = ring_timeout
+    if preconnect:
+        body["preconnect"] = preconnect
+    return body
+
+
+def _post(base_url: str, path: str, body: dict):
+    settings.require("engine_api_key")
+    url = base_url.rstrip("/") + path
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
@@ -85,6 +109,35 @@ _HINTS = {
     503: "Engine missing APNs (or transport) config — set the APNS_* vars on the engine.",
 }
 
+_CANCEL_HINTS = {
+    404: "The engine doesn't know that call_id for this agent (wrong agent, or the "
+    "engine restarted since the ring — rings are tracked in memory).",
+    409: "The ring is already over (its receipt arrived) or was already canceled.",
+}
+
+
+def _fail(status: int, body, hints: dict) -> None:
+    print(f"HTTP {status}")
+    print(json.dumps(body, indent=2) if isinstance(body, dict) else body)
+    if hint := hints.get(status) or _HINTS.get(status):
+        print(f"\n⚠️  {hint}")
+    sys.exit(1)
+
+
+def _cancel(base_url: str, agent: str, call_id: str, as_json: bool) -> None:
+    status, body = _post(base_url, f"/admin/ring/{agent}/cancel", {"call_id": call_id})
+    if status != 200:
+        _fail(status, body, _CANCEL_HINTS)
+    if as_json:
+        print(json.dumps(body, indent=2))
+        return
+    if body["method"] == "in_band":
+        print(f"Canceled {call_id} in band: the agent left the pre-connected room (no push).")
+    else:
+        print(f"Canceled {call_id} with a cancel push (APNs {body['apns_status']}).")
+    if body["bot_ended"]:
+        print("The ring's bot was ended.")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ring the Conduit app (inbound VoIP call).")
@@ -100,6 +153,30 @@ def main() -> None:
         help="Transport for --inline provisioning (default: the agent's own).",
     )
     parser.add_argument(
+        "--ring-timeout",
+        type=int,
+        metavar="SECONDS",
+        help="Shorten this ring (the app clamps it to at least 10 s and its own maximum).",
+    )
+    parser.add_argument(
+        "--preconnect",
+        choices=["credentials", "media"],
+        help="Ask the app to prepare while ringing: fetch credentials, or also join "
+        "the room (the bot then waits for the answer).",
+    )
+    cancel = parser.add_mutually_exclusive_group()
+    cancel.add_argument(
+        "--cancel",
+        metavar="CALL_ID",
+        help="Withdraw a ring that is still ringing instead of ringing (ring options are ignored).",
+    )
+    cancel.add_argument(
+        "--cancel-after",
+        type=float,
+        metavar="SECONDS",
+        help="Ring, wait this long, then cancel the ring.",
+    )
+    parser.add_argument(
         "--base-url",
         default=settings.public_base_url or "http://localhost:8000",
         help="Dispatcher base URL (default: PUBLIC_BASE_URL or http://localhost:8000).",
@@ -107,16 +184,25 @@ def main() -> None:
     parser.add_argument("--json", action="store_true", help="Print the raw payload instead.")
     args = parser.parse_args()
 
-    status, body = _post_ring(args.base_url, args.agent, args.inline, args.transport)
+    if args.cancel:
+        _cancel(args.base_url, args.agent, args.cancel, args.json)
+        return
+
+    body = ring_body(
+        inline=args.inline,
+        transport=args.transport,
+        ring_timeout=args.ring_timeout,
+        preconnect=args.preconnect,
+    )
+    status, body = _post(args.base_url, f"/admin/ring/{args.agent}", body)
     if status != 200:
-        print(f"HTTP {status}")
-        print(json.dumps(body, indent=2) if isinstance(body, dict) else body)
-        if hint := _HINTS.get(status):
-            print(f"\n⚠️  {hint}")
-        sys.exit(1)
+        _fail(status, body, {})
 
     if args.json:
         print(json.dumps(body, indent=2))
+        if args.cancel_after is not None:
+            time.sleep(args.cancel_after)
+            _cancel(args.base_url, args.agent, body["call_id"], args.json)
         return
 
     print(f"\nRinging '{args.agent}' (call_id {body['call_id']}, {body['mode']} mode)")
@@ -125,9 +211,21 @@ def main() -> None:
     else:
         print("No caller name: this registration predates names, so the app will show its own.")
     print("APNs accepted the push — the device should be ringing now.")
+    if args.preconnect:
+        print(f"Pre-connect requested: {args.preconnect}.")
     if body["mode"] == "inline":
-        print("NOTE: inline mode already dispatched the bot; a decline leaves it")
-        print("running until the pipeline timeouts reap it.")
+        if args.preconnect:
+            print("NOTE: inline mode already dispatched the bot; it ends on a decline")
+            print("(or any receipt but answered) and when the ring deadline passes.")
+        else:
+            print("NOTE: inline mode already dispatched the bot; a decline leaves it")
+            print("running until the pipeline timeouts reap it.")
+    if args.cancel_after is not None:
+        print(f"Canceling in {args.cancel_after:g} s…")
+        time.sleep(args.cancel_after)
+        _cancel(args.base_url, args.agent, body["call_id"], args.json)
+    else:
+        print(f"To withdraw it: scripts/ring.py --agent {args.agent} --cancel {body['call_id']}")
 
 
 if __name__ == "__main__":

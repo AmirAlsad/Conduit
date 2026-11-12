@@ -39,9 +39,23 @@ class FakeLiveKit:
 class FakeDispatcher:
     def __init__(self):
         self.calls = []
+        self.controls = []
+        self.sent = []  # (room_key, control line)
+        self.disconnected = []
 
-    async def dispatch(self, *, room_key, agent_id, transport, bot_argv, cleanup=None):
+    async def send_control(self, room_key, message):
+        self.sent.append((room_key, message))
+        return True
+
+    async def disconnect(self, room_key):
+        self.disconnected.append(room_key)
+        return True
+
+    async def dispatch(
+        self, *, room_key, agent_id, transport, bot_argv, cleanup=None, control=False
+    ):
         self.calls.append((room_key, agent_id, transport, tuple(bot_argv)))
+        self.controls.append(control)
         return 12345
 
 

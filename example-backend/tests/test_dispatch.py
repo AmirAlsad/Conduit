@@ -120,3 +120,61 @@ async def test_disconnect_terminates_held_handle(monkeypatch):
         if await reg.active_bot("r1") is None:
             break
     assert await disp.disconnect("r1") is False
+
+
+class FakeStdin:
+    def __init__(self, broken=False):
+        self.written = b""
+        self.broken = broken
+
+    def write(self, data):
+        if self.broken:
+            raise BrokenPipeError
+        self.written += data
+
+    async def drain(self):
+        pass
+
+
+async def test_control_dispatch_gets_a_stdin_pipe_and_send_control_writes_lines(monkeypatch):
+    reg = SQLiteRegistry(":memory:")
+    disp = Dispatcher(reg)
+    proc = FakeProc()
+    proc.stdin = FakeStdin()
+    seen = {}
+
+    async def fake_exec(*args, **kwargs):
+        seen.update(kwargs)
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    await disp.dispatch(
+        room_key="r1", agent_id="live", transport="daily",
+        bot_argv=["--token", "t", "--ring-deadline", "75"], control=True,
+    )
+    assert seen["stdin"] is asyncio.subprocess.PIPE
+    assert await disp.send_control("r1", "answered") is True
+    assert proc.stdin.written == b"answered\n"
+    assert await disp.send_control("nope", "answered") is False
+
+    proc.stdin.broken = True  # the bot exited between our check and the write
+    assert await disp.send_control("r1", "answered") is False
+
+
+async def test_plain_dispatch_keeps_inherited_stdin_and_cannot_be_controlled(monkeypatch):
+    reg = SQLiteRegistry(":memory:")
+    disp = Dispatcher(reg)
+    proc = FakeProc()
+    proc.stdin = None
+    seen = {}
+
+    async def fake_exec(*args, **kwargs):
+        seen.update(kwargs)
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    await disp.dispatch(
+        room_key="r1", agent_id="live", transport="daily", bot_argv=["--token", "t"]
+    )
+    assert seen["stdin"] is None
+    assert await disp.send_control("r1", "answered") is False

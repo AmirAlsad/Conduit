@@ -52,6 +52,12 @@ class LiveKitService:
         # The agent grant makes LiveKit clients aware an agent has joined.
         return self._token(room_name, name=settings.bot_name, agent=True, ttl_secs=ttl_secs)
 
+    async def human_in_room(self, room_name: str) -> bool:
+        """Whether anyone but the bot is in the room (RoomService.ListParticipants)."""
+        async with api.LiveKitAPI(self.url, self._key, self._secret) as lk:
+            resp = await lk.room.list_participants(api.ListParticipantsRequest(room=room_name))
+        return any(p.name != settings.bot_name for p in resp.participants)
+
     # --- webhook ---
 
     def verify_and_parse_webhook(self, raw_body: bytes, auth_header: str | None):

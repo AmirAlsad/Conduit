@@ -1,0 +1,70 @@
+"""scripts/ring.py — request bodies for the new flags, and the cancel flows,
+with the HTTP call faked."""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+import ring  # noqa: E402
+
+
+def test_ring_body_omits_unset_options():
+    assert ring.ring_body(inline=False) == {"inline": False}
+    assert ring.ring_body(
+        inline=True, transport="livekit", ring_timeout=30, preconnect="media"
+    ) == {"inline": True, "transport": "livekit", "ring_timeout": 30, "preconnect": "media"}
+
+
+def _run(monkeypatch, argv, responses):
+    calls = []
+    pending = list(responses)
+
+    def fake_post(base_url, path, body):
+        calls.append((path, body))
+        return pending.pop(0)
+
+    monkeypatch.setattr(ring, "_post", fake_post)
+    monkeypatch.setattr(ring.time, "sleep", lambda secs: calls.append(("sleep", secs)))
+    monkeypatch.setattr(sys, "argv", ["ring.py", *argv])
+    ring.main()
+    return calls
+
+
+_RANG = (200, {"call_id": "c-1", "agent_id": "u", "display_name": "Ada", "mode": "pairing",
+               "apns_status": 200, "apns_id": "a"})
+_CANCELED = (200, {"call_id": "c-1", "method": "push", "bot_ended": False,
+                   "apns_status": 200, "apns_id": "b"})
+
+
+def test_cancel_after_rings_waits_then_cancels(monkeypatch, capsys):
+    calls = _run(
+        monkeypatch,
+        ["--agent", "live", "--preconnect", "media", "--ring-timeout", "20", "--cancel-after", "5"],
+        [_RANG, _CANCELED],
+    )
+    assert calls == [
+        ("/admin/ring/live", {"inline": False, "ring_timeout": 20, "preconnect": "media"}),
+        ("sleep", 5.0),
+        ("/admin/ring/live/cancel", {"call_id": "c-1"}),
+    ]
+    assert "cancel push" in capsys.readouterr().out
+
+
+def test_cancel_only_sends_the_cancel(monkeypatch):
+    calls = _run(monkeypatch, ["--agent", "live", "--cancel", "c-9"], [_CANCELED])
+    assert calls == [("/admin/ring/live/cancel", {"call_id": "c-9"})]
+
+
+def test_cancel_conflict_exits_nonzero(monkeypatch, capsys):
+    with pytest.raises(SystemExit) as exc:
+        _run(monkeypatch, ["--cancel", "c-9"], [(409, {"detail": "ring ended"})])
+    assert exc.value.code == 1
+    assert "already over" in capsys.readouterr().out
+
+
+def test_cancel_and_cancel_after_are_exclusive(monkeypatch):
+    with pytest.raises(SystemExit):
+        _run(monkeypatch, ["--cancel", "c-9", "--cancel-after", "3"], [])

@@ -18,11 +18,15 @@ from app.agents import get_agent, resolve_transport
 from app.auth import require_engine_key
 from app.config import MissingSettingError, settings
 from app.models import ConnectionPayload, ConnectRequest
+from app.obs import event, get_logger
 from app.provisioning import (
     TransportUnavailable,
     provision_direct,
     provision_pairing,
 )
+from app.rings import ring_bot_flags
+
+_log = get_logger("connect")
 
 router = APIRouter(dependencies=[Depends(require_engine_key)])
 
@@ -41,12 +45,43 @@ async def _provision(request: Request, req: ConnectRequest, *, direct: bool) -> 
         settings.require(*agent.required_settings)
         if direct:
             return await provision_direct(request.app.state, agent.agent_id, transport)
+        state = request.app.state
+        ring_flags = None
+        if req.ring is not None:
+            # The app is pairing while the phone still rings (preconnect): the bot
+            # gets the ring deadline, and with await_answer stays silent until
+            # call-answered.
+            tracked = state.rings.get(req.ring.call_id)
+            ring_flags = ring_bot_flags(
+                ring_timeout=tracked.ring_timeout if tracked else None,
+                await_answer=req.ring.await_answer,
+            )
         # base_url backs smallwebrtc's offer URL when PUBLIC_BASE_URL is unset:
         # the device reached us at this address, so the offer URL at the same
         # host is correct by construction (the LAN case).
-        return await provision_pairing(
-            request.app.state, agent.agent_id, transport, base_url=str(request.base_url)
+        payload, room_key = await provision_pairing(
+            state,
+            agent.agent_id,
+            transport,
+            base_url=str(request.base_url),
+            ring_flags=ring_flags,
         )
+        if req.ring is not None and room_key is not None:
+            state.rings.attach_bot(
+                req.ring.call_id,
+                agent.agent_id,
+                room_key=room_key,
+                transport=transport,
+                awaits_answer=req.ring.await_answer,
+            )
+            event(
+                _log,
+                "connect.ring_bot",
+                call_id=req.ring.call_id,
+                room=room_key,
+                await_answer=req.ring.await_answer,
+            )
+        return payload
     except (TransportUnavailable, MissingSettingError) as e:
         raise HTTPException(status_code=503, detail=str(e))
 
