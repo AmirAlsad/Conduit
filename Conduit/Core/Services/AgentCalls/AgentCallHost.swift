@@ -91,6 +91,10 @@ final class AgentCallHost: CallEngineDelegate {
 
     func callEngine(_ engine: CallEngine, didChangeStateFrom old: CallState, to new: CallState) {
         trace("state: \(old) -> \(new)")
+        switch new {
+        case .ended, .failed, .idle: announcer.stopNow()
+        case .dialing, .incomingRinging, .connecting, .connected, .reconnecting: break
+        }
         guard old == .dialing, case .connecting = new,
               let id = engine.activeCall?.targetID, let agent = agent(id: id) else { return }
         // Teach Siri's calling domain that this contact is called via Conduit —

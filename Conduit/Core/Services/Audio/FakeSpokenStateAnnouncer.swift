@@ -17,6 +17,7 @@ final class FakeSpokenStateAnnouncer: SpokenStateAnnouncing {
     /// The phrase currently repeating, if any.
     private(set) var repeatingPhrase: SpokenPhrase?
     private(set) var stopRepeatingCount = 0
+    private(set) var stopNowCount = 0
 
     func announce(_ phrase: SpokenPhrase) {
         announced.append(phrase)
@@ -30,5 +31,10 @@ final class FakeSpokenStateAnnouncer: SpokenStateAnnouncing {
     func stopRepeating() {
         repeatingPhrase = nil
         stopRepeatingCount += 1
+    }
+
+    func stopNow() {
+        repeatingPhrase = nil
+        stopNowCount += 1
     }
 }

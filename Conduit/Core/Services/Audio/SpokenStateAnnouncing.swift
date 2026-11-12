@@ -16,6 +16,10 @@ protocol SpokenStateAnnouncing: AnyObject {
     func announce(_ phrase: SpokenPhrase)
     /// Speak a phrase now and repeat it on a fixed cadence until stopped.
     func startRepeating(_ phrase: SpokenPhrase)
-    /// Stop any repeating announcement.
+    /// Stop any repeating announcement. A ringback that has not yet rung for its
+    /// minimum length keeps ringing until it has, and a phrase announced meanwhile
+    /// is spoken when it stops, so a call that connects at once still rings once.
     func stopRepeating()
+    /// Silence everything immediately: the call is over.
+    func stopNow()
 }

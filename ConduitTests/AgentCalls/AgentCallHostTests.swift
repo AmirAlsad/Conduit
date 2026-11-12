@@ -350,6 +350,32 @@ struct AgentCallHostTests {
         #expect(try h.loggedEntries().map(\.outcome) == [.failed])
     }
 
+    @Test func connectingLetsTheRingbackFinishButAnEndedCallSilencesItAtOnce() async throws {
+        let h = try AgentCallHostHarness()
+        await h.placeCall()
+        #expect(h.announcer.repeatingPhrase == .connecting)
+
+        h.system.deliverTransportEvent(.connected)
+        await h.system.activateAudioSession()
+        await h.system.awaitPendingWork()
+        #expect(h.announcer.stopRepeatingCount == 1)
+        #expect(h.announcer.stopNowCount == 0)
+
+        await h.engine.endCall()
+        #expect(h.announcer.stopNowCount >= 1)
+    }
+
+    @Test func hangingUpWhileStillRingingSilencesTheRingbackAtOnce() async throws {
+        let h = try AgentCallHostHarness()
+        await h.placeCall()
+        #expect(h.announcer.repeatingPhrase == .connecting)
+
+        await h.engine.endCall()
+
+        #expect(h.announcer.stopNowCount >= 1)
+        #expect(h.announcer.repeatingPhrase == nil)
+    }
+
     @Test func providerResetWhileRingingIsSilentAndRecordedAsFailed() async throws {
         let h = try AgentCallHostHarness()
         h.ring()
