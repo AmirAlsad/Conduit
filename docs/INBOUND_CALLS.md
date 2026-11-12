@@ -245,10 +245,13 @@ One receipt per ring, describing the *ring*: a normal hang-up after an answered 
 sends nothing further. Omit `status_url` and the app sends nothing. Return any 2xx;
 the app never retries.
 
-If you dispatched an agent before the answer (inline credentials, §2), end it when
-the ring's first receipt is anything other than `answered`: nobody is coming. Act on
-the first receipt only, so a stray duplicate can't end an answered call. The
-reference engine does this for every inline ring, pre-connected or not.
+If you dispatched an agent before the answer (inline credentials, §2, or a room you
+prepared for a pre-connected pairing ring, §5), end it when the ring's first receipt
+is anything other than `answered`: nobody is coming. Act on the first receipt only,
+so a stray duplicate can't end an answered call. The reference engine does this for
+every inline ring, pre-connected or not, and for every pairing ring it prepared at
+ring time; it also ends a prepared agent at `answered` when the app never asked for
+that room (an app that did not prepare connects with a request of its own).
 
 **Accept statuses you don't know.** Newer app builds may add statuses; answer them
 with a 2xx like any other (a 4xx only loses the receipt). Treat any status other
@@ -275,9 +278,9 @@ call starts faster on answer:
 
 The app uses the lower of what you ask for, what it is configured to allow, and
 what the agent's transport supports (not every transport can join during a ring:
-LiveKit does; SmallWebRTC stays at `credentials`; Daily does too, apart from a
-DEBUG experiment in development builds of the app), so you may see `credentials`
-behaviour for a `media` ring. Anything missing means today's behaviour.
+LiveKit and Daily do, Daily with the agent's audio unsubscribed until the answer;
+SmallWebRTC stays at `credentials`), so you may see `credentials` behaviour for a
+`media` ring. Anything missing means today's behaviour.
 
 `"media"` is your promise that the agent holds its audio until the user answers.
 Your agent must:
@@ -286,7 +289,9 @@ Your agent must:
 2. End at once on `end-call`, as for any call. A decline, a timeout or a cancel
    while the phone is in the room all send it.
 3. End by itself if no `call-connected` arrives within the ring timeout plus 15 s
-   of being dispatched. Use the `ring_timeout` you sent; if the push carried none,
+   of the push (an agent started before the push, as the reference engine's are,
+   adds the time the push was held for it; the reference engine adds its whole
+   `RING_BOT_WAIT_SECS` bound). Use the `ring_timeout` you sent; if the push carried none,
    the phone rings for the app's own configured timeout (60 s by default, but it
    can be longer or unlimited), which you can only assume. Send `ring_timeout`
    when you want a firm bound.
@@ -304,10 +309,50 @@ Your agent must:
 With `"credentials"` the app joins only after the answer, so the human joining
 already means "answered"; as on every call, greet on `call-connected` (§6).
 
+### Ready when the user picks up
+
+The phone joins a `media` ring's room within a fraction of a second of the push;
+what the user waits for is your agent. In one Daily `media` ring with inline
+credentials the phone was in the room 0.3 s after the push, the user answered at
+2 s, and the agent joined at 6.7 s (2 to 5 s in other rings that day), so the
+answered call sat connecting for 4.6 s. So:
+
+- **Start your agent first, and send the push once it is in the room**, bounding
+  that wait to a few seconds so a slow agent never holds the ring back. At the very
+  least start it when you send the push, not when the phone asks for credentials
+  after the answer.
+- **Ask for pre-connect on every ring** to a device that lists `preconnect` in its
+  `push_features`: `"media"` when it also lists `call-connected` in `call_signals`
+  (and your agent waits for it), `"credentials"` otherwise. A device that lists
+  neither gets a plain ring, which works as before.
+- **Without inline credentials, return the room your agent is already in** to the
+  pairing request the app makes during the ring: it carries the ring's `call_id`
+  (`ring.call_id`, §2).
+
+The reference engine does all three by default (see the backend guide,
+`docs/backend/inbound-calls.md`); the room it prepares at ring time for a pairing
+ring uses the ring's transport (`--transport`, or the agent's default), and a
+request for another transport gets a fresh room. What the user experiences:
+
+| Case | What the user experiences |
+|---|---|
+| Ready at the answer (`media`, the agent in the room before the answer) | Connected the moment they pick up; nothing from the app is said; iOS activates the audio a fraction of a second later, `call-connected` reaches the agent then, and it greets. |
+| Answered before the agent was there (`media`, agent still starting) | Connecting from the answer, with no ringback; if still connecting a second after the answer, "Connecting" once; connected the moment the agent is in the room, then "Connected", then `call-connected`. No minimum connecting time applies to an answered call. |
+| Credentials only during the ring (`credentials`, or `media` lowered to it, e.g. SmallWebRTC) | The phone joins at the answer: connecting for the join plus the agent's readiness, with the same sounds as the row above; short if the agent is already in the room. |
+| Pre-connect failed (credentials refused, room unreachable, a drop, the agent not in the room within 30 s of the phone's join, or the agent leaving before it was there) | During the ring, nothing changes: it keeps ringing, and an answer connects as without pre-connect (an ordinary pairing request, no `ring`). After the answer, the call stays connecting and makes that ordinary request once. |
+
+An agent that never arrives fails the call: 30 s after the phone's join (the
+app's join timeout), then, for an answered pre-connected ring, once more after the
+ordinary request, the call ends as "Agent didn't join".
+
 ### Canceling a ring
 
 To withdraw a ring that is still ringing:
 
+- **Before the push.** A server that starts its agent first (§5, "Ready when the
+  user picks up") may be asked to cancel while it is still waiting for that agent:
+  send no push, and end the agent. The reference engine answers such a cancel with
+  `"method": "before_push"`.
 - **In band (preferred).** If the ring is pre-connected (`media`) and the phone is
   in the room, make your agent leave the room. The app takes the agent leaving a
   ringing call as the cancel, ends the ring and reports `canceled`. No push, so
@@ -366,9 +411,11 @@ session connects.** The app lists the messages it sends as `call_signals` in eve
 pairing request and in its token registration (§1). An agent started for a request
 or registration that lists `call-connected` keeps quiet until it arrives, then
 greets, once: a repeat after a reconnect is the same call. Before it, the device can
-already be in the room: during its ringback (the app shows "connecting" for at
-least about 2.6 s, so the first ring tone always plays in full), and, for a `media`
-ring, while the phone still rings. Being muted or in push-to-talk does not delay it:
+already be in the room: during its ringback on a call the user placed (the app
+shows "connecting" for at least about 2.6 s, so the first ring tone always plays in
+full), while an answered call is still connecting, and, for a `media` ring, while
+the phone still rings. A call answered with its agent already there says nothing
+of its own, so `call-connected` follows the answer within about a second. Being muted or in push-to-talk does not delay it:
 the user hears you. Treat it with `call-held` and `call-resumed` as state: the user
 is on the line once you have had `call-connected`, and away while the latest of the
 three is `call-held` (`call-connected` is never sent while the call is held; a call
@@ -379,8 +426,9 @@ before. **Fallback:** a listed `call-connected` can be lost, so once your agent
 knows the user answered (at once for an ordinary call; for a ring, its `answered`
 receipt, or the device joining a ring it joins only after the answer) and the device
 is in the room, it greets anyway if `call-connected` has not come within a grace
-period: 5 seconds at least, 10 to cover the app's own sequence after it joins (the
-minimum connecting time and its "Connected", which the app bounds at 5 s). The
+period: 5 seconds at least, 10 to cover the app's own sequence after it joins (on a
+call the user placed, the minimum connecting time; and its "Connected", which the
+app bounds at 5 s). The
 reference engine does all of this (`CALL_CONNECTED_GRACE_SECS`, default 10).
 
 On hold the app's mic is off and, where the transport can, its playout too. A

@@ -290,18 +290,25 @@ the November run**, so none is closed until the 0.2.0 sheet in
 - **The device session.** The 0.2.0 sheet in
   [DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md) (hold, pre-connect, cancel and
   timeout rings, the tone agent, microphone prompt, missed-call rows, Cue Lab, the
-  Daily ring-join switch, and regression calls on all three transports on Pipecat
+  Daily ring join, and regression calls on all three transports on Pipecat
   1.3.0, Daily 0.41.0 and LiveKit 2.19.0) is written and unrun.
 - **The spoken-cue mechanism.** Decide, from the Cue Lab results, what plays the
   cues so that they are heard on every transport and in every phase of a call. Until
   then the announcer is unchanged.
-- **Daily joining during a ring (experiment).** Daily declares it cannot connect
-  while ringing, so a `media` pre-connect ring is `credentials` on Daily. The package
-  carries three experimental join strategies (D1 default subscriptions, D2 agent audio
-  unsubscribed until the answer, D3 staged until the answer), selected in a DEBUG-only
-  Settings → Debug picker so the device session can test them with the tone agent.
-  Until one of them is shown on a device to leak no audio before the answer, Daily
-  rings stay at `credentials`.
+- **Daily joining during a ring: decided (November 2026).** The DEBUG picker's three
+  strategies were run on an iPhone 17 (iOS 27.0, locked, app not running). D1 (default
+  subscriptions during the ring) failed: no agent audio for the whole call, and the
+  route flipped between speaker and earpiece four times in 2.5 s. D2 (agent audio
+  unsubscribed from before the join until the first attach) passed: a silent 20 s
+  ring, clean agent audio at the answer, route settled within about 0.3 s, also with a
+  cold launch by the push. D3 (staged) showed no advantage. The package now joins
+  Daily during a `media` ring with D2's method and the picker is gone. Open: other
+  devices, Bluetooth/CarPlay routes, and rings longer than 20 s.
+- **Incoming calls ready when the user picks up.** Answered calls no longer wait for
+  the outgoing minimum or play the ringback (heard after an answer "as though I am the
+  one calling"); the reference backend asks for pre-connect by default and starts the
+  agent before it rings. Device run of the new timelines pending (DEVICE_VERIFICATION,
+  section W).
 - **SmallWebRTC on hold and signals.** Its SDK exposes no playout control, so a held
   SmallWebRTC call is silent only if the agent honours `call-held`, and the SDK reports
   nothing past the data channel's hand-off, so a signal's delivery cannot be

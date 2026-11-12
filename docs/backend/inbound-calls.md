@@ -197,6 +197,25 @@ answers `"method": "before_push"` and ends the bot; the ring request answers
 receipt for it during the wait does the same. A push APNs rejects ends the bot
 started for it.
 
+### When the user picks up
+
+The rule for any agent you ring with: **start your agent first and send the push
+when it is in the room** (bounded, so a slow agent never blocks the ring), and ask
+for pre-connect on every ring. The phone joins within a fraction of a second; what
+the user waits for is your agent's start. What the user experiences, with Conduit:
+
+| Case | What the user experiences |
+|---|---|
+| Ready at the answer (`media`, agent in the room before the answer) | Connected the moment they pick up; the app says nothing; `call-connected` reaches the agent when iOS activates the audio, a fraction of a second later. |
+| Answered before the agent was there | Connecting, with no ringback; "Connecting" once if still connecting a second after the answer; connected the moment the agent arrives (no minimum for answered calls), then "Connected" and `call-connected`. |
+| Credentials only during the ring (`credentials`, or SmallWebRTC) | The phone joins at the answer; connecting for the join plus the agent's readiness, short when the agent is already in the room; same sounds as above. |
+| Pre-connect failed | The ring keeps ringing; the answer connects with an ordinary `/connect` (no `ring`), which starts a fresh agent. |
+
+An agent that never arrives fails the call as "Agent didn't join": 30 s after the
+phone's join, then, for a pre-connected ring that was answered, once more after
+the ordinary request. The full contract is [Inbound calls (contract)](../INBOUND_CALLS.md),
+section 5.
+
 ### Ring timeout and pre-connect
 
 Two ring options for Conduit builds on call engine 0.2+ (older builds ignore
@@ -232,7 +251,8 @@ uv run python scripts/ring.py --agent live --preconnect none   # a plain ring
   a bot that met the phone in the room that the user answered. When it is sent:
   `credentials` fetches `/connect/{agent_id}` during the ring; `media` also
   joins the room before the answer (only where the transport supports it: LiveKit
-  does; Daily and SmallWebRTC stay at `credentials`). In pairing mode the app's
+  and Daily do, Daily with the agent's audio unsubscribed until the answer;
+  SmallWebRTC stays at `credentials`). In pairing mode the app's
   `/connect` then carries `"ring": {"call_id", "joins_before_answer"}`. The
   engine has already prepared a room and **ring bot** for the ring (Daily and
   LiveKit; SmallWebRTC has no room, its bot starts at the app's offer), and the

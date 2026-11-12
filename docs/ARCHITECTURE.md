@@ -85,8 +85,8 @@ transitively covers every model and voice. The layer sits behind the
 `CallTransport` protocol so the call state machine, connection parsing, and
 transport selection can unit-test against fakes (voice plan "Layer 1").
 The protocol also lets a transport state what it can do: whether it can join a
-room while the phone still rings (`canConnectWhileRinging` — LiveKit yes; Daily and
-SmallWebRTC no, Daily only behind a DEBUG experiment), and whether a call-control
+room while the phone still rings (`canConnectWhileRinging` — LiveKit and Daily yes;
+SmallWebRTC no), and whether a call-control
 signal (`call-connected`, `call-held`, `call-resumed`) reached the agent
 (`send(_:)`'s `CallSignalDelivery`). The engine adapts to what each one reports.
 
@@ -136,7 +136,7 @@ Conduit/
 ├── Features/       # Self-contained feature modules (Recents, Contacts,
 │                   #   Settings, AgentDetail, AddEditAgent, InCall)
 ├── Shared/         # Reusable UI components, navigation
-├── Debug/          # DEBUG-only: call trace, Cue Lab, Daily ring-join switch, device spikes
+├── Debug/          # DEBUG-only: call trace, Cue Lab, device spikes
 └── Resources/      # Assets, audio, data files
 
 ConduitCallEngine (package)      # consumed by version

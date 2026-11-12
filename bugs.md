@@ -7,6 +7,29 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### An answered call played the outgoing ringback and "Connected", as if the user had called
+First seen: 2026-11-12 (device, iOS 27.0, plain rings and Daily D2 rings)
+
+**Pattern:** After answering an agent's ring the user heard the ringback, then
+"Connected": "as though I am the one calling". The host played every
+`.start(.connecting)` as a ringback and every `.moment(.connected)` as "Connected",
+and the engine held every call, answered ones included, in `.connecting` for the
+outgoing ringback's 2.6 s minimum. Separately, a Daily `media` ring answered at
++2 s waited 4.6 s for a bot the server only started at the push and that joined at
++6.7 s.
+
+**Rule:** Sounds depend on the call: read `engine.activeCall` at the cue
+(`direction`, `wasReadyAtAnswer`). The minimum is
+`minimumOutgoingConnectingDuration`, for placed calls only. An answered call gets
+no ringback: nothing when its agent was there at the answer, "Connecting" once a
+second later if it is still connecting. Servers start the agent before they ring
+and ask for pre-connect by default.
+
+**Why it's missed:** host tests asserted the ringback on answered calls as
+expected behaviour; nobody listened to an answered call until the device run.
+
+---
+
 ### A phone call during an engine call left it resumed but silent and "Paused"
 First seen: 2026-11-12 (device, iOS 27.0, Daily)
 

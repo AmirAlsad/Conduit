@@ -142,13 +142,13 @@ The Debug build appends timestamped lines (ISO 8601, fractional seconds) to
 (`Conduit/Debug/CallTrace.swift`, `CallTraceObserver.swift`). It starts at **launch**,
 including the cold launch a VoIP push causes, and is **not truncated per call**:
 
-- `launch: daily ring-join <Off|D1|D2|D3>`, then `transport made: <kind>
-  canConnectWhileRinging=<bool>` (and `daily transport made: ring-join ...`) each time
-  a transport is built.
+- `launch`, then `transport made: <kind> canConnectWhileRinging=<bool>` each time a
+  transport is built.
 - The call host's view: `ring: call=... known=... preconnect=... inline=...
   transport=...`, `state: <old> -> <new>`, `ring preparation: <old> -> <new>` (every
-  phase, so fast ones are not lost), `cue: ...`, `record: ...` (outcome, failure
-  and missed reason, duration), `voip token: invalidated`.
+  phase, so fast ones are not lost), `cue: ...`, `spoken: connecting (answered, still
+  connecting)`, `record: ...` (outcome, failure and missed reason, duration),
+  `voip token: invalidated`.
 - The engine's observable state: `hold: on|off`, `audio activated: true|false` (as the
   engine counts it; an activation it ignores, such as one during an unanswered ring,
   does not show), `interruption: began|ended`, `muted: true|false`.
@@ -157,7 +157,7 @@ including the cold launch a VoIP push causes, and is **not truncated per call**:
 - While the in-call screen is up, one `screen: state=... muted=... onHold=...
   audioActivated=... selected=... activeRoute=[...] devices=[...]` line per change
   (polled every 250 ms), and `in-call screen shown`.
-- Cue Lab presses and session snapshots, and `debug setting: daily ring-join -> ...`.
+- Cue Lab presses and session snapshots.
 
 Constraints:
 
@@ -262,7 +262,7 @@ Leave Before as `n/a`. These cover behavior fixed or added by the change.
 **Status.** Everything this sheet covers (call hold, pre-connect while ringing, ring
 timeouts and cancel pushes, call-control signals, engine-driven spoken cues, the
 join deadline and "Agent didn't join", the explicit microphone request, the Cue Lab,
-the Daily ring-join switch, the rebuilt SmallWebRTC adapter, and the SDK bumps to
+the Daily ring join, the rebuilt SmallWebRTC adapter, and the SDK bumps to
 Pipecat 1.3.0, Daily 0.41.0 and LiveKit 2.19.0) is built and unit-tested; **device
 verification pending**. It is built from the package's own device checklist
 (`ConduitCallEngine/Docs/IntegrationGuide.md`, section 13) plus the app-level checks
@@ -279,7 +279,8 @@ How to use it:
   version resolved in `Package.resolved`, and the backend commit in the results block.
 - Ids are new so they do not collide with the main sheet's: **K** build and
   permissions, **H** hold, **R** missed rings, timeouts and cancels, **P** pre-connect,
-  **T** the tone agent (audio-leak checks), **DJ** the Daily ring-join experiment,
+  **T** the tone agent (audio-leak checks), **DJ** the Daily ring-join experiment
+  (concluded), **W** incoming calls ready when the user picks up ("when they pick up"),
   **C** cues and the Cue Lab, **G** the join deadline, **X** regression calls on the
   new SDKs.
 - Pull the call trace (see above) after the key rows; for the rows that are about
@@ -343,8 +344,8 @@ Pairing mode unless the row says otherwise. Audio-leak checks use the `tone` age
 | # | Check | Steps | Pass when | Result |
 |---|---|---|---|---|
 | P1 | `credentials` tier | `ring.py --agent <id> --preconnect credentials` on each transport (SmallWebRTC over the LAN). Answer after about 10 seconds. | The engine logs `dispatch.accepted` for a `/connect` made during the ring, before the answer; the trace shows `ring preparation:` phases and no join; on answer the call joins with those credentials and connects, two-way audio. | |
-| P2 | `media` tier per transport | `ring.py --agent <id> --preconnect media` on LiveKit, Daily and SmallWebRTC. | LiveKit joins during the ring (the engine logs the device joining, `teardown.first_human`); Daily and SmallWebRTC do **not** (the trace shows `canConnectWhileRinging=false` and no join before the answer) and still connect on answer. (Daily with a ring-join strategy chosen: see DJ.) | |
-| P3 | Agent never joins | Ring with an agent whose bot never joins the room (a pipeline that crashes on start, or a bot you kill as soon as it is dispatched) with `--preconnect media`, and answer after 10 seconds. | The call stays connecting with the ringback; about 20 seconds later (30 from the device's join) the backend gets an ordinary answered credential request and the call connects to the agent it returns, or fails as "Agent didn't join". *Record* which. | |
+| P2 | `media` tier per transport | `ring.py --agent <id> --preconnect media` on LiveKit, Daily and SmallWebRTC. | LiveKit and Daily join during the ring (the engine logs the device joining, `teardown.first_human`; Daily's engine log shows `Daily connect while ringing` and `Daily agent audio -> unsubscribed` before the join); SmallWebRTC does **not** (the trace shows `canConnectWhileRinging=false` and no join before the answer) and still connects on answer. | |
+| P3 | Agent never joins | Ring with an agent whose bot never joins the room (a pipeline that crashes on start, or a bot you kill as soon as it is dispatched) with `--preconnect media`, and answer after 10 seconds. | The call stays connecting, with no ringback ("Connecting" once, a second after the answer); about 20 seconds later (30 from the device's join) the backend gets an ordinary answered credential request and the call connects to the agent it returns, or fails as "Agent didn't join". *Record* which. | |
 | P4 | Hang up the instant it starts | LiveKit: decline a pre-connected ring the instant it starts ringing, and separately end an outgoing call the instant after placing it. | The engine log shows the device leaving (with `bot.end_call_signal` if it had joined); the device is never left in the room (no zombie `teardown.human_joined` after the hang-up). | |
 | P5 | The ring ends unanswered | Decline a `media` ring; let another time out (`--ring-timeout 15`); cancel a third (`--cancel`). | Each time the agent gets `end-call` or sees the participant leave within a second; the ring bot ends; no audio and no orange microphone indicator remain on the phone. | |
 | P6 | The agent leaves a ready ring | `ring.py --agent <id> --preconnect media` then `--cancel <call_id>` once the device has joined (in-band cancel: the engine ends the bot, no push). | The ring stops, **Missed** row, `canceled` receipt, no flash of a second incoming call. | |
@@ -365,24 +366,23 @@ with the app **killed** and the phone **locked**, and once unlocked with the app
 | T1 | LiveKit `media` ring | `ring.py --agent tone --inline --preconnect media --transport livekit`. Listen during the ring (phone speaker, then AirPods). | Nothing from the app is audible; the ringtone and vibration are unaffected; no orange microphone indicator; Console and the trace show no audio-session activation by the app before CallKit's `didActivate`; the engine logs the device joining the room. | |
 | T2 | Answer the LiveKit ring | Answer T1's ring. | CallKit activates; the tone is heard within a second; `bot.call_answered` follows the activation; the route is right (AirPods when connected, speaker otherwise) and the in-app route picker works; "Connected" is heard (record whether in full). | |
 | T3 | The tone after the ring ends | Decline a tone ring, let one time out, cancel one. | Silence from the phone; no microphone indicator; the tone bot ends. | |
-| T4 | The tone on Daily and SmallWebRTC | Daily: `ring.py --agent tone --inline --preconnect media --transport daily`. SmallWebRTC (pairing only, over the LAN): `ring.py --agent tone --preconnect media`. | No join before the answer on either (the tier is lowered to `credentials`); no tone while ringing; the tone is heard at once after the answer. *Record* what SmallWebRTC does. | |
+| T4 | The tone on Daily and SmallWebRTC | Daily: `ring.py --agent tone --inline --preconnect media --transport daily`. SmallWebRTC (pairing only, over the LAN): `ring.py --agent tone --preconnect media`. | Daily joins during the ring, SmallWebRTC does not (its tier is lowered to `credentials`); no tone while ringing on either; the tone is heard at once after the answer. *Record* what SmallWebRTC does. | |
 
-### DJ. Daily ring join (experiment)
+### DJ. Daily ring join (experiment, concluded)
 
-Settings, Debug, "Daily ring join", is Debug-only and chosen **before** the push (it
-is stored, so the cold launch a VoIP push causes uses it). The trace logs `daily
-transport made: ring-join <choice> (strategy ..., canConnectWhileRinging=...)`. Use
-the `tone` agent registered for Daily and `ring.py --agent tone --inline
---preconnect media --transport daily`, app killed, phone locked. These are *record*
-rows: the outcome decides whether Daily may ever join during a ring.
-
-| # | Check | Steps | Pass when | Result |
-|---|---|---|---|---|
-| DJ1 | Off (the shipping behaviour) | Choose "Off", ring, listen, answer. | `canConnectWhileRinging=false`; no join and no tone before the answer; connects after the answer. | |
-| DJ2 | D1, default subscriptions | Choose D1, ring, listen during the ring, answer. | *Record*: is any tone audible before the answer (a leak), is the microphone indicator on, does the call connect on answer, and the time to the tone. | |
-| DJ3 | D2, agent audio unsubscribed until the answer | Choose D2; same. | *Record* the same four things. | |
-| DJ4 | D3, agent audio staged until the answer | Choose D3; same. | *Record* the same four things. | |
-| DJ5 | The longest ring that holds | For any strategy that did not leak, ring for about 50 seconds before answering. | *Record* whether the device stays in the room and the call still connects. Set the picker back to "Off" afterwards. | |
+Run on an iPhone 17 (iOS 27.0, phone locked, app not running unless stated) with the
+DEBUG picker this section used to describe, now removed. D1 (default subscriptions
+during the ring): after the answer no agent audio for the whole call, and the route
+flipped between speaker and earpiece four times in 2.5 s; **fails**. D2 (agent audio
+unsubscribed from before the join until the first attach): Daily accepted the
+unsubscribe before the join; a 20 s ring with no audio activity; at the answer
+CallKit activated audio, the adapter subscribed, the agent played cleanly and the
+route settled within about 0.3 s; repeated with a cold launch by the push and an
+answer 0.7 s after the agent was ready, the same; **passes**. D3 (staged instead of
+unsubscribed): three rings, the same sequence in the trace, the route longer on the
+earpiece after the answer (up to 1.35 s); no advantage. The package now joins Daily
+during a `media` ring with D2's method (P2, T4, W). Still open: other devices,
+Bluetooth and CarPlay routes, and a ring of about 50 s (P7 on Daily).
 
 ### C. Cues and the Cue Lab
 
@@ -404,10 +404,11 @@ exists to find out which playback paths are audible.
 
 ### S. The connect sequence
 
-The same on every call: the ringback starts half a second after dialing (or the
-answer) and the call stays "Connecting" for at least 2.6 s, so the first tone plays
-in full; then "Connected" with the mic closed; then the mic opens and the agent is
-sent `call-connected`, which is when a reference agent greets. Run against a backend
+On a call the user placed: the ringback starts half a second after dialing and the
+call stays "Connecting" for at least 2.6 s, so the first tone plays in full; then
+"Connected" with the mic closed; then the mic opens and the agent is sent
+`call-connected`, which is when a reference agent greets. An answered call has no
+ringback and no minimum (section W). Run against a backend
 from this build (it reads `call_signals`) and an app agent re-saved with this build
 (so its registration lists them). `tone` plays from the moment the device joins and
 ignores every signal; `loopback` echoes once it is released.
@@ -417,11 +418,33 @@ ignores every signal; `loopback` echoes once it is released.
 | S1 | Outgoing, fast agent | LiveKit `loopback` on the speaker: dial and say "one two three" continuously. | Nothing for about 0.5 s, then one full ring tone; the screen and the system call UI show connecting until the tone ends (about 2.6 s from dialing, not 1.2 s); then "Connected"; nothing of the ring, "Connected" or your words before it comes back to you; your voice echoes only after "Connected" finished. The backend logs `bot.call_signal signal=call-connected` once and `bot.call_connected via=signal`. | |
 | S2 | Outgoing, the same on Daily | S1 on Daily. | As S1, with the route caveat of Daily's late speaker (the tone may start on the earpiece). | |
 | S3 | Outgoing, tone agent | LiveKit `tone`, then Daily `tone`. | The tone is heard from about the device's join, under the ring (the tone agent ignores the signals by design); the call still shows connecting until the ring's tone ends. | |
-| S4 | Answered ring | `ring.py --agent loopback` (pairing mode), answer. | Ringback 0.5 s after the answer, at least 2.6 s of connecting, "Connected", then the echo; the backend logs `bot.call_connected via=signal`. | |
-| S5 | Pre-connected ring | `ring.py --agent loopback --inline --preconnect media --transport livekit`, wait for the device's join, answer. | No ringback (straight to connected), "Connected", then the echo; nothing audible before the answer. With `tone` instead: no tone before the answer, tone at once after it. | |
+| S4 | Answered ring | Moved to section W (W5). | | |
+| S5 | Pre-connected ring | Moved to section W (W1 to W3). | | |
 | S6 | Reconnect | During S1, airplane mode on for 10 s, then off. | "Disconnected", "Retrying connection", then "Connected" on return; the echo resumes only after it; the backend logs a second `bot.call_signal signal=call-connected` and no second `bot.call_connected`; the agent does not greet again. | |
 | S7 | Hang up during the wait | Dial and hang up within 2 s. | No "Connected"; Recents shows a canceled call; the backend logs `client-end-call`. Hang up within 0.5 s: no ring tone at all. | |
 | S8 | Older backend | S1 against a backend from before this build (it ignores `call_signals`). | The agent greets when the device joins, as before, possibly over the ring tone; the app works unchanged. | |
+
+### W. Incoming calls ready when the user picks up
+
+The backend from this build asks for the best pre-connect the registration takes on
+every ring and starts the agent before the push (the ring response's `bot_in_room`
+and `bot_wait_secs`); `--preconnect none` rings plainly and `--no-wait` pushes at
+once. An answered call gets no ringback and no minimum connecting time: nothing from
+the app when its agent was there at the answer; "Connecting" once if it is still
+connecting a second after the answer, then "Connected" with the mic closed. Use
+`loopback` (it echoes once it has `call-connected`) and `tone` (a tone from the
+moment the device joins, whatever the signals). App killed and phone locked, then
+once unlocked with the app open.
+
+| # | Check | Steps | Pass when | Result |
+|---|---|---|---|---|
+| W1 | Ready at the answer, LiveKit | `ring.py --agent loopback --inline --transport livekit`; the response shows `preconnect: media` and `bot_in_room: true`; answer after about 3 s and talk. | Nothing from the app before or after the answer (no ringback, no "Connecting", no "Connected"); the call screen is connected at the answer; your voice comes back within about a second of the answer. Trace: `state: incomingRinging -> connected` at the answer, then `audio activated: true` and `cue: moment(connected)`, no `cue: start(connecting)`. Backend: `bot.call_signal signal=call-connected` within about a second of the answer. With `tone`: no tone during the ring, the tone at once after the answer. | |
+| W2 | Ready at the answer, Daily | W1 with `--transport daily`. | As W1. Engine log: `Daily connect while ringing ...` and `Daily agent audio -> unsubscribed` before the join, then after the answer `Daily attach: agent audio wanted subscribed` and `Daily agent audio is subscribed` before `Daily client message call-connected sent`; the route settles within a fraction of a second. | |
+| W3 | Ready at the answer, pairing mode | `ring.py --agent loopback` (pairing, default tier), on LiveKit and on Daily. | As W1. Backend: `ring.bot_wait outcome=joined` before `ring.sent`, and the app's `/connect` during the ring gets the prepared room (no second `dispatch.accepted`). | |
+| W4 | Answered before the agent is there | `ring.py --agent tone --inline --transport daily --no-wait`, answer the instant it rings; repeat with `loopback` and on LiveKit. | No ringback. If the agent has not joined a second after the answer, "Connecting" once (trace: `spoken: connecting`). The call connects the moment the agent is in the room, with no extra 2.6 s: then "Connected"; with `loopback` your voice echoes only after "Connected" has finished; with `tone` the tone may start under "Connected". *Record* the seconds from the answer to the agent's audio. | |
+| W5 | Plain ring | `ring.py --agent loopback --preconnect none` (pairing), answer. | No ringback; "Connecting" once if still connecting a second after the answer; "Connected", then the echo. *Record* the seconds from the answer to the echo, to compare with W3. | |
+| W6 | A placed call is unchanged | S1 and S2. | As S1 and S2: ringback after 0.5 s, at least 2.6 s connecting, "Connected", then the echo. | |
+| W7 | A slow agent does not hold the ring back | Ring an agent whose bot takes longer than 8 s to join (or set `RING_BOT_WAIT_SECS=2` on a test deployment). | The phone rings once the wait runs out (`bot_in_room: false`, `ring.bot_wait outcome=timeout`); answering connects when the agent arrives, as W4. | |
 
 ### G. The join deadline
 

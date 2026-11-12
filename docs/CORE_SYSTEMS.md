@@ -130,9 +130,15 @@ the agent's audio on detach and subscribing again on attach (a held call that
 reconnects joins unsubscribed); it sends client messages once the call is joined,
 releases its Pipecat client on `disconnect()`, and takes over a session whose bot
 never got ready instead of refusing it, while refusing (and leaving alone) a call
-Daily is still healing. It declares `canConnectWhileRinging` false; the package
-carries an experimental ring-join switch for the device test (see DEBUG below).
-The hold silencing and the ring join are unit-tested only.
+Daily is still healing. It declares `canConnectWhileRinging` true: a ring's join
+(`connectWhileRinging`) unsubscribes from the agent's audio before it joins and
+keeps it so until the first attach after the answer, which subscribes and returns
+once Daily has it; for that join the agent being in the room counts as ready (the
+bot cannot report ready unheard). Every other join keeps Daily's default
+subscriptions and waits for bot-ready. Device-observed on one phone (iPhone 17,
+iOS 27.0, locked): silent rings of up to 20 s, clean agent audio at the answer,
+route settled within ~0.3 s; joining with default subscriptions during a ring had
+left the call with no agent audio. The hold silencing is unit-tested only.
 
 `LiveKitTransport` (package product `ConduitCallEngineLiveKit`, M6) is the native
 second transport over `livekit/client-sdk-swift`, behind the same protocol. It
@@ -246,16 +252,10 @@ sim. The `AppDelegate` starts the engine's PushKit registration at launch and se
 `inboundRegistrar` to the host. `ConduitApp` injects the environment via
 `.environment(_:)` + `.modelContainer(_:)`.
 
-**DEBUG on a device.** `live()` makes the Daily transport through
-`Debug/RingJoin/DebugDailyRingJoin`, which applies the package's experimental
-ring-join strategy (`@_spi(RingJoinExperiment)` `DailyRingJoinStrategy`: Off, D1
-default subscriptions, D2 agent audio unsubscribed until answer, D3 staged until
-answer) chosen in a DEBUG-only Settings section and stored in `UserDefaults`
-(`debug.dailyRingJoinStrategy`), so a VoIP push's cold launch uses it. Release
-builds compile none of it. `live()` also starts the call trace
+**DEBUG on a device.** `live()` starts the call trace
 (`Debug/CallTrace.swift`, `conduit-call-trace.log` in Documents, timestamped,
 kept across launches; past 2 MB it moves to `conduit-call-trace.previous.log`): the
-launch and its strategy, each
+launch, each
 transport made, `AgentCallHost`'s view of every ring (call id, requested
 pre-connect, inline or not), state change, cue, record and every
 `ringPreparationPhase` change (from the delegate callback, so fast intermediate
@@ -392,32 +392,40 @@ fields ignores them. **Pre-connect
 policy:** `AgentCallHost` allows each ring whatever its push's `preconnect` asks
 for (`CallTarget.ringPreparation = IncomingCall.requestedPreparation`), since the
 sender is the user's own backend; the engine still lowers `media` to `credentials`
-for a transport that cannot join while ringing (SmallWebRTC always, Daily unless the
-DEBUG ring-join switch is on; today only LiveKit joins). Outgoing targets allow none. Conduit's delegate is `AgentCallHost`
+for a transport that cannot join while ringing (SmallWebRTC; LiveKit and Daily
+join). Outgoing targets allow none. Conduit's delegate is `AgentCallHost`
 (`Core/Services/AgentCalls/AgentCallHost.swift`): it writes `CallLogEntry` rows
 (looking the agent up by target id — none, no row; the missed reason is stored as
 `missedReasonRaw`, and Recents reads every missed ring as "Missed", in red, with
 "— on another call" / "— Focus" for the two the user never heard), posts the
 missed-call notification for every missed ring, donates outgoing calls to Siri on
-`dialing → connecting`, and plays the engine's cues: `.start(.connecting)` loops
-the ringback tone (starting `Ringback.startDelay`, 0.5 s, after the cue, so it never
-starts while the call screen slides up and a call that ends sooner never rings),
+`dialing → connecting`, and plays the engine's cues, choosing by the call
+(`activeCall.direction`, `activeCall.wasReadyAtAnswer`): `.start(.connecting)` on a
+call the user placed loops the ringback tone (starting `Ringback.startDelay`, 0.5 s,
+after the cue, so it never starts while the call screen slides up and a call that
+ends sooner never rings); on an answered call there is never a ringback, and if it is
+still connecting `AgentCallHost.connectingPromptDelay` (1 s) after the answer it
+says "Connecting" once per call (a hold before then waits again from the resume),
 `.start(.retrying)` repeats "Retrying", `.stop` ends the loop at once,
 `.moment(.connected)` / `.moment(.reconnected)` say "Connected" (the engine sends
 `.moment(.connected)` only once CallKit has activated the call's audio, so it is
-said into a live session), and
+said into a live session), except `.moment(.connected)` of a call answered with its
+agent already there, which says nothing, and
 `.moment(.connectionLost)` says "Disconnected" (once per outage);
 `.moment(.held)` and `.moment(.resumed)` play nothing. The engine
 guarantees every loop is stopped by the time the call ends, a provider reset
 included, and no cues for a ring that is never answered. **The connect sequence**
-is the same for every call: the engine holds the call in `.connecting` for at least
-`Ringback.minimumConnectingDuration` (the 0.5 s start delay plus the 2.1 s audible
-tone, the engine's `minimumConnectingDuration`) even when the transport is ready
-sooner, so the first tone always plays in full and the state, the call screen,
-CallKit and the cue stop together; a pre-connected ring answered with its agent
-there skips `.connecting` and is not delayed. The engine keeps the mic closed until
-the call is connected, so the ringback needs nothing. At `.moment(.connected)` (and
-`.moment(.reconnected)`) the host keeps the mic closed with the engine's
+of a call the user placed: the engine holds the call in `.connecting` for at least
+`Ringback.minimumOutgoingConnectingDuration` (the 0.5 s start delay plus the 2.1 s
+audible tone, the engine's `minimumOutgoingConnectingDuration`) even when the
+transport is ready sooner, so the first tone always plays in full and the state, the
+call screen, CallKit and the cue stop together. An answered call is never held: it
+connects as soon as its transport is ready, and a pre-connected ring answered with
+its agent there skips `.connecting` altogether. The engine keeps the mic closed until
+the call is connected, so neither the ringback nor "Connecting" needs anything. A
+call answered with its agent there withholds nothing, so the engine sends
+`call-connected` as soon as CallKit activates the audio. At every other
+`.moment(.connected)` (and `.moment(.reconnected)`) the host keeps the mic closed with the engine's
 `setMicWithheld(_:)` (not mute: the call screen and CallKit still show it unmuted)
 until the announcer reports that "Connected" has finished
 (`announce(_:completion:)`, from the synthesizer's didFinish/didCancel, or
@@ -648,9 +656,10 @@ single client calling one agent, so there is no thundering-herd to spread.
 deliberately robotic built-in voice, distinct from the agent's, since the agent is
 exactly what's unreachable: "Retrying connection" repeats on a ~7 s cadence,
 "Connected"/"Disconnected" once, and `.connecting` plays a looped phone ringback
-tone (`Ringback`, `SystemRingback`) instead of speaking, starting 0.5 s after the cue.
-A stop silences it at once (the engine's minimum connecting time covers the first
-tone), and `stopNow()` also cuts off speech in progress. The real `SpeechSpokenStateAnnouncer` uses
+tone (`Ringback`, `SystemRingback`) instead of speaking, starting 0.5 s after the cue,
+for calls the user placed only; announced once, `.connecting` is spoken ("Connecting",
+an answered call still connecting after a second). A stop silences the tone at once
+(the engine's outgoing minimum connecting time covers the first tone), and `stopNow()` also cuts off speech in progress. The real `SpeechSpokenStateAnnouncer` uses
 `AVSpeechSynthesizer` and the system-sound server for the tone; it must mix with
 (never deactivate) the CallKit-owned session — that ducking/session wiring is
 finalized in WS-3. `AgentCallHost` drives it from the engine's cue events (see
