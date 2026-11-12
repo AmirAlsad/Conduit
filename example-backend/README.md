@@ -254,8 +254,10 @@ entrypoint handles them for you (`bot/call_control.py`):
 
 - **Await-answer.** A bot dispatched with `--await-answer` (the app joined while
   the phone still rang) keeps the pipeline's audio gates closed and doesn't greet
-  until `call-answered` or the ring's `answered` receipt. With `--ring-deadline`
-  it ends if no answer comes in time.
+  until `call-answered`, or the ring's `answered` receipt if `call-answered`
+  has not come within `ANSWERED_RECEIPT_GRACE_SECS` of it (the receipt is sent at
+  the moment of answer, before the app's audio is up). With `--ring-deadline` it
+  ends if no answer comes in time; the receipt also stops that deadline.
 - **Hold.** `call-held` interrupts the bot and closes its audio gates (no turns,
   no speech) until `call-resumed`; a human who drops while held gets
   `HELD_GRACE_SECS` instead of `HUMAN_ABSENT_GRACE_SECS`.
@@ -280,6 +282,9 @@ return them as `BotBuild(gates=…)` — see `bot/pipelines/live.py`.
 - **`RING_TIMEOUT_SECS`** (default `60`, the app's default ring timeout) and
   **`RING_DEADLINE_MARGIN_SECS`** (default `15`) — a ring bot ends when the ring's
   timeout plus the margin passes without an answer.
+- **`ANSWERED_RECEIPT_GRACE_SECS`** (default `4`) — how long a ring bot that got
+  the ring's `answered` receipt waits for the app's `call-answered` before it
+  treats the receipt as the answer.
 
 See `.env.example` for the full list and which feature needs which key.
 

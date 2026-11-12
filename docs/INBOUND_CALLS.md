@@ -264,7 +264,11 @@ Your agent must:
 3. End by itself if no `call-answered` arrives within the ring timeout plus 15 s
    of being dispatched.
 4. Fall back on receipts: `answered` may release the greeting (an app without
-   engine 0.2 joins only after the answer and never sends `call-answered`);
+   engine 0.2 joins only after the answer and never sends `call-answered`), but
+   only after a short grace (a few seconds) in which `call-answered` has not
+   arrived: the app sends `answered` at the moment of answer, before its audio is
+   up, and `call-answered` once it is, so a greeting released by the receipt can
+   play into audio that is not there yet;
    `declined`, `unanswered`, `canceled`, `busy` or `suppressed_by_focus` mean end
    the agent. So send `status_url` with every pre-connected inline ring.
 

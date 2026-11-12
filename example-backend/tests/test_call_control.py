@@ -70,7 +70,7 @@ class RtviMessage:
         self.type = type_
 
 
-def _make(*, await_answer=False, deadline=None, gates=None, grace=100.0):
+def _make(*, await_answer=False, deadline=None, gates=None, grace=100.0, receipt_grace=0.0):
     worker = FakeWorker()
     teardown = TeardownController(worker, grace_secs=grace, log=_log, held_grace_secs=0.3)
     greet = Greeter()
@@ -81,6 +81,7 @@ def _make(*, await_answer=False, deadline=None, gates=None, grace=100.0):
         gates=gates,
         await_answer=await_answer,
         ring_deadline_secs=deadline,
+        receipt_grace_secs=receipt_grace,
         log=_log,
     )
     return call, teardown, worker, greet, gates
@@ -297,7 +298,7 @@ async def test_daily_join_answers_a_ring_bot_that_does_not_await():
 
 
 async def test_control_line_answered_is_the_receipt():
-    call, _, _, greet, _ = _make(await_answer=True, deadline=60)
+    call, _, _, greet, _ = _make(await_answer=True, deadline=60, receipt_grace=0)
     await call.client_ready()
 
     async def lines():
@@ -449,3 +450,79 @@ def test_the_verdict_goes_to_stdout_behind_the_control_prefix(capsys):
     assert capsys.readouterr().out == (
         f"{CONTROL_REPLY_PREFIX}cancel ended\n{CONTROL_REPLY_PREFIX}cancel refused\n"
     )
+
+
+# --- the answered receipt is only a fallback for call-answered ---
+
+
+async def _receipt_line(call):
+    async def lines():
+        yield "answered"
+
+    await _read_control(lines(), call, _log)
+
+
+async def test_the_answered_receipt_waits_out_a_grace_for_call_answered():
+    # The receipt is sent at answer, before the app's audio is up; releasing the
+    # greeting on it would play into audio that may not be there yet.
+    call, _, worker, greet, gates = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    await call.client_ready()
+    await _receipt_line(call)
+    assert not call.answered and greet.count == 0
+    assert not any(g.is_open for g in gates)
+    await asyncio.sleep(0.2)
+    assert call.answered and greet.count == 1
+    assert all(g.is_open for g in gates)
+    assert worker.cancelled == 0
+    call.stop()
+
+
+async def test_call_answered_inside_the_grace_releases_the_bot_once():
+    call, _, _, greet, gates = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    await call.client_ready()
+    await _receipt_line(call)
+    await call.handle("call-answered")
+    assert call.answered and greet.count == 1
+    await asyncio.sleep(0.2)
+    assert greet.count == 1
+    assert all(g.is_open for g in gates)
+    call.stop()
+
+
+async def test_the_receipt_stops_the_ring_deadline_during_the_grace():
+    call, _, worker, _, _ = _make(await_answer=True, deadline=0.05, receipt_grace=0.2)
+    call.start()
+    await _receipt_line(call)
+    await asyncio.sleep(0.12)
+    assert worker.cancelled == 0
+    await asyncio.sleep(0.2)
+    assert call.answered
+    call.stop()
+
+
+async def test_a_pending_receipt_blocks_a_cancel():
+    call, _, worker, _, _ = _make(await_answer=True, deadline=60, receipt_grace=1)
+    await _receipt_line(call)
+    replies = []
+
+    async def lines():
+        yield "cancel"
+
+    await _read_control(lines(), call, _log, replies.append)
+    assert replies == [False] and worker.cancelled == 0
+    call.stop()
+
+
+async def test_stopping_the_bot_drops_a_pending_receipt_release():
+    call, _, _, greet, _ = _make(await_answer=True, deadline=60, receipt_grace=0.05)
+    await call.client_ready()
+    await _receipt_line(call)
+    call.stop()
+    await asyncio.sleep(0.15)
+    assert greet.count == 0 and not call.answered
+
+
+def test_the_receipt_grace_is_a_setting():
+    from app.config import settings
+
+    assert settings.answered_receipt_grace_secs > 0

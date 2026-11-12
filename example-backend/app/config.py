@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     # ring request doesn't set one; the app clamps a pushed timeout to at least 10 s.
     ring_timeout_secs: int = 60
     ring_deadline_margin_secs: float = 15.0
+    # The app sends the ring's "answered" receipt at the moment of answer, before
+    # its audio is up, and the call-answered message once it is. A ring bot given
+    # the receipt therefore waits this long for call-answered before it takes the
+    # receipt as the answer (the fallback for an app that never sends it).
+    answered_receipt_grace_secs: float = 4.0
 
     # Token TTLs. Pairing tokens are born per-call (short); direct tokens are pasted
     # into the app once and must outlive many calls (long). Expiry gates only the

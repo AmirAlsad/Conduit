@@ -86,8 +86,9 @@ async def ring_status(agent_id: str, req: RingStatusRequest, request: Request):
     if ring.room_key:
         if req.status == "answered":
             if ring.ring_bot:
-                # Releases a bot awaiting the answer even if the app never sends
-                # call-answered (a 0.1 app ignores preconnect), and stops its deadline.
+                # Stops the bot's deadline and, as a fallback, releases a bot awaiting
+                # the answer if call-answered doesn't follow within its grace (the
+                # app sends this receipt before its audio is up).
                 await state.dispatcher.send_control(ring.room_key, "answered")
         else:
             ended = await state.dispatcher.disconnect(ring.room_key)

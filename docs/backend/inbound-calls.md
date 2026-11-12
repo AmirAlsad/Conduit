@@ -184,10 +184,15 @@ A ring bot differs from a normal bot in three ways:
   `RING_TIMEOUT_SECS`, default 60, when the ring didn't set one) plus
   `RING_DEADLINE_MARGIN_SECS` (15).
 - For `media` it is dispatched with `--await-answer`: no audio and no greeting
-  until the app's `call-answered` message, or the ring's `answered` receipt
-  (relayed to the bot by the engine; that covers an app without engine 0.2).
-- The ring's first receipt steers it: `answered` releases it, any other status
-  ends it. (A plain inline ring's bot is ended the same way, but has no deadline
+  until the app's `call-answered` message, or, as a fallback, the ring's
+  `answered` receipt (relayed to the bot by the engine; that covers an app that
+  never sends `call-answered`). The app sends the receipt at the moment of
+  answer, before its audio is up, and `call-answered` once it is, so the receipt
+  always arrives first: the bot waits `ANSWERED_RECEIPT_GRACE_SECS` (default 4)
+  after it for `call-answered`, and releases itself only if that has not come.
+  The receipt does stop the ring deadline at once.
+- The ring's first receipt steers it: `answered` starts that fallback, any other
+  status ends it at once. (A plain inline ring's bot is ended the same way, but has no deadline
   and no control pipe.)
 
 The engine tracks rings in memory (`app/rings.py`), so a dispatcher restart

@@ -205,6 +205,7 @@ async def run_bot(
         gates=bot_build.gates,
         await_answer=await_answer,
         ring_deadline_secs=ring_deadline_secs,
+        receipt_grace_secs=settings.answered_receipt_grace_secs,
         log=log,
     )
 
@@ -254,7 +255,7 @@ async def _read_control(
 ) -> None:
     async for line in lines:
         if line == "answered":
-            await call.answer("receipt")
+            await call.receipt_answered()
         elif line == "cancel":
             await call.cancel(reply)
         else:
