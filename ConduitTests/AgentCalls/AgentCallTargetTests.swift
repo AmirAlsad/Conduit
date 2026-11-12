@@ -3,8 +3,10 @@
 //  ConduitTests
 //
 //  `Agent.callTarget(...)`: the identity CallKit sees, the adapter the agent's
-//  kind selects, and the credential step — direct room + token, pairing (with
-//  its error mapping), or inline push credentials — without the engine.
+//  kind selects, the ring preparation it allows, and the credential step — direct
+//  room + token, pairing (with its error mapping and the ring a request made while
+//  ringing is for), or inline push credentials — for every `ConnectRequest`
+//  purpose, without the engine.
 //
 
 import Foundation
@@ -32,13 +34,27 @@ struct AgentCallTargetTests {
         keychain: InMemoryKeychain? = nil,
         pairing: FakePairingResolver? = nil,
         inline: CallConnection? = nil,
+        ringPreparation: RingPreparation = .none,
         factory: @escaping (TransportKind) -> CallTransport = { _ in FakeTransport() }
     ) -> CallTarget {
         agent.callTarget(
             keychain: keychain ?? InMemoryKeychain(), transportFactory: factory,
-            pairingResolver: (pairing ?? FakePairingResolver()).resolver, inlineConnection: inline
+            pairingResolver: (pairing ?? FakePairingResolver()).resolver, inlineConnection: inline,
+            ringPreparation: ringPreparation
         )
     }
+
+    private nonisolated static let callID = UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF")!
+
+    /// Every purpose the engine can ask with, as it asks for an incoming call.
+    nonisolated static let everyPurpose: [ConnectRequest] = [
+        .outgoing,
+        ConnectRequest(purpose: .answered, callID: callID),
+        ConnectRequest(purpose: .ringing(joinsBeforeAnswer: false), callID: callID),
+        ConnectRequest(purpose: .ringing(joinsBeforeAnswer: true), callID: callID),
+        ConnectRequest(purpose: .reconnect(attempt: 1), callID: callID),
+        ConnectRequest(purpose: .reconnect(attempt: 3), callID: nil),
+    ]
 
     @Test func identityIsTheAgents() {
         let agent = directAgent()
@@ -47,6 +63,15 @@ struct AgentCallTargetTests {
         #expect(target.id == agent.id)
         #expect(target.displayName == agent.name)
         #expect(target.handle == agent.syntheticEmail)
+    }
+
+    @Test func allowsNoRingPreparationUnlessAsked() {
+        #expect(target(for: pairingAgent()).ringPreparation == .none)
+    }
+
+    @Test(arguments: RingPreparation.allCases)
+    func allowsTheRingPreparationItIsGiven(preparation: RingPreparation) {
+        #expect(target(for: pairingAgent(), ringPreparation: preparation).ringPreparation == preparation)
     }
 
     @Test(arguments: TransportKind.allCases)
@@ -69,13 +94,13 @@ struct AgentCallTargetTests {
         let keychain = InMemoryKeychain()
         try keychain.setToken("room-token", for: KeychainTokenRef(directTokenForAgentID: agent.id))
 
-        let connection = try await target(for: agent, keychain: keychain).connect()
+        let connection = try await target(for: agent, keychain: keychain).connect(.outgoing)
         #expect(connection == CallConnection(url: room, token: "room-token"))
     }
 
     @Test func directTargetWithoutTokenThrowsAuthenticationFailed() async throws {
         let target = target(for: directAgent())
-        await #expect(throws: TransportError.authenticationFailed) { try await target.connect() }
+        await #expect(throws: TransportError.authenticationFailed) { try await target.connect(.outgoing) }
     }
 
     @Test func directTargetWithoutURLThrowsConnectionFailed() async throws {
@@ -85,7 +110,7 @@ struct AgentCallTargetTests {
 
         let target = target(for: agent, keychain: keychain)
         await #expect(throws: TransportError.connectionFailed("No room URL or pairing endpoint")) {
-            try await target.connect()
+            try await target.connect(.outgoing)
         }
     }
 
@@ -97,8 +122,8 @@ struct AgentCallTargetTests {
         let target = target(for: agent, keychain: keychain)
 
         try keychain.setToken("rotated", for: ref)
-        #expect(try await target.connect().token == "room-token")
-        #expect(try await target.connect().token == "room-token") // same on every attempt
+        #expect(try await target.connect(.outgoing).token == "room-token")
+        #expect(try await target.connect(.outgoing).token == "room-token") // same on every attempt
     }
 
     @Test func pairingTargetPairsWithTheAPIKeyAndKind() async throws {
@@ -108,8 +133,8 @@ struct AgentCallTargetTests {
         let pairing = FakePairingResolver()
         let target = target(for: agent, keychain: keychain, pairing: pairing)
 
-        let connection = try await target.connect()
-        _ = try await target.connect()
+        let connection = try await target.connect(.outgoing)
+        _ = try await target.connect(.outgoing)
 
         #expect(connection == CallConnection(url: URL(string: "https://example.daily.co/paired")!, token: "paired-token"))
         let expected = FakePairingResolver.Request(endpoint: endpoint, apiKey: "api-key", kind: .livekit)
@@ -121,7 +146,7 @@ struct AgentCallTargetTests {
         pairing.result = .failure(PairingError.unauthorized)
         let target = target(for: pairingAgent(), pairing: pairing)
 
-        await #expect(throws: TransportError.authenticationFailed) { try await target.connect() }
+        await #expect(throws: TransportError.authenticationFailed) { try await target.connect(.outgoing) }
     }
 
     @Test(arguments: [PairingError.invalidResponse, .server(503), .missingCredentials])
@@ -130,7 +155,7 @@ struct AgentCallTargetTests {
         pairing.result = .failure(error)
         let target = target(for: pairingAgent(), pairing: pairing)
 
-        await #expect(throws: TransportError.connectionFailed("pairing: \(error)")) { try await target.connect() }
+        await #expect(throws: TransportError.connectionFailed("pairing: \(error)")) { try await target.connect(.outgoing) }
     }
 
     @Test func nonPairingErrorsMapToConnectionFailed() async throws {
@@ -139,18 +164,63 @@ struct AgentCallTargetTests {
         pairing.result = .failure(underlying)
         let target = target(for: pairingAgent(), pairing: pairing)
 
-        let thrown = await #expect(throws: TransportError.self) { try await target.connect() }
+        let thrown = await #expect(throws: TransportError.self) { try await target.connect(.outgoing) }
         if case .connectionFailed = thrown {} else {
             Issue.record("Expected .connectionFailed, got \(String(describing: thrown))")
         }
     }
 
-    @Test func inlineConnectionWinsWithoutPairing() async throws {
+    @Test(arguments: everyPurpose)
+    func inlineConnectionWinsWithoutPairing(request: ConnectRequest) async throws {
         let pairing = FakePairingResolver()
         let inline = CallConnection(url: URL(string: "https://example.daily.co/inbound-room")!, token: "push-token")
         let target = target(for: pairingAgent(), pairing: pairing, inline: inline)
 
-        #expect(try await target.connect() == inline)
+        #expect(try await target.connect(request) == inline)
         #expect(pairing.requests.isEmpty)
+    }
+
+    // MARK: - What each request tells the pairing endpoint
+
+    @Test(arguments: [
+        (ConnectRequest.outgoing, PairingRing?.none),
+        (ConnectRequest(purpose: .answered, callID: callID), nil),
+        (ConnectRequest(purpose: .ringing(joinsBeforeAnswer: false), callID: callID),
+         PairingRing(callID: callID, awaitAnswer: false)),
+        (ConnectRequest(purpose: .ringing(joinsBeforeAnswer: true), callID: callID),
+         PairingRing(callID: callID, awaitAnswer: true)),
+        (ConnectRequest(purpose: .reconnect(attempt: 1), callID: callID), nil),
+        (ConnectRequest(purpose: .reconnect(attempt: 2), callID: nil), nil),
+    ])
+    func pairingIsToldTheRingOnlyWhileRinging(request: ConnectRequest, ring: PairingRing?) async throws {
+        let agent = pairingAgent()
+        let keychain = InMemoryKeychain()
+        try keychain.setToken("api-key", for: KeychainTokenRef(account: agent.keychainTokenRef))
+        let pairing = FakePairingResolver()
+
+        _ = try await target(for: agent, keychain: keychain, pairing: pairing).connect(request)
+
+        #expect(pairing.requests == [
+            FakePairingResolver.Request(endpoint: endpoint, apiKey: "api-key", kind: .livekit, ring: ring),
+        ])
+    }
+
+    @Test func aRingingRequestWithoutACallIDCarriesNoRing() async throws {
+        let pairing = FakePairingResolver()
+        let request = ConnectRequest(purpose: .ringing(joinsBeforeAnswer: true), callID: nil)
+
+        _ = try await target(for: pairingAgent(), pairing: pairing).connect(request)
+
+        #expect(pairing.requests.map(\.ring) == [nil])
+    }
+
+    @Test(arguments: everyPurpose)
+    func directTargetAnswersEveryPurposeWithItsRoom(request: ConnectRequest) async throws {
+        let agent = directAgent()
+        let keychain = InMemoryKeychain()
+        try keychain.setToken("room-token", for: KeychainTokenRef(directTokenForAgentID: agent.id))
+
+        let connection = try await target(for: agent, keychain: keychain).connect(request)
+        #expect(connection == CallConnection(url: room, token: "room-token"))
     }
 }

@@ -4,8 +4,9 @@
 //
 //  Conduit's side of the call engine, driven by the real engine against
 //  fakes: the call-log rows it writes from each record, the engine's cues it
-//  speaks, Siri donation, missed-call notifications, the receipt bearer, the
-//  agent targets it hands the engine (direct, pairing, inline push), and VoIP
+//  speaks, Siri donation, missed-call
+//  notifications, the receipt bearer, the agent targets it hands the engine
+//  (direct, pairing, inline push, and the ring preparation it allows), and VoIP
 //  token registration.
 //
 
@@ -550,6 +551,106 @@ struct AgentCallHostTests {
             url: URL(string: "https://example.daily.co/paired")!, token: "paired-token"
         ))
         #expect(h.engine.state.isConnecting)
+    }
+
+    // MARK: - Pre-connect
+
+    @Test(arguments: RingPreparation.allCases)
+    func incomingTargetAllowsWhatThePushAsksFor(requested: RingPreparation) throws {
+        let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
+        let call = IncomingCall(
+            callID: UUID(), targetID: h.agent.id, displayName: h.agent.name,
+            handle: h.agent.syntheticEmail, connection: nil, requestedPreparation: requested
+        )
+
+        let target = try #require(h.host.callEngine(h.engine, targetForIncomingCall: call))
+        #expect(target.ringPreparation == requested)
+    }
+
+    @Test func outgoingTargetsAllowNoRingPreparation() throws {
+        let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
+        #expect(h.host.target(for: h.agent).ringPreparation == .none)
+    }
+
+    @Test func aRingWithoutPreconnectPairsOnlyAfterTheAnswer() async throws {
+        let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
+        h.ring()
+        await waitUntil(ticks: 50) { !h.pairing.requests.isEmpty }
+        #expect(h.pairing.requests.isEmpty)
+        #expect(h.engine.ringPreparationPhase == .idle)
+
+        await h.system.answerIncomingCall()
+        #expect(h.pairing.requests.map(\.ring) == [nil])
+    }
+
+    @Test func aCredentialsRingPairsForTheRingAndAnswersWithIt() async throws {
+        let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
+        let callID = UUID()
+        h.ring(callID: callID, preconnect: "credentials")
+        await waitUntil { h.engine.ringPreparationPhase == .credentialsReady }
+
+        #expect(h.engine.state == .incomingRinging)
+        #expect(h.pairing.requests == [FakePairingResolver.Request(
+            endpoint: endpoint, apiKey: "valid-token", kind: .daily,
+            ring: PairingRing(callID: callID, awaitAnswer: false)
+        )])
+        #expect(h.transports.made.allSatisfy { $0.connectCount == 0 })
+
+        await h.system.answerIncomingCall()
+        #expect(h.pairing.requests.count == 1) // the ring's credentials are used
+        #expect(h.transport.lastConnection == CallConnection(
+            url: URL(string: "https://example.daily.co/paired")!, token: "paired-token"
+        ))
+    }
+
+    @Test func aMediaRingJoinsBeforeTheAnswerAndConnectsSilentlyOnIt() async throws {
+        let h = try AgentCallHostHarness(pairingEndpoint: endpoint, transportKind: .livekit)
+        h.transport.canConnectWhileRinging = true
+        let callID = UUID()
+        h.ring(callID: callID, preconnect: "media")
+        await waitUntil { h.transport.connectCount == 1 }
+
+        #expect(h.pairing.requests.map(\.ring) == [PairingRing(callID: callID, awaitAnswer: true)])
+        #expect(h.engine.ringPreparationPhase == .connecting)
+        #expect(!h.transport.isAudioAttached)
+        h.system.deliverTransportEvent(.connected)
+        #expect(h.engine.ringPreparationPhase == .ready)
+        #expect(h.engine.state == .incomingRinging)
+        #expect(h.announcer.announced.isEmpty)
+
+        await h.system.answerIncomingCall()
+        await h.system.activateAudioSession()
+        await waitUntil { h.transport.sentSignals.contains(.answered) }
+
+        if case .connected = h.engine.state {} else {
+            Issue.record("Expected connected at the answer, got \(h.engine.state)")
+        }
+        #expect(h.pairing.requests.count == 1)
+        #expect(h.transport.connectCount == 1)
+        #expect(h.announcer.startedRepeating.isEmpty) // no ringback
+        #expect(h.announcer.announced == [.connected])
+        #expect(h.transport.sentSignals == [.answered])
+    }
+
+    @Test func aMediaRingOnATransportThatCannotJoinWhileRingingOnlyPairs() async throws {
+        let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
+        let callID = UUID()
+        h.ring(callID: callID, preconnect: "media")
+        await waitUntil { h.engine.ringPreparationPhase == .credentialsReady }
+
+        #expect(h.pairing.requests.map(\.ring) == [PairingRing(callID: callID, awaitAnswer: false)])
+        #expect(h.transports.made.allSatisfy { $0.connectCount == 0 })
+    }
+
+    @Test func aPreconnectRingWithInlineCredentialsMakesNoNetworkCall() async throws {
+        let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
+        let room = URL(string: "https://example.daily.co/inbound-room")!
+        h.ring(roomURL: room, token: "push-token", preconnect: "credentials")
+        await waitUntil { h.engine.ringPreparationPhase == .credentialsReady }
+
+        await h.system.answerIncomingCall()
+        #expect(h.pairing.requests.isEmpty)
+        #expect(h.transport.lastConnection == CallConnection(url: room, token: "push-token"))
     }
 
     // MARK: - VoIP token registration

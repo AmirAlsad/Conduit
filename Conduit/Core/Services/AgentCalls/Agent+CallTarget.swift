@@ -3,29 +3,34 @@
 //  Conduit
 //
 //  How an agent becomes something the call engine can dial: its identity for
-//  CallKit, the transport its kind selects, and the credential step the engine
-//  runs before every connect attempt — inline push credentials as-is, otherwise
-//  the agent's pairing endpoint (re-paired on every attempt) or its direct room.
-//  The agent's configuration and Keychain secret are captured once, so every
-//  attempt resolves against the same values. Failures surface as
-//  `TransportError`s, which the engine maps to a failure reason.
+//  CallKit, the transport its kind selects, how much of a ring the engine may
+//  prepare before the answer, and the credential step the engine runs before
+//  every connect attempt — inline push credentials as-is, otherwise the agent's
+//  pairing endpoint (re-paired on every attempt, told which ring a request made
+//  while ringing is for) or its direct room. The agent's configuration and
+//  Keychain secret are captured once, so every attempt resolves against the same
+//  values. Failures surface as `TransportError`s, which the engine maps to a
+//  failure reason.
 //
 
 import ConduitCallEngine
 import Foundation
 
-typealias PairingResolving = @Sendable (URL, String, TransportKind) async throws -> PairingCredentials
+typealias PairingResolving = @Sendable (URL, String, TransportKind, PairingRing?) async throws -> PairingCredentials
 
 extension Agent {
     static let livePairingResolver: PairingResolving = {
-        try await PairingClient.resolve(endpoint: $0, apiKey: $1, transport: $2)
+        try await PairingClient.resolve(endpoint: $0, apiKey: $1, transport: $2, ring: $3)
     }
 
+    /// `ringPreparation` is the most of an incoming ring the engine may prepare
+    /// before the answer (the push must ask for it too); outgoing calls ignore it.
     func callTarget(
         keychain: KeychainStoring,
         transportFactory: @escaping (TransportKind) -> CallTransport,
         pairingResolver: @escaping PairingResolving = Agent.livePairingResolver,
-        inlineConnection: CallConnection? = nil
+        inlineConnection: CallConnection? = nil,
+        ringPreparation: RingPreparation = .none
     ) -> CallTarget {
         let kind = transportKind
         return CallTarget(
@@ -37,7 +42,8 @@ extension Agent {
                 keychain: keychain,
                 pairingResolver: pairingResolver,
                 inlineConnection: inlineConnection
-            )
+            ),
+            ringPreparation: ringPreparation
         )
     }
 
@@ -45,17 +51,17 @@ extension Agent {
         keychain: KeychainStoring,
         pairingResolver: @escaping PairingResolving,
         inlineConnection: CallConnection?
-    ) -> @MainActor () async throws -> CallConnection {
+    ) -> @MainActor (ConnectRequest) async throws -> CallConnection {
         if let inlineConnection {
-            return { inlineConnection }
+            return { _ in inlineConnection }
         }
 
         let token = callToken(keychain: keychain) ?? ""
         if let endpoint = pairingEndpoint {
             let kind = transportKind
-            return {
+            return { request in
                 do {
-                    let creds = try await pairingResolver(endpoint, token, kind)
+                    let creds = try await pairingResolver(endpoint, token, kind, PairingRing(request))
                     return CallConnection(url: creds.roomURL, token: creds.token)
                 } catch let error as PairingError {
                     Log.error(.transport, "Pairing failed: \(error)")
@@ -69,7 +75,7 @@ extension Agent {
 
         let url = connectionURL
         let email = syntheticEmail
-        return {
+        return { _ in
             // Direct mode needs its room token; pairing mode authenticates with its API
             // key, but an endpoint may be open, so it doesn't hard-require one.
             guard !token.isEmpty else {

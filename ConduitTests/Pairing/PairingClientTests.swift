@@ -5,7 +5,9 @@
 //  The pairing-response parsing — the engine nests credentials under `connection`,
 //  which is what the SDK's built-in pairing decoder couldn't handle. A flat shape,
 //  a camelCase room key, and a `url` key (LiveKit token servers' usual name for
-//  the server URL) are accepted as fallbacks.
+//  the server URL) are accepted as fallbacks. And the request body: `transport`
+//  alone for an ordinary call, plus `ring` for a request made while the phone
+//  rings.
 //
 
 import Foundation
@@ -73,5 +75,44 @@ struct PairingClientTests {
         #expect(throws: PairingError.invalidResponse) {
             try PairingClient.parse(json)
         }
+    }
+
+    // MARK: - Request body
+
+    private static let callID = UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF")!
+
+    /// Resolve against a recorder (which answers an empty 200, so parsing fails)
+    /// and return the JSON body that was sent.
+    private func sentBody(ring: PairingRing?) async throws -> [String: Any] {
+        let endpoint = RecordingURLProtocol.uniqueEndpoint(path: "/connect/live")
+        await #expect(throws: PairingError.invalidResponse) {
+            try await PairingClient.resolve(
+                endpoint: endpoint, apiKey: "key", transport: .livekit, ring: ring,
+                session: RecordingURLProtocol.session()
+            )
+        }
+        let host = try #require(endpoint.host())
+        let request = try #require(RecordingURLProtocol.requests(host: host).first)
+        #expect(request.method == "POST")
+        #expect(request.headers["Authorization"] == "Bearer key")
+        let json = try JSONSerialization.jsonObject(with: request.body)
+        return try #require(json as? [String: Any])
+    }
+
+    @Test func anOrdinaryRequestSendsOnlyTheTransport() async throws {
+        let body = try await sentBody(ring: nil)
+        #expect(body.keys.sorted() == ["transport"])
+        #expect(body["transport"] as? String == "livekit")
+    }
+
+    @Test(arguments: [false, true])
+    func aRingingRequestAddsTheRing(awaitAnswer: Bool) async throws {
+        let body = try await sentBody(ring: PairingRing(callID: Self.callID, awaitAnswer: awaitAnswer))
+        #expect(body.keys.sorted() == ["ring", "transport"])
+        #expect(body["transport"] as? String == "livekit")
+        let ring = try #require(body["ring"] as? [String: Any])
+        #expect(ring.keys.sorted() == ["await_answer", "call_id"])
+        #expect(ring["call_id"] as? String == "6f9619ff-8b86-d011-b42d-00c04fc964ff")
+        #expect(ring["await_answer"] as? Bool == awaitAnswer)
     }
 }

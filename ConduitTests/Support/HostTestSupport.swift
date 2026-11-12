@@ -67,6 +67,10 @@ final class ManualSleeper {
     }
 }
 
+extension ConnectRequest {
+    static let outgoing = ConnectRequest(purpose: .outgoing, callID: nil)
+}
+
 extension CallState {
     var isConnecting: Bool { if case .connecting = self { return true } else { return false } }
     var failureReason: CallFailureReason? {

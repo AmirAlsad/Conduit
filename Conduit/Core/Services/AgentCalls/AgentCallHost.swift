@@ -2,11 +2,12 @@
 //  AgentCallHost.swift
 //  Conduit
 //
-//  Conduit's side of the call engine: turns agents into call targets and reacts
-//  to what the engine reports — writing the call log, speaking the engine's cues,
-//  donating outgoing calls to Siri, posting missed-call notifications, supplying
-//  the API key that authenticates ring-status receipts, and registering the
-//  device's VoIP token with every agent that lets itself call the user. The
+//  Conduit's side of the call engine: turns agents into call targets (allowing
+//  the ring preparation each push asks for) and reacts to what the engine
+//  reports — writing the call log, speaking the engine's cues, donating outgoing
+//  calls to Siri, posting missed-call notifications, supplying the API key that
+//  authenticates ring-status receipts, and registering the device's VoIP token
+//  with every agent that lets itself call the user. The
 //  engine identifies calls only by target id; this looks the agent up, and a
 //  target with no agent (unknown or deleted) records nothing.
 //
@@ -48,12 +49,17 @@ final class AgentCallHost: CallEngineDelegate {
         self.registrationSession = registrationSession
     }
 
-    func target(for agent: Agent, inlineConnection: CallConnection? = nil) -> CallTarget {
+    func target(
+        for agent: Agent,
+        inlineConnection: CallConnection? = nil,
+        ringPreparation: RingPreparation = .none
+    ) -> CallTarget {
         agent.callTarget(
             keychain: keychain,
             transportFactory: transportFactory,
             pairingResolver: pairingResolver,
-            inlineConnection: inlineConnection
+            inlineConnection: inlineConnection,
+            ringPreparation: ringPreparation
         )
     }
 
@@ -63,8 +69,14 @@ final class AgentCallHost: CallEngineDelegate {
 
     // MARK: - CallEngineDelegate
 
+    /// Allows whatever preparation the ring's push asks for: the sender is the
+    /// user's own backend, which knows whether its agent waits for the answer. The
+    /// engine still lowers `.media` to `.credentials` for a transport that cannot
+    /// join while ringing.
     func callEngine(_ engine: CallEngine, targetForIncomingCall call: IncomingCall) -> CallTarget? {
-        agent(id: call.targetID).map { target(for: $0, inlineConnection: call.connection) }
+        agent(id: call.targetID).map {
+            target(for: $0, inlineConnection: call.connection, ringPreparation: call.requestedPreparation)
+        }
     }
 
     func callEngine(_ engine: CallEngine, didChangeStateFrom old: CallState, to new: CallState) {

@@ -23,6 +23,7 @@ final class FakePairingResolver {
         let endpoint: URL
         let apiKey: String
         let kind: TransportKind
+        var ring: PairingRing? = nil
     }
 
     private(set) var requests: [Request] = []
@@ -32,8 +33,8 @@ final class FakePairingResolver {
     var suspend = false
     private var pending: [CheckedContinuation<Void, Never>] = []
 
-    func resolve(endpoint: URL, apiKey: String, kind: TransportKind) async throws -> PairingCredentials {
-        requests.append(Request(endpoint: endpoint, apiKey: apiKey, kind: kind))
+    func resolve(endpoint: URL, apiKey: String, kind: TransportKind, ring: PairingRing?) async throws -> PairingCredentials {
+        requests.append(Request(endpoint: endpoint, apiKey: apiKey, kind: kind, ring: ring))
         if suspend {
             await withCheckedContinuation { pending.append($0) }
         }
@@ -48,7 +49,7 @@ final class FakePairingResolver {
     }
 
     var resolver: PairingResolving {
-        { [self] in try await resolve(endpoint: $0, apiKey: $1, kind: $2) }
+        { [self] in try await resolve(endpoint: $0, apiKey: $1, kind: $2, ring: $3) }
     }
 }
 
@@ -77,14 +78,15 @@ final class AgentCallHostHarness {
 
     /// `pairingEndpoint` makes the agent pairing-mode: `token` is then its API key
     /// and every connect attempt goes through `pairing`. The default `sleep` returns
-    /// at once (instant reconnect backoff), so the ring timeout is off unless a test
-    /// sets one, with a sleep it ends by hand.
+    /// at once (instant reconnect backoff), so the ring timeout and the join deadline
+    /// are off unless a test sets them, with a sleep it ends by hand.
     init(
         token: String? = "valid-token",
         pairingEndpoint: URL? = nil,
         transportKind: TransportKind = .daily,
         now: @escaping () -> Date = { Date() },
         ringTimeout: Duration? = nil,
+        joinTimeout: Duration? = nil,
         sleep: @escaping (Duration) async throws -> Void = { _ in }
     ) throws {
         container = try ModelContainer(
@@ -129,7 +131,11 @@ final class AgentCallHostHarness {
             registrationSession: RecordingURLProtocol.session()
         )
         engine = CallEngine.simulated(
-            configuration: CallEngineConfiguration(unknownCallerName: "Agent", ringTimeout: ringTimeout),
+            configuration: CallEngineConfiguration(
+                unknownCallerName: "Agent",
+                ringTimeout: ringTimeout,
+                joinTimeout: joinTimeout
+            ),
             system: system,
             now: now,
             sleep: sleep
@@ -159,7 +165,8 @@ final class AgentCallHostHarness {
         handle: String? = nil,
         roomURL: URL? = nil,
         token: String? = nil,
-        statusURL: URL? = nil
+        statusURL: URL? = nil,
+        preconnect: String? = nil
     ) {
         var push: [AnyHashable: Any] = [
             "agent_id": (agentID ?? agent.id).uuidString,
@@ -170,6 +177,7 @@ final class AgentCallHostHarness {
         push["room_url"] = roomURL?.absoluteString
         push["token"] = token
         push["status_url"] = statusURL?.absoluteString
+        push["preconnect"] = preconnect
         system.deliverPush(push) { [self] in pushCompletions += 1 }
     }
 }

@@ -3,8 +3,10 @@
 //  Conduit
 //
 //  Resolves a bring-your-own pairing endpoint into a fresh room + token for one
-//  call: POST the endpoint with the API key as a bearer and `{transport}`, then
-//  read the credentials. The endpoint itself identifies the agent (one endpoint
+//  call: POST the endpoint with the API key as a bearer and `{transport}` (plus
+//  `ring` when the call is still ringing, see `PairingRing`), then read the
+//  credentials. A backend that predates `ring` ignores it and dispatches as for
+//  any call. The endpoint itself identifies the agent (one endpoint
 //  per agent), so no agent id is sent. The reference engine nests credentials
 //  under `connection` (which is why the SDK's built-in pairing decoder choked); a
 //  flat shape is also accepted, and `url` is read as a fallback key because
@@ -19,6 +21,7 @@ enum PairingClient {
         endpoint: URL,
         apiKey: String,
         transport: TransportKind,
+        ring: PairingRing? = nil,
         session: URLSession = .shared
     ) async throws -> PairingCredentials {
         var request = URLRequest(url: endpoint)
@@ -27,8 +30,7 @@ enum PairingClient {
         if !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
-        let body: [String: String] = ["transport": transport.rawValue]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.httpBody = try JSONSerialization.data(withJSONObject: body(transport: transport, ring: ring))
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw PairingError.invalidResponse }
@@ -37,6 +39,12 @@ enum PairingClient {
             throw PairingError.server(http.statusCode)
         }
         return try parse(data)
+    }
+
+    static func body(transport: TransportKind, ring: PairingRing?) -> [String: Any] {
+        var body: [String: Any] = ["transport": transport.rawValue]
+        body["ring"] = ring?.body
+        return body
     }
 
     /// Extract the room URL + token. Accepts the engine's nested
