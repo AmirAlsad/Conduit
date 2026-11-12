@@ -666,6 +666,28 @@ struct AgentCallHostTests {
         #expect(h.transport.isMicEnabled)
     }
 
+    /// iOS may never post an interruption's end (it did not after a phone call on
+    /// iOS 27): CallKit handing the call its audio back ends "Paused" by itself.
+    @Test func anInterruptionWhoseEndNeverComesDoesNotLeaveTheCallPaused() async throws {
+        let h = try AgentCallHostHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        h.announcer.finishAnnouncements()
+        await h.system.awaitPendingWork()
+
+        h.system.beginAudioInterruption()
+        h.system.deactivateAudioSession()
+        await h.system.awaitPendingWork()
+        #expect(InCallStatus.pausedText(for: h.engine.state, isOnHold: false, isInterrupted: h.engine.isInterrupted) == "Paused")
+
+        await h.system.activateAudioSession()
+
+        #expect(!h.engine.isInterrupted)
+        #expect(InCallStatus.pausedText(for: h.engine.state, isOnHold: false, isInterrupted: h.engine.isInterrupted) == nil)
+        #expect(h.transport.isMicEnabled)
+    }
+
     // MARK: - The mic during the connect sounds
 
     /// A harness whose engine timers wait in real time, so the withhold's bound

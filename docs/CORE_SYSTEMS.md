@@ -518,10 +518,14 @@ Key behaviors:
 - **Audio interruptions.** `AudioInterruptionObserving` (real:
   `SystemAudioInterruptionObserver` over `AVAudioSession.interruptionNotification`)
   drives `isInterrupted`: on `.began` the mic pauses (`setMicEnabled(false)`); on
-  `.ended(shouldResume:)` it re-applies the correct mic state via `applyMicIfActivated`
-  (respecting mute / push-to-talk). The session is never touched — CallKit owns it and
-  re-fires `providerDidActivate` after an interruption, so the two are unordered edges
-  that both re-apply mic state idempotently. Transient GPS/nav ducking is system-managed
+  `.ended(shouldResume:)` it re-applies the correct mic state (respecting mute /
+  push-to-talk). The session is never touched — CallKit owns it and re-fires
+  `providerDidActivate` after an interruption, so the two are unordered edges that
+  both re-apply mic state idempotently. iOS does not always post the end (after a
+  phone call on iOS 27 it never came), so CallKit activating the audio of a call that
+  is not held ends the interruption by itself, as does resuming a call whose audio
+  CallKit activated during the hold; an end without `shouldResume` still waits for
+  an activation, an unmute or a push-to-talk press. Transient GPS/nav ducking is system-managed
   by `.duckOthers`; this observer covers full takeovers (Siri, a phone call). The live
   audio behavior is device-only; the begin/resume logic is unit-tested via the fake.
 - **Inbound (agent-initiated) calls.** A VoIP push (PushKit) → the synchronous
@@ -590,6 +594,10 @@ presents as a `.fullScreenCover` from `RootTabView`, gated on
   `Connecting…`, `Reconnecting…`, the failure hint, or — once connected — the live
   timer prefixed with the transport (`LiveKit · 1:23`). `On Hold` while the engine
   holds the call (over `Paused` while interrupted), never once it has ended.
+  `Paused` clears when the interruption ends or CallKit hands the audio back; if it
+  ever lingers on a call that is not held, the way out is the hold control (Hold,
+  then Resume), which stays enabled while the call is connecting, connected or
+  reconnecting and makes CallKit hand the audio back, or End.
 - **Controls** group into one frosted pill: Mute (or Push-to-Talk when always-on
   listening is off), the Daily-backed route menu, Hold (filled while held; enabled
   while the call is connecting, connected or reconnecting; `InCall_HoldButton`) and
