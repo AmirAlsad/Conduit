@@ -111,6 +111,13 @@ class Settings(BaseSettings):
     # ring_timeout (a firm bound: the app clamps it to [10 s, its own timeout]).
     ring_timeout_secs: int = Field(default=60, gt=0)
     ring_deadline_margin_secs: float = 15.0
+    # Agent-first ringing: a ring that starts its bot before the push (inline, and
+    # pre-connected pairing rings) sends the push once the bot has joined the room,
+    # or after this many seconds without it, so a slow or broken bot never blocks
+    # a ring (observed joins: 2 to 7 s). Its ring bot's deadline is lengthened by
+    # the same amount. 0 turns agent-first ringing off: every ring is pushed at
+    # once, as a ring with "wait_for_bot": false is.
+    ring_bot_wait_secs: float = Field(default=8.0, ge=0)
     # A bot for a client that sends call-connected greets when it arrives. The
     # fallback for a lost one: once the bot knows the user answered (at once for an
     # ordinary call; for a ring, the "answered" receipt, or the device joining a

@@ -2,8 +2,8 @@
 
 import asyncio
 
-from app.dispatch import Dispatcher
-from app.rings import CANCEL_ENDED, CANCEL_REFUSED, CONTROL_REPLY_PREFIX
+from app.dispatch import BOT_EXITED, BOT_JOINED, BOT_WAIT_TIMEOUT, Dispatcher
+from app.rings import CANCEL_ENDED, CANCEL_REFUSED, CONTROL_JOINED, CONTROL_REPLY_PREFIX
 from app.registry import SQLiteRegistry
 
 
@@ -268,3 +268,91 @@ async def test_bot_stdout_noise_is_forwarded_not_mistaken_for_a_reply(monkeypatc
     proc.stdout.feed_data(_reply(CANCEL_ENDED))
     assert await asyncio.wait_for(task, 1) == CANCEL_ENDED
     assert "some library banner" in capsys.readouterr().out
+
+
+# --- the joined report a ring's push waits for ---
+
+
+def _joined_line():
+    return f"{CONTROL_REPLY_PREFIX}{CONTROL_JOINED}\n".encode()
+
+
+async def _reporting_dispatcher(monkeypatch, *, control=False):
+    disp = Dispatcher(SQLiteRegistry(":memory:"))
+    proc = FakeProc()
+    proc.stdout = asyncio.StreamReader()
+    proc.stdin = FakeStdin() if control else None
+    seen = {}
+
+    async def fake_exec(*args, **kwargs):
+        seen.update(kwargs)
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    await disp.dispatch(
+        room_key="r1", agent_id="live", transport="daily",
+        bot_argv=["--token", "t", "--report-joined"], control=control, report_joined=True,
+    )
+    return disp, proc, seen
+
+
+async def test_a_reporting_bot_gets_a_stdout_pipe_but_keeps_its_stdin(monkeypatch):
+    _, _, seen = await _reporting_dispatcher(monkeypatch)
+    assert seen["stdout"] is asyncio.subprocess.PIPE
+    assert seen["stdin"] is None
+
+
+async def test_wait_joined_returns_when_the_bot_says_it_joined(monkeypatch, capsys):
+    disp, proc, _ = await _reporting_dispatcher(monkeypatch)
+    task = asyncio.create_task(disp.wait_joined("r1", 5))
+    await asyncio.sleep(0.01)
+    assert not task.done()
+    proc.stdout.feed_data(_joined_line())
+    assert await asyncio.wait_for(task, 1) == BOT_JOINED
+    # Already joined: a later wait returns at once. The line is not forwarded.
+    assert await disp.wait_joined("r1", 0.01) == BOT_JOINED
+    assert CONTROL_JOINED not in capsys.readouterr().out
+
+
+async def test_wait_joined_sees_a_line_written_before_it_was_called(monkeypatch):
+    disp, proc, _ = await _reporting_dispatcher(monkeypatch)
+    proc.stdout.feed_data(_joined_line())
+    await asyncio.sleep(0.01)
+    assert await disp.wait_joined("r1", 0.01) == BOT_JOINED
+
+
+async def test_wait_joined_times_out_and_the_bot_can_still_join_later(monkeypatch):
+    disp, proc, _ = await _reporting_dispatcher(monkeypatch)
+    assert await disp.wait_joined("r1", 0.05) == BOT_WAIT_TIMEOUT
+    proc.stdout.feed_data(_joined_line())
+    assert await disp.wait_joined("r1", 1) == BOT_JOINED
+
+
+async def test_wait_joined_ends_when_the_bot_exits_first(monkeypatch):
+    disp, proc, _ = await _reporting_dispatcher(monkeypatch)
+    task = asyncio.create_task(disp.wait_joined("r1", 5))
+    await asyncio.sleep(0.01)
+    proc.stdout.feed_eof()
+    proc.finish()
+    assert await asyncio.wait_for(task, 1) == BOT_EXITED
+    for _ in range(50):
+        await asyncio.sleep(0)
+    assert disp.has_bot("r1") is False
+    assert await disp.wait_joined("r1", 1) == BOT_EXITED
+    assert await disp.wait_joined("nope", 1) == BOT_EXITED
+
+
+async def test_a_ring_bot_reports_its_join_on_the_control_pipe_too(monkeypatch):
+    disp, proc, seen = await _reporting_dispatcher(monkeypatch, control=True)
+    assert seen["stdin"] is asyncio.subprocess.PIPE
+    proc.stdout.feed_data(_joined_line())
+    assert await disp.wait_joined("r1", 1) == BOT_JOINED
+    assert await disp.send_control("r1", "answered") is True
+
+
+async def test_has_bot_follows_the_bots_life(monkeypatch):
+    disp, proc, _ = await _reporting_dispatcher(monkeypatch)
+    assert disp.has_bot("r1") is True
+    assert disp.has_bot("nope") is False
+    await disp.disconnect("r1")
+    assert disp.has_bot("r1") is False

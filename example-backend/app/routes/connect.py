@@ -36,6 +36,22 @@ def _own_ring(state, call_id: str, agent_id: str) -> TrackedRing | None:
     return ring if ring is not None and ring.agent_id == agent_id else None
 
 
+def _prepared_unfit(state, ring: TrackedRing, transport: str, req: ConnectRequest) -> str | None:
+    """Why the room prepared at ring time can't serve this request (None: it can).
+    Its bot must be the one this request would dispatch: the same transport and
+    call-connected wait, and a bot that knows the device joins before the answer
+    when it will (one that knows it serves a phone that joins after, too)."""
+    if ring.transport != transport:
+        return "transport"
+    if req.ring.joins_before_answer and not ring.joins_before_answer:
+        return "joins_before_answer"
+    if req.sends_call_connected != ring.prepared_await_connected:
+        return "call_signals"
+    if not state.dispatcher.has_bot(ring.room_key):
+        return "bot_gone"
+    return None
+
+
 def _ring_over(ring: TrackedRing | None) -> HTTPException | None:
     """409 for a ring that already ended without being answered (a receipt other
     than "answered", or our own cancel): nobody is coming, so no bot is wanted. The
@@ -77,6 +93,26 @@ async def _provision(request: Request, req: ConnectRequest, *, direct: bool) -> 
             if over := _ring_over(tracked):
                 event(_log, "connect.ring_over", call_id=req.ring.call_id, status=tracked.status)
                 raise over
+            if tracked is not None and tracked.prepared is not None:
+                # The ring prepared a room and bot at ring time: the first request
+                # takes them. Any later one, or one they don't fit, gets a fresh
+                # room as before (and an unfit prepared bot is ended).
+                prepared, tracked.prepared = tracked.prepared, None
+                unfit = _prepared_unfit(state, tracked, transport, req)
+                if unfit is None:
+                    event(
+                        _log, "connect.ring_prepared", call_id=tracked.call_id, room=tracked.room_key
+                    )
+                    return prepared
+                event(
+                    _log,
+                    "connect.ring_prepared_unused",
+                    call_id=tracked.call_id,
+                    room=tracked.room_key,
+                    reason=unfit,
+                )
+                if unfit != "bot_gone":
+                    await state.dispatcher.disconnect(tracked.room_key)
             ring_flags = ring_bot_flags(
                 ring_timeout=tracked.ring_timeout if tracked else None,
                 joins_before_answer=req.ring.joins_before_answer,

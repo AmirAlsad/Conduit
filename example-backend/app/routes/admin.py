@@ -17,10 +17,19 @@ call. A "media" preconnect also needs the registration to list the
 call-connected tells the bot the user is on the line. Without it the ring asks
 for "credentials" instead. A ring that names no preconnect asks for the best
 tier the registration takes; "none" asks for none.
+
+Agent-first ringing: so the agent is ready when the user picks up, a ring whose
+bot starts before the push (inline; and a pre-connected pairing ring, whose room
+and bot are prepared now for the app's credential request during the ring)
+waits until the bot has joined the room (its "joined" line on the control
+pipe), at most RING_BOT_WAIT_SECS, then pushes. The ring is tracked during the
+wait: a cancel or a receipt then means it is never pushed.
 """
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
@@ -36,6 +45,7 @@ from app.models import (
     RingRequest,
     RingResponse,
 )
+from app.dispatch import BOT_JOINED
 from app.obs import event, get_logger
 from app.provisioning import TransportUnavailable, provision_pairing
 from app.rings import (
@@ -46,6 +56,9 @@ from app.rings import (
     TrackedRing,
     ring_bot_flags,
 )
+
+# The bot-wait outcome when the ring ended (a cancel or a receipt) during the wait.
+_WITHDRAWN = "withdrawn"
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_engine_key)])
 _log = get_logger("admin")
@@ -111,17 +124,19 @@ async def ring(
         preconnect=preconnect,
         ring_timeout=ring_timeout,
     )
+    wait_secs = settings.ring_bot_wait_secs if req.wait_for_bot else 0.0
+    transport = resolve_transport(agent, req.transport)
     if req.inline:
         # Provision NOW and ride the creds in the push: the bot is dispatched
-        # before the user answers. Pairing mode instead defers everything to the
-        # app's /connect on answer (or during the ring, with preconnect). Any
-        # inline bot ends on a non-answered first receipt; with preconnect it is
-        # also a ring bot, with a deadline and a control pipe.
-        transport = resolve_transport(agent, req.transport)
+        # before the user answers. Any inline bot ends on a non-answered first
+        # receipt; with preconnect it is also a ring bot, with a deadline and a
+        # control pipe.
         ring_flags = None
         if preconnect is not None:
             ring_flags = ring_bot_flags(
-                ring_timeout=ring_timeout, joins_before_answer=preconnect == "media"
+                ring_timeout=ring_timeout,
+                joins_before_answer=preconnect == "media",
+                push_wait_secs=wait_secs,
             )
         try:
             settings.require(*agent.required_settings)
@@ -133,6 +148,7 @@ async def ring(
                 # The bot starts before the app asks for anything, so only the
                 # registration says whether the app sends call-connected.
                 await_connected=sends_call_connected,
+                report_joined=wait_secs > 0,
             )
         except (TransportUnavailable, MissingSettingError) as e:
             raise HTTPException(status_code=503, detail=str(e))
@@ -142,14 +158,47 @@ async def ring(
         ring.transport = transport
         ring.ring_bot = ring_flags is not None
         ring.joins_before_answer = preconnect == "media"
+    elif preconnect is not None and wait_secs > 0:
+        # The app will ask for credentials during the ring (with the ring's
+        # call_id), so its room and agent can be made now. Without preconnect the
+        # app asks only after the answer, with nothing to match a prepared room to.
+        await _prepare(state, agent, ring, transport, wait_secs, sends_call_connected)
 
     # Tracked before the push: the app may pair for this ring (preconnect) before
-    # APNs has even answered us.
+    # APNs has even answered us, and a cancel or receipt can find it while we
+    # wait for its bot.
     state.rings.add(ring)
+    ring.awaiting_push = True
+    bot_in_room = bot_wait_secs = None
+    if ring.room_key is not None and wait_secs > 0:
+        event(
+            _log,
+            "ring.waiting_for_bot",
+            agent=agent_id,
+            call_id=ring.call_id,
+            room=ring.room_key,
+            bound_secs=wait_secs,
+        )
+        outcome, bot_wait_secs = await _await_bot(state, ring, wait_secs)
+        bot_in_room = outcome == BOT_JOINED
+        event(
+            _log,
+            "ring.bot_wait",
+            call_id=ring.call_id,
+            room=ring.room_key,
+            outcome=outcome,
+            waited_secs=bot_wait_secs,
+        )
+    ring.awaiting_push = False
+    if ring.canceled or ring.status is not None:
+        await _withdrawn_before_push(state, ring)
     try:
         result = await _push(state, agent_id, reg, payload)
     except HTTPException:
         state.rings.discard(ring.call_id)
+        if ring.room_key:
+            # The ring never reached the phone: nobody will come to this bot.
+            await state.dispatcher.disconnect(ring.room_key)
         raise
     event(
         _log,
@@ -159,6 +208,8 @@ async def ring(
         mode=ring.mode,
         preconnect=ring.preconnect,
         ring_timeout=ring.ring_timeout,
+        bot_in_room=bot_in_room,
+        bot_wait_secs=bot_wait_secs,
     )
 
     return RingResponse(
@@ -168,6 +219,8 @@ async def ring(
         mode=ring.mode,
         ring_timeout=ring.ring_timeout,
         preconnect=ring.preconnect,
+        bot_in_room=bot_in_room,
+        bot_wait_secs=bot_wait_secs,
         apns_status=result.status,
         apns_id=result.apns_id,
     )
@@ -189,6 +242,78 @@ def _preconnect_tier(agent_id: str, requested: str | None, reg, sends_call_conne
         event(_log, "ring.preconnect_media_needs_call_connected", agent=agent_id)
         return "credentials"
     return requested
+
+
+async def _prepare(
+    state, agent, ring: TrackedRing, transport: str, wait_secs: float, sends_call_connected: bool
+) -> None:
+    """Make a pre-connected pairing ring's room and ring bot before the push; the
+    app's credential request for the ring then takes them (app/routes/connect.py).
+    Best effort: when it fails, the ring goes out as before and that request
+    provisions. SmallWebRTC has no room to prepare: its bot starts at the offer."""
+    if transport == "smallwebrtc":
+        return
+    flags = ring_bot_flags(
+        ring_timeout=ring.ring_timeout,
+        joins_before_answer=ring.preconnect == "media",
+        push_wait_secs=wait_secs,
+    )
+    try:
+        settings.require(*agent.required_settings)
+        creds, room_key = await provision_pairing(
+            state,
+            agent.agent_id,
+            transport,
+            ring_flags=flags,
+            await_connected=sends_call_connected,
+            report_joined=True,
+        )
+    except Exception as e:
+        event(_log, "ring.prepare_failed", call_id=ring.call_id, transport=transport, error=repr(e))
+        return
+    ring.room_key = room_key
+    ring.transport = transport
+    ring.ring_bot = True
+    ring.joins_before_answer = ring.preconnect == "media"
+    ring.prepared = creds
+    ring.prepared_await_connected = sends_call_connected
+    event(_log, "ring.prepared", call_id=ring.call_id, room=room_key, transport=transport)
+
+
+async def _await_bot(state, ring: TrackedRing, timeout: float) -> tuple[str, float]:
+    """Wait for the ring's bot to join its room, at most ``timeout``, or until the
+    ring ends. Returns the outcome and the seconds waited."""
+    started = time.monotonic()
+    joined = asyncio.create_task(state.dispatcher.wait_joined(ring.room_key, timeout))
+    ended = asyncio.create_task(ring.ended.wait())
+    try:
+        await asyncio.wait({joined, ended}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        joined.cancel()
+        ended.cancel()
+    waited = round(time.monotonic() - started, 3)
+    if joined.done() and not joined.cancelled():
+        return joined.result(), waited
+    return _WITHDRAWN, waited
+
+
+async def _withdrawn_before_push(state, ring: TrackedRing) -> None:
+    """The ring was canceled, or got a receipt, while it waited for its bot: never
+    push it (409). The cancel or the receipt has ended the bot, except an
+    "answered" receipt for an inline ring, which no phone could have sent."""
+    if ring.status == "answered" and ring.mode == "inline" and ring.room_key and not ring.canceled:
+        await state.dispatcher.disconnect(ring.room_key)
+    event(
+        _log,
+        "ring.withdrawn_before_push",
+        call_id=ring.call_id,
+        status=ring.status,
+        canceled=ring.canceled,
+    )
+    raise HTTPException(
+        status_code=409,
+        detail={"call_id": ring.call_id, "status": ring.status or "canceled", "reason": RING_ENDED},
+    )
 
 
 @router.post("/ring/{agent_id}/cancel", response_model=RingCancelResponse)
@@ -213,11 +338,21 @@ async def cancel_ring(
             detail={"call_id": ring.call_id, "status": None, "reason": "already canceled"},
         )
 
+    if ring.awaiting_push:
+        # Still waiting for its bot: the push never goes out, and the bot (no
+        # answer possible yet) is simply ended.
+        ring.canceled = True
+        ring.ended.set()
+        ended = await state.dispatcher.disconnect(ring.room_key) if ring.room_key else False
+        event(_log, "ring.canceled", call_id=ring.call_id, method="before_push", bot_ended=ended)
+        return RingCancelResponse(call_id=ring.call_id, method="before_push", bot_ended=ended)
+
     if ring.preconnect == "media" and ring.room_key and await _human_in_room(state, ring):
         # In-band cancel: the phone is in the room with the agent, so the agent
         # leaving IS the cancel. No push, so no flash on the lock screen.
         ended = await _end_ring_bot(state, ring)
         ring.canceled = True
+        ring.ended.set()
         event(_log, "ring.canceled", call_id=ring.call_id, method="in_band", bot_ended=ended)
         return RingCancelResponse(call_id=ring.call_id, method="in_band", bot_ended=ended)
 
@@ -249,6 +384,7 @@ async def cancel_ring(
     # answered after all: the push then changes nothing on the phone either.
     ended = await _end_ring_bot(state, ring)
     ring.canceled = True
+    ring.ended.set()
     event(_log, "ring.canceled", call_id=ring.call_id, method="push", bot_ended=ended)
     return RingCancelResponse(
         call_id=ring.call_id,

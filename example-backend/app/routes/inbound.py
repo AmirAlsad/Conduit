@@ -14,9 +14,11 @@ pointing here, and the app reports how the ring ended (answered / declined /
 busy / suppressed_by_focus / unanswered / canceled, and any status a newer app
 adds) — so an agent that really needed to reach the user knows whether the ring
 landed. The engine logs every receipt and records it on the ring tracker. Only
-a ring's first receipt steers its bot (an inline ring's, or one dispatched when
-the app paired during the ring): any status but "answered" ends the bot, and
-"answered" tells a ring bot (one with the ring flags) through its control pipe.
+a ring's first receipt steers its bot (an inline ring's, a pairing ring's
+prepared at ring time, or one dispatched when the app paired during the ring):
+any status but "answered" ends the bot, and "answered" tells a ring bot (one with
+the ring flags) through its control pipe, except a prepared bot whose room the
+app never took: the app then connects with a request of its own, so that bot ends.
 """
 
 from __future__ import annotations
@@ -86,9 +88,23 @@ async def ring_status(agent_id: str, req: RingStatusRequest, request: Request):
     if ring is None or ring.agent_id != agent_id or ring.status is not None:
         return {"ok": True}
     ring.status = req.status
+    ring.ended.set()
     if ring.room_key:
         if req.status == "answered":
-            if ring.ring_bot:
+            if ring.prepared is not None:
+                # Answered without taking the room prepared for it: the app connects
+                # with a fresh request, so this bot would wait for nobody. A late
+                # request for the ring then gets a fresh room too.
+                ring.prepared = None
+                ended = await state.dispatcher.disconnect(ring.room_key)
+                event(
+                    _log,
+                    "inbound.prepared_bot_unclaimed",
+                    call_id=req.call_id,
+                    room=ring.room_key,
+                    ended=ended,
+                )
+            elif ring.ring_bot:
                 # Stops the bot's deadline and starts its fallback wait for
                 # call-connected (the app sends this receipt before its audio is up).
                 await state.dispatcher.send_control(ring.room_key, "answered")

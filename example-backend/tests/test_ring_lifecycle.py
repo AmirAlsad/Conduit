@@ -98,11 +98,12 @@ def test_an_inline_bot_for_an_app_that_lists_no_call_signals_greets_as_before():
 def test_ring_timeout_and_preconnect_ride_the_push_as_strings():
     with TestClient(app) as c:
         _setup(c)
-        _, payload = _ring(c, ring_timeout=30, preconnect="media")
+        _, payload = _ring(c, ring_timeout=30, preconnect="media", wait_for_bot=False)
         assert payload["ring_timeout"] == "30"
         assert payload["preconnect"] == "media"
         assert "action" not in payload
-        # Pairing mode: nothing is dispatched until the app pairs.
+        # Pairing mode without agent-first ringing: nothing is dispatched until
+        # the app pairs.
         assert app.state.dispatcher.calls == []
 
 
@@ -137,13 +138,15 @@ def test_ring_bot_deadline_assumes_the_default_when_ring_timeout_is_not_sent():
         _setup(c, body=NO_TIMEOUT_BODY)
         _, payload = _ring(c, inline=True, preconnect="credentials", ring_timeout=30)
         assert "ring_timeout" not in payload
-        assert _deadline(_argv()) == settings.ring_timeout_secs + settings.ring_deadline_margin_secs
+        assert _deadline(_argv()) == (
+            settings.ring_timeout_secs + settings.ring_deadline_margin_secs + settings.ring_bot_wait_secs
+        )
 
 
 def test_pairing_ring_bot_deadline_assumes_the_default_when_ring_timeout_is_not_sent():
     with TestClient(app) as c:
         _setup(c, body=NO_TIMEOUT_BODY)
-        call_id, _ = _ring(c, preconnect="media", ring_timeout=20)
+        call_id, _ = _ring(c, preconnect="media", ring_timeout=20, wait_for_bot=False)
         r = c.post(
             "/connect/loopback",
             json={"transport": "daily", "call_signals": CALL_SIGNALS, "ring": {"call_id": call_id, "joins_before_answer": True}},
@@ -168,7 +171,9 @@ def test_inline_media_ring_dispatches_an_awaiting_ring_bot():
         _ring(c, inline=True, preconnect="media")
         argv = _argv()
         assert "--joins-before-answer" in argv and "--await-connected" in argv
-        assert _deadline(argv) == settings.ring_timeout_secs + settings.ring_deadline_margin_secs
+        assert _deadline(argv) == (
+            settings.ring_timeout_secs + settings.ring_deadline_margin_secs + settings.ring_bot_wait_secs
+        )
         assert app.state.dispatcher.controls == [True]
 
 
@@ -178,7 +183,7 @@ def test_inline_credentials_ring_gets_a_deadline_but_does_not_await():
         _ring(c, inline=True, preconnect="credentials", ring_timeout=30)
         argv = _argv()
         assert "--joins-before-answer" not in argv
-        assert _deadline(argv) == 30 + settings.ring_deadline_margin_secs
+        assert _deadline(argv) == 30 + settings.ring_deadline_margin_secs + settings.ring_bot_wait_secs
 
 
 def test_a_media_ring_needs_an_app_that_sends_call_connected():
@@ -268,7 +273,7 @@ def test_the_assumed_ring_length_must_be_positive():
 def test_connect_with_ring_dispatches_a_ring_bot_and_tracks_it():
     with TestClient(app) as c:
         _setup(c)
-        call_id, _ = _ring(c, preconnect="media", ring_timeout=20)
+        call_id, _ = _ring(c, preconnect="media", ring_timeout=20, wait_for_bot=False)
         r = c.post(
             "/connect/loopback",
             json={"transport": "daily", "call_signals": CALL_SIGNALS, "ring": {"call_id": call_id, "joins_before_answer": True}},
@@ -288,7 +293,7 @@ def test_connect_with_an_uppercase_ring_id_attaches_to_the_tracked_ring():
     # The app's engine formats call ids with Swift's uuidString (uppercase).
     with TestClient(app) as c:
         _setup(c)
-        call_id, _ = _ring(c, preconnect="credentials", ring_timeout=20)
+        call_id, _ = _ring(c, preconnect="credentials", ring_timeout=20, wait_for_bot=False)
         r = c.post(
             "/connect/loopback",
             json={"transport": "daily", "call_signals": CALL_SIGNALS, "ring": {"call_id": call_id.upper(), "joins_before_answer": False}},
@@ -333,7 +338,7 @@ def test_connect_for_a_ring_that_already_ended_dispatches_nothing():
     for status in ("declined", "busy", "suppressed_by_focus", "unanswered", "canceled", "exploded"):
         with TestClient(app) as c:
             _setup(c)
-            call_id, _ = _ring(c, preconnect="media")
+            call_id, _ = _ring(c, preconnect="media", wait_for_bot=False)
             _receipt(c, call_id, status)
             r = _pair(c, call_id)
             assert r.status_code == 409, status
@@ -345,7 +350,7 @@ def test_connect_for_a_ring_that_already_ended_dispatches_nothing():
 def test_connect_for_a_canceled_ring_dispatches_nothing():
     with TestClient(app) as c:
         _setup(c)
-        call_id, _ = _ring(c, preconnect="media")
+        call_id, _ = _ring(c, preconnect="media", wait_for_bot=False)
         assert _cancel(c, call_id).status_code == 200
         r = _pair(c, call_id)
         assert r.status_code == 409, r.text
@@ -358,7 +363,7 @@ def test_connect_for_an_answered_ring_still_pairs_and_hands_the_bot_the_receipt(
     # room, and the bot (dispatched after the receipt) gets the fallback anyway.
     with TestClient(app) as c:
         _setup(c)
-        call_id, _ = _ring(c, preconnect="media")
+        call_id, _ = _ring(c, preconnect="media", wait_for_bot=False)
         _receipt(c, call_id, "answered")
         r = _pair(c, call_id)
         assert r.status_code == 200, r.text
@@ -388,7 +393,7 @@ def test_connect_ending_a_ring_during_provisioning_ends_the_bot_it_just_made():
 def test_connect_for_another_agents_ring_is_unaffected_by_its_status():
     with TestClient(app) as c:
         _setup(c)
-        call_id, _ = _ring(c, preconnect="media")
+        call_id, _ = _ring(c, preconnect="media", wait_for_bot=False)
         _receipt(c, call_id, "declined")
         r = c.post(
             "/connect/live",
@@ -500,7 +505,7 @@ def test_only_the_first_receipt_ends_a_plain_inline_bot():
 def test_receipts_for_a_pairing_ring_without_a_bot_end_nothing():
     with TestClient(app) as c:
         _setup(c)
-        call_id, _ = _ring(c)
+        call_id, _ = _ring(c, preconnect="none")
         _receipt(c, call_id, "declined")
         assert app.state.dispatcher.disconnected == []
         assert app.state.dispatcher.sent == []
@@ -869,7 +874,7 @@ def test_pairing_for_a_ring_before_apns_answers_is_kept():
             return ApnsResult(status=200, apns_id="x")
 
         apns.send_voip_push = slow_send
-        call_id, _ = _ring(c, preconnect="media", ring_timeout=20)
+        call_id, _ = _ring(c, preconnect="media", ring_timeout=20, wait_for_bot=False)
         assert connect_status == [200]
         ring = app.state.rings.get(call_id)
         assert ring.room_key == "room-abc" and ring.preconnect == "media"

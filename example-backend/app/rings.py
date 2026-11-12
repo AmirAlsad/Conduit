@@ -1,8 +1,9 @@
 """Ring tracker: what the engine knows about each ring it sent, keyed by call_id.
 
-It links a ring to the bot dispatched for it (inline rings at ring time, pairing
-rings when the app fetches credentials during the ring), records the ring's
-receipt, and backs POST /admin/ring/{agent_id}/cancel.
+It links a ring to the bot dispatched for it (at ring time for inline rings and
+for pre-connected pairing rings, whose prepared room the app's credential request
+during the ring then takes; otherwise when the app fetches credentials during the
+ring), records the ring's receipt, and backs POST /admin/ring/{agent_id}/cancel.
 
 In memory and process-local, like active bots: a ring lasts about a minute, and a
 restarted dispatcher has no bots to steer anyway. Entries expire after an hour.
@@ -10,11 +11,13 @@ restarted dispatcher has no bots to steer anyway. Entries expire after an hour.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.config import settings
+from app.models import ConnectionPayload
 
 _TTL_SECS = 60 * 60
 # The app clamps a pushed ring_timeout to at least this many seconds.
@@ -35,6 +38,9 @@ CANCEL_ANSWERED = "ring answered"
 CONTROL_REPLY_PREFIX = "@conduit-control "
 CANCEL_ENDED = "ended"
 CANCEL_REFUSED = "refused"
+# A bot dispatched with --report-joined writes this line (behind the prefix) once
+# its transport has joined the room: the ring's push waits for it.
+CONTROL_JOINED = "joined"
 
 
 @dataclass
@@ -52,8 +58,17 @@ class TrackedRing:
     ring_bot: bool = False
     # The device joins the bot's room before the user answers ("media").
     joins_before_answer: bool = False
+    # A pairing ring's room and bot, prepared at ring time, until the app's first
+    # credential request for the ring takes them (or they are given up).
+    prepared: ConnectionPayload | None = None
+    # Whether that bot was dispatched with --await-connected.
+    prepared_await_connected: bool = False
+    # Tracked, but its push has not gone out yet (the engine is waiting for the bot).
+    awaiting_push: bool = False
     status: str | None = None  # the ring's receipt, once it arrives
     canceled: bool = False
+    # Set by the first receipt and by our cancel: wakes a ring still waiting to push.
+    ended: asyncio.Event = field(default_factory=asyncio.Event, repr=False, compare=False)
     created_at: float = 0.0
 
 
@@ -63,9 +78,15 @@ def ring_deadline_secs(ring_timeout: int | None) -> float:
     return timeout + settings.ring_deadline_margin_secs
 
 
-def ring_bot_flags(*, ring_timeout: int | None, joins_before_answer: bool) -> list[str]:
-    """argv flags for a bot dispatched for a ring (see bot/bot.py)."""
-    flags = ["--ring-deadline", f"{ring_deadline_secs(ring_timeout):g}"]
+def ring_bot_flags(
+    *, ring_timeout: int | None, joins_before_answer: bool, push_wait_secs: float = 0.0
+) -> list[str]:
+    """argv flags for a bot dispatched for a ring (see bot/bot.py).
+    ``push_wait_secs``: the longest the ring's push may wait for this bot to join.
+    The bot counts its deadline from its own start, so the wait is added to keep
+    the full ring after the push."""
+    deadline = ring_deadline_secs(ring_timeout) + push_wait_secs
+    flags = ["--ring-deadline", f"{deadline:g}"]
     if joins_before_answer:
         flags.append("--joins-before-answer")
     return flags

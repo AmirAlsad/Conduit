@@ -23,12 +23,17 @@ from pathlib import Path
 
 from app.obs import event, get_logger
 from app.registry import Registry
-from app.rings import CONTROL_REPLY_PREFIX
+from app.rings import CONTROL_JOINED, CONTROL_REPLY_PREFIX
 
 # How long a cancel waits for the ring bot's verdict before the caller falls back
 # to force-ending it (the bot may still be importing, with the line waiting in its
 # stdin pipe).
 CANCEL_REPLY_SECS = 3.0
+
+# wait_joined outcomes.
+BOT_JOINED = "joined"
+BOT_EXITED = "exited"  # the bot ended (or there is no reporting bot) before joining
+BOT_WAIT_TIMEOUT = "timeout"
 
 # Sentinel pid stored inside the dispatch lock before the subprocess exists, so a
 # racing trigger sees the room as already-active and skips. Never terminated.
@@ -55,6 +60,9 @@ class Dispatcher:
         self._watchers: set[asyncio.Task] = set()
         # A pending cancel's verdict, per room, filled in by the bot's stdout reader.
         self._cancel_waiters: dict[str, asyncio.Future] = {}
+        # Whether a bot dispatched with report_joined has joined its room, per room:
+        # True once it said so, False if it ended first.
+        self._joined: dict[str, asyncio.Future] = {}
         self._log = get_logger("dispatch")
 
     def _lock(self, room_key: str) -> asyncio.Lock:
@@ -74,6 +82,7 @@ class Dispatcher:
         bot_argv: list[str],
         cleanup: Callable[[], Awaitable[None]] | None = None,
         control: bool = False,
+        report_joined: bool = False,
     ) -> int | None:
         """Spawn a bot into ``room_key`` unless one is already active there.
 
@@ -83,6 +92,9 @@ class Dispatcher:
         while the bot is still importing waits in the pipe, where a signal would
         hit the default action and kill it. (Logs go to stderr, which stays
         inherited; any other stdout line is forwarded.)
+
+        ``report_joined`` (a bot started with ``--report-joined``) pipes its stdout
+        too, for the line it writes once it has joined the room: ``wait_joined``.
 
         Returns the new pid, or None if an active bot made this a no-op.
         """
@@ -101,6 +113,7 @@ class Dispatcher:
                 agent=agent_id,
                 transport=transport,
             )
+            pipe_stdout = control or report_joined
             try:
                 proc = await asyncio.create_subprocess_exec(
                     sys.executable,
@@ -110,7 +123,7 @@ class Dispatcher:
                     env=os.environ.copy(),
                     cwd=_PROJECT_ROOT,
                     stdin=asyncio.subprocess.PIPE if control else None,
-                    stdout=asyncio.subprocess.PIPE if control else None,
+                    stdout=asyncio.subprocess.PIPE if pipe_stdout else None,
                 )
             except Exception as e:
                 await self._registry.clear_active_bot(room_key)
@@ -120,10 +133,14 @@ class Dispatcher:
             self._procs[room_key] = proc
             await self._registry.set_active_bot(room_key, proc.pid)
             event(self._log, "dispatch.accepted", room=room_key, agent=agent_id, pid=proc.pid)
+            joined = None
+            if report_joined:
+                joined = asyncio.get_running_loop().create_future()
+                self._joined[room_key] = joined
             # Retain a strong reference so the watcher isn't GC'd mid-flight (which
             # would leave a leaked active-bot entry permanently blocking the room).
-            self._spawn_task(self._watch(proc, room_key, cleanup))
-            if control and getattr(proc, "stdout", None) is not None:
+            self._spawn_task(self._watch(proc, room_key, cleanup, joined))
+            if pipe_stdout and getattr(proc, "stdout", None) is not None:
                 self._spawn_task(self._read_replies(proc.stdout, room_key))
             return proc.pid
 
@@ -133,8 +150,9 @@ class Dispatcher:
         task.add_done_callback(self._watchers.discard)
 
     async def _read_replies(self, stdout, room_key: str) -> None:
-        """Drain a control bot's stdout: its verdicts resolve a pending cancel,
-        anything else is passed through as if the bot had inherited stdout."""
+        """Drain a control or reporting bot's stdout: its verdicts resolve a
+        pending cancel, its joined line resolves ``wait_joined``, anything else is
+        passed through as if the bot had inherited stdout."""
         try:
             while raw := await stdout.readline():
                 line = raw.decode(errors="replace").rstrip("\n")
@@ -142,19 +160,28 @@ class Dispatcher:
                 if line.startswith(CONTROL_REPLY_PREFIX + "cancel "):
                     if waiter is not None and not waiter.done():
                         waiter.set_result(line.rsplit(" ", 1)[1])
+                elif line == CONTROL_REPLY_PREFIX + CONTROL_JOINED:
+                    joined = self._joined.get(room_key)
+                    if joined is not None and not joined.done():
+                        joined.set_result(True)
+                        event(self._log, "dispatch.bot_joined", room=room_key)
                 else:
                     print(line, flush=True)
         finally:
-            # The bot is gone: no verdict will come.
+            # The bot is gone: no verdict will come, and it will not join now.
             waiter = self._cancel_waiters.get(room_key)
             if waiter is not None and not waiter.done():
                 waiter.set_result(None)
+            joined = self._joined.get(room_key)
+            if joined is not None and not joined.done():
+                joined.set_result(False)
 
     async def _watch(
         self,
         proc: asyncio.subprocess.Process,
         room_key: str,
         cleanup: Callable[[], Awaitable[None]] | None,
+        joined: asyncio.Future | None = None,
     ) -> None:
         code = await proc.wait()
         await self._registry.clear_active_bot(room_key)
@@ -162,12 +189,36 @@ class Dispatcher:
         # guard; the per-room lock is intentionally kept, see __init__).
         if self._procs.get(room_key) is proc:
             self._procs.pop(room_key, None)
+        if joined is not None:
+            if not joined.done():
+                joined.set_result(False)
+            if self._joined.get(room_key) is joined:
+                del self._joined[room_key]
         event(self._log, "dispatch.bot_exited", room=room_key, pid=proc.pid, code=code)
         if cleanup is not None:
             try:
                 await cleanup()
             except Exception as e:  # cleanup is best-effort (e.g. delete ephemeral room)
                 event(self._log, "dispatch.cleanup_failed", room=room_key, error=str(e))
+
+    def has_bot(self, room_key: str) -> bool:
+        """Whether a bot this dispatcher started is still running in the room."""
+        proc = self._procs.get(room_key)
+        return proc is not None and proc.returncode is None
+
+    async def wait_joined(self, room_key: str, timeout: float) -> str:
+        """Wait up to ``timeout`` for the bot dispatched with ``report_joined`` into
+        ``room_key`` to say it has joined the room: BOT_JOINED, BOT_EXITED (it
+        ended first, or no such bot is running) or BOT_WAIT_TIMEOUT."""
+        joined = self._joined.get(room_key)
+        if joined is None:
+            return BOT_EXITED
+        try:
+            # Shielded: the future is the room's, not this waiter's.
+            ok = await asyncio.wait_for(asyncio.shield(joined), timeout)
+        except asyncio.TimeoutError:
+            return BOT_WAIT_TIMEOUT
+        return BOT_JOINED if ok else BOT_EXITED
 
     async def send_control(self, room_key: str, message: str) -> bool:
         """Write one control line to a bot dispatched with ``control=True``.

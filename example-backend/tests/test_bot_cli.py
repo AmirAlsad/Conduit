@@ -55,3 +55,66 @@ async def test_ring_bot_reads_control_lines_from_stdin(monkeypatch):
     os.write(write_fd, b"answered\n")
     os.close(write_fd)
     assert [line async for line in _stdin_lines()] == ["answered"]
+
+
+async def test_report_joined_makes_the_bot_announce_its_join(monkeypatch):
+    import sys
+
+    import bot.bot as entry
+    from bot.runtime import announce_joined_on_stdout
+
+    seen = {}
+
+    async def fake_run_bot(transport, agent_id, transport_type, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(entry, "build_transport", lambda kind, creds: object())
+    monkeypatch.setattr(entry, "run_bot", fake_run_bot)
+    base = ["bot", "--transport", "daily", "--agent", "live", "--token", "t", "--room-url", "https://x"]
+    monkeypatch.setattr(sys, "argv", [*base, "--report-joined"])
+    await entry._run_from_cli()
+    assert seen["announce_joined"] is announce_joined_on_stdout
+    # A plain bot reports nothing: its stdout may not be a pipe to the dispatcher.
+    monkeypatch.setattr(sys, "argv", base)
+    await entry._run_from_cli()
+    assert seen["announce_joined"] is None
+
+
+def test_the_joined_announcement_is_the_dispatchers_control_line(capsys):
+    from app.rings import CONTROL_JOINED, CONTROL_REPLY_PREFIX
+    from bot.runtime import announce_joined_on_stdout
+
+    announce_joined_on_stdout()
+    assert capsys.readouterr().out == f"{CONTROL_REPLY_PREFIX}{CONTROL_JOINED}\n"
+
+
+class _Events:
+    def __init__(self):
+        self.handlers = {}
+
+    def event_handler(self, name):
+        def deco(fn):
+            self.handlers[name] = fn
+            return fn
+
+        return deco
+
+
+async def test_the_bot_announces_once_when_its_own_transport_joined():
+    from app.obs import get_logger
+    from bot.runtime import _wire_joined
+
+    for transport_type, event_name, args in (
+        ("daily", "on_joined", ({"participants": {}},)),
+        ("livekit", "on_connected", ()),
+    ):
+        t, announced = _Events(), []
+        _wire_joined(t, transport_type, lambda: announced.append(1), get_logger("test"))
+        assert set(t.handlers) == {event_name}
+        await t.handlers[event_name](t, *args)
+        # LiveKit can report the connection twice.
+        await t.handlers[event_name](t, *args)
+        assert announced == [1], transport_type
+    t = _Events()
+    _wire_joined(t, "smallwebrtc", lambda: None, get_logger("test"))
+    assert t.handlers == {}

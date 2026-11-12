@@ -110,9 +110,17 @@ class RingRequest(BaseModel):
 
     ``ring_timeout`` and ``preconnect`` ride the push only to a device whose
     registration lists the "ring_timeout" / "preconnect" push feature; any other
-    device rings for its own default, and a ``preconnect`` is dropped."""
+    device rings for its own default, and a ``preconnect`` is dropped.
+
+    Agent-first: a ring that starts its bot before the push (inline, and a
+    pre-connected pairing ring, whose room and bot are prepared at ring time)
+    sends the push once the bot has joined the room, or after
+    RING_BOT_WAIT_SECS without it. ``wait_for_bot: false`` pushes at once and
+    prepares nothing for a pairing ring (its bot starts at the app's request)."""
 
     inline: bool = False
+    # The transport of the room made at ring time (inline, or a prepared pairing
+    # ring): match the app's for the agent.
     transport: Transport | None = None
     # Shortens this ring (whole seconds; the app clamps it to [10, its own timeout]).
     ring_timeout: int | None = Field(default=None, gt=0)
@@ -121,6 +129,7 @@ class RingRequest(BaseModel):
     # a device that does not list it gets "credentials"). Omitted: the best tier
     # the registration takes. "none": a plain ring, with no preconnect key.
     preconnect: PreconnectRequest | None = None
+    wait_for_bot: bool = True
 
 
 class RingCancelRequest(BaseModel):
@@ -133,7 +142,9 @@ class RingCancelResponse(BaseModel):
     call_id: str
     # "in_band": the agent left the pre-connected room (no push).
     # "push": a cancel push was sent.
-    method: Literal["in_band", "push"]
+    # "before_push": the ring was still waiting for its bot, so its push never
+    # went out (and never will).
+    method: Literal["in_band", "push", "before_push"]
     bot_ended: bool
     apns_status: int | None = None
     apns_id: str | None = None
@@ -152,6 +163,12 @@ class RingResponse(BaseModel):
     # device doesn't list the "preconnect" push feature (the ring then behaves as
     # one that never asked, and no ring bot is dispatched for it).
     preconnect: Preconnect | None = None
+    # Agent-first ringing: whether the bot started for this ring had joined its
+    # room when the push went out (False: the wait ran out, or the bot exited).
+    # None when the ring did not wait (no bot at ring time, or wait_for_bot false).
+    bot_in_room: bool | None = None
+    # How long the push waited for that bot, in seconds; None when it did not wait.
+    bot_wait_secs: float | None = None
     apns_status: int
     apns_id: str | None = None
 

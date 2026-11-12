@@ -48,15 +48,20 @@ async def provision_pairing(
     base_url: str | None = None,
     ring_flags: list[str] | None = None,
     await_connected: bool = False,
+    report_joined: bool = False,
 ) -> tuple[ConnectionPayload, str | None]:
     """Returns the payload and the room key the bot was dispatched into (None for
     smallwebrtc, which has no room). ``ring_flags`` (app.rings.ring_bot_flags)
     dispatch the bot for a ring: with a deadline and a control channel.
     ``await_connected``: the client sends call-connected, so the bot stays silent
-    until it (for smallwebrtc, the bot the offer starts)."""
+    until it (for smallwebrtc, the bot the offer starts). ``report_joined``: the
+    bot says when it has joined the room (``Dispatcher.wait_joined``); a ring
+    pushes only then."""
     extra = list(ring_flags or ())
     if await_connected:
         extra.append("--await-connected")
+    if report_joined:
+        extra.append("--report-joined")
     control = bool(ring_flags)
     if transport == "daily":
         daily = _daily(state)
@@ -77,7 +82,7 @@ async def provision_pairing(
 
         await state.dispatcher.dispatch(
             room_key=room.name, agent_id=agent_id, transport="daily",
-            bot_argv=argv, cleanup=cleanup, control=control,
+            bot_argv=argv, cleanup=cleanup, control=control, report_joined=report_joined,
         )
         return ConnectionPayload(
             transport="daily",
@@ -98,7 +103,7 @@ async def provision_pairing(
         # LiveKit Cloud auto-closes empty rooms; no cleanup needed.
         await state.dispatcher.dispatch(
             room_key=room_name, agent_id=agent_id, transport="livekit",
-            bot_argv=argv, control=control,
+            bot_argv=argv, control=control, report_joined=report_joined,
         )
         return ConnectionPayload(
             transport="livekit",

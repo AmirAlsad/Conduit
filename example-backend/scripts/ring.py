@@ -20,6 +20,12 @@ the ``preconnect`` push feature and the ``call-connected`` call signal,
 credentials|media`` asks for one tier (``media`` is sent as ``credentials`` to a
 device without ``call-connected``); ``--preconnect none`` sends a plain ring.
 
+Agent first: when the ring starts its agent before the push (``--inline``, and a
+pre-connected pairing ring, whose room the engine prepares for the app's request
+during the ring), the engine pushes once the agent's bot is in the room, or after
+``RING_BOT_WAIT_SECS`` (8) without it; the script prints how long that took.
+``--no-wait`` pushes at once and prepares nothing for a pairing ring.
+
 ``--cancel CALL_ID`` withdraws a ring that is still ringing (no new ring);
 ``--cancel-after SECONDS`` rings, waits, then cancels that ring. A cancel push
 goes only to a device that registered the ``cancel`` push feature; otherwise the
@@ -29,7 +35,7 @@ Usage:
   uv run python scripts/ring.py --agent live
   uv run python scripts/ring.py --agent loopback --inline --base-url https://<host>
   uv run python scripts/ring.py --agent tone --inline --preconnect media --ring-timeout 30
-  uv run python scripts/ring.py --agent live --preconnect none
+  uv run python scripts/ring.py --agent live --preconnect none --no-wait
   uv run python scripts/ring.py --agent live --cancel-after 8
   uv run python scripts/ring.py --agent live --cancel <call_id>
 
@@ -70,6 +76,7 @@ def ring_body(
     transport: str | None = None,
     ring_timeout: int | None = None,
     preconnect: str | None = None,
+    wait_for_bot: bool = True,
 ) -> dict:
     """The /admin/ring body; options left unset are omitted (the engine's defaults)."""
     body: dict = {"inline": inline}
@@ -79,6 +86,8 @@ def ring_body(
         body["ring_timeout"] = ring_timeout
     if preconnect:
         body["preconnect"] = preconnect
+    if not wait_for_bot:
+        body["wait_for_bot"] = False
     return body
 
 
@@ -118,6 +127,11 @@ _HINTS = {
     ),
     502: "APNs rejected the push — see `reason` and `hint` above.",
     503: "Engine missing APNs (or transport) config — set the APNS_* vars on the engine.",
+}
+
+_RING_HINTS = {
+    409: "The ring was canceled, or got a receipt, while the engine waited for its "
+    "agent to join the room, so its push never went out.",
 }
 
 _CANCEL_HINTS = {
@@ -161,6 +175,8 @@ def _cancel(base_url: str, agent: str, call_id: str, as_json: bool) -> None:
         return
     if body["method"] == "in_band":
         print(f"Canceled {call_id} in band: the agent left the pre-connected room (no push).")
+    elif body["method"] == "before_push":
+        print(f"Canceled {call_id} before its push went out: nothing reached the phone.")
     else:
         print(f"Canceled {call_id} with a cancel push (APNs {body['apns_status']}).")
     if body["bot_ended"]:
@@ -178,7 +194,8 @@ def main() -> None:
     parser.add_argument(
         "--transport",
         choices=["daily", "livekit"],
-        help="Transport for --inline provisioning (default: the agent's own).",
+        help="Transport of the room made at ring time (--inline, or a pre-connected "
+        "pairing ring); match the app's for the agent (default: the agent's own).",
     )
     parser.add_argument(
         "--ring-timeout",
@@ -192,6 +209,12 @@ def main() -> None:
         help="Ask the app to prepare while ringing: fetch credentials, or also join "
         "the room (the bot then waits for the answer); none for a plain ring "
         "(default: the best the device's registration takes).",
+    )
+    parser.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="Push at once instead of when the agent is in the room (a pairing ring "
+        "then prepares nothing; its agent starts when the app asks).",
     )
     cancel = parser.add_mutually_exclusive_group()
     cancel.add_argument(
@@ -222,10 +245,11 @@ def main() -> None:
         transport=args.transport,
         ring_timeout=args.ring_timeout,
         preconnect=args.preconnect,
+        wait_for_bot=not args.no_wait,
     )
     status, body = _post(args.base_url, f"/admin/ring/{args.agent}", body)
     if status != 200:
-        _fail(status, body, {})
+        _fail(status, body, _RING_HINTS)
 
     if args.json:
         print(json.dumps(body, indent=2))
@@ -253,6 +277,12 @@ def main() -> None:
         print("the call-connected call signal, which a media ring needs.")
     else:
         print(f"Pre-connect requested: {args.preconnect}.")
+    waited = body.get("bot_wait_secs")
+    if body.get("bot_in_room") is True:
+        print(f"Agent first: its bot joined the room {waited:g} s after it started;")
+        print("then the push went out.")
+    elif body.get("bot_in_room") is False:
+        print(f"Agent first: its bot was not in the room after {waited:g} s; rang anyway.")
     if args.ring_timeout is not None and "ring_timeout" in body and body["ring_timeout"] is None:
         print("Ring timeout not sent: the device's app doesn't list the ring_timeout")
         print("push feature, so it rings for its own default.")
@@ -262,6 +292,10 @@ def main() -> None:
             print("(or any receipt but answered) and when the ring deadline passes.")
         else:
             print("(or any receipt but answered).")
+    elif body.get("bot_in_room") is not None:
+        print("NOTE: the engine prepared the room and bot at ring time; the app's credential")
+        print("request during the ring takes them. The bot ends on a decline (or any receipt")
+        print("but answered), when the ring deadline passes, or if the app answers without them.")
     if args.cancel_after is not None:
         print(f"Canceling in {args.cancel_after:g} s…")
         time.sleep(args.cancel_after)

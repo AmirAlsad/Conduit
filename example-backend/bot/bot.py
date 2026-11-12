@@ -6,7 +6,8 @@ that branches between two launch modes converging on ``run_bot``:
     for a client that sends call-connected gets ``--await-connected``; one
     dispatched for a ring also gets ``--ring-deadline SECS`` (and, when the app
     joins during the ring, ``--joins-before-answer``) and reads control lines
-    from stdin.
+    from stdin; one whose ring pushes only once it is in the room gets
+    ``--report-joined`` and says so on stdout.
   * local dev: ``python -m bot.bot`` (no dispatch args) → the Pipecat dev runner
     serves a prebuilt client at :7860/client. Pick the agent with CONDUIT_AGENT.
 
@@ -24,7 +25,7 @@ from pipecat.runner.types import DailyRunnerArguments, RunnerArguments
 from pipecat.runner.utils import create_transport
 
 from app.config import settings
-from bot.runtime import run_bot
+from bot.runtime import announce_joined_on_stdout, run_bot
 from bot.transport_factory import DEV_TRANSPORT_PARAMS, build_transport
 
 
@@ -66,6 +67,8 @@ async def _run_from_cli() -> None:
     # before the answer, its joining is not the answer.
     parser.add_argument("--joins-before-answer", action="store_true")
     parser.add_argument("--ring-deadline", type=float)
+    # The ring's push waits for this bot: say on stdout when it has joined the room.
+    parser.add_argument("--report-joined", action="store_true")
     args = parser.parse_args()
 
     if args.transport == "daily":
@@ -84,6 +87,7 @@ async def _run_from_cli() -> None:
         ring_deadline_secs=args.ring_deadline,
         # The dispatcher gives ring bots a stdin pipe for the receipt-driven answer.
         control=_stdin_lines() if args.ring_deadline is not None else None,
+        announce_joined=announce_joined_on_stdout if args.report_joined else None,
     )
 
 

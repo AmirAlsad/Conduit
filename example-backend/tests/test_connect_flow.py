@@ -1,6 +1,8 @@
 """Pairing + direct flows through the real routes, with faked transport/dispatch
 (no network). Locks in the connection contract and the register/dispatch wiring."""
 
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from app.config import settings
@@ -46,6 +48,13 @@ class FakeDispatcher:
         # What a ring bot answers a cancel with: "ended", "refused" (the call was
         # answered) or None (it can't be reached; the caller then force-ends it).
         self.cancel_outcome = "ended"
+        self.reports_joined = []  # report_joined, per dispatch
+        self.alive = set()  # rooms with a running bot
+        self.waits = []  # (room_key, timeout) per wait_joined
+        # What wait_joined says: "joined" at once, "exited" at once, or "timeout"
+        # after the timeout (a bot that never joins). on_wait runs first.
+        self.join_outcome = "joined"
+        self.on_wait = None
 
     async def send_control(self, room_key, message):
         self.sent.append((room_key, message))
@@ -53,19 +62,35 @@ class FakeDispatcher:
 
     async def disconnect(self, room_key):
         self.disconnected.append(room_key)
+        self.alive.discard(room_key)
         return True
 
     async def cancel_ring_bot(self, room_key):
         self.cancels.append(room_key)
         if self.cancel_outcome == "ended":
             self.disconnected.append(room_key)
+            self.alive.discard(room_key)
         return self.cancel_outcome
 
+    def has_bot(self, room_key):
+        return room_key in self.alive
+
+    async def wait_joined(self, room_key, timeout):
+        self.waits.append((room_key, timeout))
+        if self.on_wait is not None:
+            await self.on_wait(room_key)
+        if self.join_outcome == "timeout":
+            await asyncio.sleep(timeout)
+        return self.join_outcome
+
     async def dispatch(
-        self, *, room_key, agent_id, transport, bot_argv, cleanup=None, control=False
+        self, *, room_key, agent_id, transport, bot_argv, cleanup=None, control=False,
+        report_joined=False,
     ):
         self.calls.append((room_key, agent_id, transport, tuple(bot_argv)))
         self.controls.append(control)
+        self.reports_joined.append(report_joined)
+        self.alive.add(room_key)
         return 12345
 
 

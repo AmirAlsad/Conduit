@@ -20,7 +20,7 @@ from pipecat.workers.runner import WorkerRunner
 
 from app.config import settings
 from app.obs import event, get_logger
-from app.rings import CANCEL_ENDED, CANCEL_REFUSED, CONTROL_REPLY_PREFIX
+from app.rings import CANCEL_ENDED, CANCEL_REFUSED, CONTROL_JOINED, CONTROL_REPLY_PREFIX
 from bot.call_control import CallControl
 from bot.pipelines import live, loopback, tone
 from bot.teardown import TeardownController
@@ -166,6 +166,30 @@ def _wire_presence(
             await controller.end_now("client-left")
 
 
+def _wire_joined(transport, transport_type: str, announce: Callable[[], None], log) -> None:
+    """Call ``announce`` once, when the bot's own transport has joined the room
+    (Daily's on_joined, LiveKit's on_connected, which can fire twice)."""
+    announced = False
+
+    async def _joined(*_):
+        nonlocal announced
+        if announced:
+            return
+        announced = True
+        event(log, "bot.joined_room", transport=transport_type)
+        announce()
+
+    if transport_type == "daily":
+        transport.event_handler("on_joined")(_joined)
+    elif transport_type == "livekit":
+        transport.event_handler("on_connected")(_joined)
+
+
+def announce_joined_on_stdout() -> None:
+    """Tell the dispatcher the bot is in the room (a ring's push waits for it)."""
+    print(f"{CONTROL_REPLY_PREFIX}{CONTROL_JOINED}", flush=True)
+
+
 def reply_on_stdout(ended: bool) -> None:
     """The ring bot's verdict on a cancel, read by the dispatcher (stdout is the
     reply channel of a control bot; logs go to stderr)."""
@@ -185,12 +209,15 @@ async def run_bot(
     ring_deadline_secs: float | None = None,
     control: AsyncIterator[str] | None = None,
     control_reply: Callable[[bool], None] | None = reply_on_stdout,
+    announce_joined: Callable[[], None] | None = None,
 ) -> None:
     """``await_connected`` / ``joins_before_answer`` / ``ring_deadline_secs``: see
     bot/call_control.py.
     ``control``: lines from the dispatcher (a ring bot's stdin); "answered" is the
     ring's answered receipt, "cancel" a withdrawn ring (answered with
-    ``reply_on_stdout`` unless ``control_reply`` says otherwise)."""
+    ``reply_on_stdout`` unless ``control_reply`` says otherwise).
+    ``announce_joined``: called once the transport has joined the room
+    (``announce_joined_on_stdout`` for a bot dispatched with --report-joined)."""
     log = get_logger("bot")
 
     build_fn = _BUILDERS.get(agent_id)
@@ -227,6 +254,8 @@ async def run_bot(
         _wire_rtvi(rtvi, controller, call, agent_id, log)
 
     _wire_presence(transport, transport_type, controller, call, log)
+    if announce_joined is not None:
+        _wire_joined(transport, transport_type, announce_joined, log)
 
     event(
         log,
