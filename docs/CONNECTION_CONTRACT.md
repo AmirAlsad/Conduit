@@ -36,9 +36,13 @@ Authorization: Bearer <API key>      # the key the user entered; omitted if blan
 - **`Authorization`:** the user's API key as a bearer token. Sent only if the user
   provided a key; use it to authenticate the request however you like (validate it,
   rate-limit on it, ignore it for an open endpoint).
-- **Body:** a JSON object with a single `transport` field — `"daily"`,
-  `"livekit"`, or `"smallwebrtc"` — telling you which WebRTC transport the user
-  selected, so you can provision the matching room (or offer endpoint).
+- **Body:** a JSON object with a `transport` field — `"daily"`, `"livekit"`, or
+  `"smallwebrtc"` — telling you which WebRTC transport the user selected, so you can
+  provision the matching room (or offer endpoint). For an outgoing call that is the
+  whole body. For an incoming call that the app prepares while the phone is still
+  ringing, it also carries a `ring` object, `{"call_id": "<the ring's id, lowercase>",
+  "await_answer": <bool>}`; see [Inbound calls](INBOUND_CALLS.md#2-ringing-the-user).
+  An endpoint that does not know `ring` can ignore it.
 - **No agent identifier is sent.** *The endpoint identifies the agent* — one
   endpoint per agent (see [Multiple agents](#multiple-agents)). Conduit does not
   send an `agent_id`.
@@ -247,6 +251,13 @@ need opposite responses:
 
   The signal is best-effort: a connection that dies mid-drop never sends one, which
   is exactly when the grace window should apply.
+- **Hold is not a hangup either.** When the user takes a cellular call (or presses
+  Hold in the app), Conduit keeps the call and sends the RTVI client messages
+  `call-held` and, later, `call-resumed`, in the same envelope as `end-call`. A
+  reasonable agent stops talking while held and gives a human who drops during the
+  hold a longer grace window. Agents that don't know the messages can ignore them.
+  Details, and the other call-control message (`call-answered`, for rings), are in
+  [Inbound calls](INBOUND_CALLS.md#6-call-control-messages-to-your-agent-engine-02).
 
 ---
 
@@ -256,6 +267,10 @@ need opposite responses:
   "connected" only once media **and** the bot are live, so join the bot to the room
   as part of (or right after) handling the pairing request — don't make the user
   wait in an empty room.
+- **Conduit waits 30 seconds for the agent.** After it has joined the room, a call
+  whose agent is not ready within 30 seconds fails with "Agent didn't join" and a
+  hint to check that your server starts the agent for each call. Start the agent
+  when you return credentials, not later.
 - **Use HTTPS.** The API key travels as a bearer token. Conduit stores it only in
   the device Keychain and never logs it, but the endpoint must be HTTPS. (The one
   sanctioned exception is SmallWebRTC on a private network — plain `http://` to a

@@ -173,8 +173,8 @@ uv run python scripts/ring.py --agent live --ring-timeout 30 --preconnect media
   engine logs `ring.preconnect_unsupported`. An older app would otherwise answer
   into a bot whose audio is closed. When it is sent:
   `credentials` fetches `/connect/{agent_id}` during the ring; `media` also
-  joins the room before the answer (only where the transport supports it; Daily
-  stays at `credentials`). In pairing mode the app's `/connect` then carries
+  joins the room before the answer (only where the transport supports it: LiveKit
+  does; Daily and SmallWebRTC stay at `credentials`). In pairing mode the app's `/connect` then carries
   `"ring": {"call_id", "await_answer"}`, and the engine dispatches a **ring bot**
   for it. With `--inline` the ring bot is dispatched at ring time.
   If that `/connect` lands after the ring already ended (a declined, busy,
@@ -253,9 +253,10 @@ uv run python scripts/ring.py --agent live --cancel-after 8        # ring, wait 
 
 ### Hold
 
-When the user puts the call on hold (e.g. to take a cellular call), the app
-sends `call-held` and, later, `call-resumed`. The bot stops talking and hears
-nothing while held, and if the phone drops out of the room while held it waits
+When the user puts the call on hold (taking or placing a cellular call, or the
+Hold button in the app), the app sends `call-held` and, later, `call-resumed`,
+each again if it did not leave the device and `call-held` again after a
+reconnect. The bot stops talking and hears nothing while held, and if the phone drops out of the room while held it waits
 `HELD_GRACE_SECS` (default 600) instead of `HUMAN_ABSENT_GRACE_SECS`.
 
 ### The `tone` test agent

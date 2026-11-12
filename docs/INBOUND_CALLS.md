@@ -32,6 +32,8 @@ own server. Anthropic/Conduit operates nothing at runtime.
 
 Inbound is **opt-in per agent**: in Add Agent, toggle **"Let this agent call me"** and
 give a **registration endpoint** (pre-filled from the pairing endpoint, editable).
+Turning it on also asks for the microphone, so that a call answered from the lock
+screen can carry the user's voice.
 
 ---
 
@@ -190,10 +192,11 @@ was `answered` first still gets its room and agent.
 2. **User answers** → Conduit connects the transport (inline creds, else pairing
    resolve), transitions to `connecting` → `connected`, and the call behaves exactly
    like an outgoing one (mute, routing, reconnection, interruptions).
-3. **User declines** (or the call is never answered) → logged in Recents as a declined
-   **incoming** call. On engine 0.2+ an unanswered ring ends after the ring timeout
-   (§2, receipt `unanswered`), and a withdrawn ring ends on your cancel (§5, receipt
-   `canceled`).
+3. **User declines** → logged in Recents as a declined **incoming** call (receipt
+   `declined`). A ring nobody answers or declines is logged as a **missed** call: on
+   engine 0.2+ it ends after the ring timeout (§2, receipt `unanswered`), or when
+   you withdraw it (§5, receipt `canceled`), and the app posts a quiet local
+   notification. A ring that was busy or Focus-filtered is missed too (§4).
 4. **Unknown `agent_id`** (not configured in the app) → Conduit still reports the call
    to satisfy PushKit, then ends it gracefully.
 5. **Already on a call** → the new call is reported (corrected to the agent's identity
@@ -225,6 +228,10 @@ Authorization: Bearer <API key>
 | `suppressed_by_focus` | Focus/DND filtered the ring — the phone never rang (the call is still logged in the app's Recents as missed) |
 | `unanswered` | The ring timed out with nobody answering (engine 0.2+) |
 | `canceled` | You withdrew the ring before it was answered (§5; engine 0.2+) |
+
+`call_id` is the ring's UUID in lowercase; the one in your push may be spelled
+differently, so **compare it case-insensitively** (parse both as UUIDs, or lowercase
+both). Builds on engine 0.1 sent it in uppercase.
 
 One receipt per ring, describing the *ring*: a normal hang-up after an answered call
 sends nothing further. Omit `status_url` and the app sends nothing. Return any 2xx;
@@ -260,7 +267,8 @@ call starts faster on answer:
 
 The app uses the lower of what you ask for, what it is configured to allow, and
 what the agent's transport supports (not every transport can join during a ring:
-Daily and SmallWebRTC stay at `credentials`), so you may see `credentials`
+LiveKit does; SmallWebRTC stays at `credentials`; Daily does too, apart from a
+DEBUG experiment in development builds of the app), so you may see `credentials`
 behaviour for a `media` ring. Anything missing means today's behaviour.
 
 `"media"` is your promise that the agent holds its audio until the user answers.
@@ -342,11 +350,21 @@ same envelope:
 | `t` | When |
 |---|---|
 | `call-answered` | The user answered a ring whose push carried `preconnect` (any value), once iOS has activated the call's audio and the transport is connected; sent again after every reconnect of that call |
-| `call-held` | The call went on hold (e.g. the user took a cellular call) |
+| `call-held` | The call went on hold: the user took or placed a cellular call, or pressed Hold in the app. Any call, incoming or outgoing; sent again after every reconnect of a held call |
 | `call-resumed` | The call came back from hold |
 
-On hold the app's mic is off. A reasonable agent stops talking, takes no turns,
-and gives a human who drops while held a longer grace window than a normal drop.
+On hold the app's mic is off and, where the transport can, its playout too. A
+reasonable agent stops talking, takes no turns, and gives a human who drops while
+held a longer grace window than a normal drop. SmallWebRTC's SDK cannot stop
+playout, so on that transport a held call is silent only if the agent honours
+`call-held`.
+
+Each message is sent once the connection to the agent is up, and the app learns
+whether it left the device: if it did not, it sends the call's current state
+again after 1, 2, 4, 8, 16 and 30 seconds, so a lost `call-held` does not leave
+the agent talking, and a lost `call-resumed` does not leave it silent. Expect
+the same message more than once, and treat each as the call's current state
+rather than an event to count.
 
 Delivery: on Daily (and SmallWebRTC) the messages reach Pipecat's RTVI processor
 (`on_client_message`). On LiveKit they arrive as raw data packets: Pipecat's

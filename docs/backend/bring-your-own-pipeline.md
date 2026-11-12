@@ -95,6 +95,20 @@ because breaking one fails in ways that are easy to misdiagnose:
 A **greeting** (`on_ready`) is optional but recommended — immediate downlink audio
 confirms the call connected.
 
+## Hold and rings that wait for the answer (optional)
+
+The app also sends `call-held` / `call-resumed` (the user took a phone call or
+pressed Hold) and, for a ring it prepares while the phone rings, `call-answered`.
+The entrypoint receives them for you (`bot/call_control.py`), but your pipeline
+only honours them if it can close its audio: put an `AudioGate`
+(`from bot.call_control import AudioGate`) after `transport.input()` and one before
+`transport.output()`, and return them as `BotBuild(worker=..., gates=(gate_in,
+gate_out))`; `live.py` shows it. The gates stay closed while a ring awaits its
+answer and while the call is held, so the agent hears nothing and says nothing. An
+agent without gates still works: it simply keeps talking through a hold, and a
+pre-connected ring would be audible before the user answers. See
+[Inbound calls](inbound-calls.md) for the messages.
+
 ## Already have a Pipecat bot?
 
 Then you're nearly done: move your pipeline construction into a

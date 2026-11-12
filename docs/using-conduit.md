@@ -76,6 +76,55 @@ withdraws, shows in **Recents** as missed, with a quiet notification.
     Recents entirely, inbound isn't registered — re-toggle "Let this agent call me",
     and make sure you're testing on a real device, not the simulator.)
 
+## Missed calls
+
+A ring you never answered or declined shows in **Recents** as **Missed**, in red,
+like a missed call in the Phone app, and Conduit posts a quiet notification. That
+covers a call that rang out, one your agent withdrew before you picked up, one that
+arrived while you were on another call (**Missed — on another call**) and one that
+iOS silenced for a Focus (**Missed — Focus**). The last two never rang, so the row
+says why. A call you declined shows as **Declined**.
+
+## Hold
+
+Pressing **Hold** on the call screen (the pause button; it reads **Resume** while
+held) puts the call on hold, and so does taking or placing a phone call: Conduit
+keeps the call instead of ending it. The microphone closes, the call screen reads
+**On Hold**, and Conduit tells your agent, which can stop talking and wait. When
+the other call ends, or when you press **Resume**, the conversation continues. A
+connection that drops while the call is on hold is picked up again when you resume.
+The time on hold counts toward the call's duration.
+
+Whether the agent actually goes quiet depends on it: on **SmallWebRTC** the app
+cannot silence the agent itself, so it relies on your agent honouring the hold
+message. The example backend does.
+
+!!! note "New in this release"
+    Hold has been tested with simulated calls, and is still being verified on
+    physical phones, with real phone calls and on each transport.
+
+## Microphone access
+
+Conduit asks for the microphone the first time you place a call, and when you turn
+on **Let this agent call me** (so a call you answer from the lock screen can carry
+your voice). If you said no, Conduit does not place a call the agent could not
+hear: it tells you so, with a shortcut to Settings. Under the inbound toggle you
+will see a note while access is off. Allow it in **Settings → Apps → Conduit →
+Microphone**.
+
+## When your agent doesn't join
+
+If Conduit reaches the call but your agent is not ready within 30 seconds, the
+call fails with **Agent didn't join**, and Recents reads **Failed — agent didn't
+join**. The connection to the room worked; the problem is on your server's side.
+Check that your server starts the agent for each call (for pairing, when it returns
+credentials; for direct mode, from the room webhook), and that the agent can
+actually start (its model keys, for instance). If your agent legitimately needs
+longer than 30 seconds to start, have the server start it earlier or warm it up.
+Other failures read **Authentication failed** (check the API key),
+**Connection lost** (the network dropped) and **Couldn't connect** (check the
+transport setting and your server's credentials).
+
 ## Add to Contacts
 
 **Add to Contacts** (Agent Detail) saves the agent as a regular iOS contact —
