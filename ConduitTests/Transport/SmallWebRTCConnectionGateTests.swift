@@ -3,8 +3,10 @@
 //  ConduitTests
 //
 //  The rules the SmallWebRTC adapter reports by: one `.connected` per attempt,
-//  nothing that steers the engine once an attempt is over, and a connect that
-//  finds the session still up never resetting what it will report.
+//  nothing that steers the engine once an attempt is over, a connect that finds
+//  the session still up reporting it connected only when its agent is ready and
+//  taking it over otherwise, signals only over an open data channel, and only the
+//  newest of overlapping connects owning the transport.
 //
 
 import Testing
@@ -86,24 +88,116 @@ struct SmallWebRTCConnectionGateTests {
         #expect(gate.transportDidDisconnect() == .disconnected(reason: .networkDropped))
     }
 
-    @Test func aJoinUnderWayIsLeftToFinish() {
+    @Test func aJoinedAttemptWhoseAgentWasReportedReadyReportsConnected() {
         var gate = liveGate()
-        #expect(gate.plan(for: .joining) == .awaitJoinUnderWay)
-        #expect(gate.transportDidBecomeReady() == .connected) // the join still reports
+        _ = gate.transportDidBecomeReady() // bot-ready before the client's state says ready
+        #expect(gate.plan(for: .awaitingBot) == .reportConnected)
     }
 
-    @Test func aSessionWhoseAttemptIsOverIsReplaced() {
+    @Test func aSessionWhoseBotNeverGotReadyIsTakenOver() {
+        // The engine's join deadline ran out, or a hold paused that attempt: it comes
+        // back with fresh credentials, which must not be refused or ignored.
+        let gate = liveGate()
+        #expect(gate.plan(for: .awaitingBot) == .takeOver)
+    }
+
+    @Test func aJoinStillInFlightIsTakenOver() {
+        #expect(liveGate().plan(for: .negotiating) == .takeOver)
+    }
+
+    @Test func aSessionWhoseAttemptIsOverIsTakenOver() {
         var dropped = liveGate()
+        _ = dropped.transportDidBecomeReady()
         _ = dropped.transportDidDisconnect()
-        #expect(dropped.plan(for: .ready) == .replaceSession)
-        #expect(dropped.plan(for: .joining) == .replaceSession)
+        #expect(dropped.plan(for: .ready) == .takeOver)
+        #expect(dropped.plan(for: .awaitingBot) == .takeOver)
+
+        var botLeft = liveGate()
+        _ = botLeft.transportDidBecomeReady()
+        _ = botLeft.botDidLeave()
+        #expect(botLeft.plan(for: .ready) == .takeOver) // the client is still in the call
 
         var failed = liveGate()
         failed.connectDidFail()
-        #expect(failed.plan(for: .joining) == .replaceSession)
+        #expect(failed.plan(for: .negotiating) == .takeOver)
     }
 
-    @Test func aLeavingSessionIsReplaced() {
-        #expect(liveGate().plan(for: .leaving) == .replaceSession)
+    @Test func aLeavingSessionIsTakenOver() {
+        #expect(liveGate().plan(for: .leaving) == .takeOver)
+    }
+
+    @Test func aTakenOverSessionReportsNothingWhileTheNewAttemptDoes() {
+        var old = liveGate()
+        old.retire()
+        var new = SmallWebRTCConnectionGate()
+        new.connectDidStart()
+        #expect(old.botDidLeave() == nil)
+        #expect(old.transportDidDisconnect() == nil)
+        #expect(new.transportDidBecomeReady() == .connected)
+    }
+
+    // MARK: - Call-control signals
+
+    @Test(arguments: [SmallWebRTCSessionPhase.awaitingBot, .ready])
+    func aLiveAttemptWithAnOpenDataChannelCarriesSignals(phase: SmallWebRTCSessionPhase) {
+        #expect(liveGate().carriesSignals(in: phase))
+    }
+
+    @Test(arguments: [SmallWebRTCSessionPhase.idle, .negotiating, .leaving])
+    func noDataChannelCarriesNoSignal(phase: SmallWebRTCSessionPhase) {
+        #expect(!liveGate().carriesSignals(in: phase))
+    }
+
+    @Test func anAttemptThatIsOverCarriesNoSignal() {
+        var botLeft = liveGate()
+        _ = botLeft.transportDidBecomeReady()
+        _ = botLeft.botDidLeave()
+        #expect(!botLeft.carriesSignals(in: .ready))
+
+        var dropped = liveGate()
+        _ = dropped.transportDidDisconnect()
+        #expect(!dropped.carriesSignals(in: .awaitingBot))
+
+        var leaving = liveGate()
+        leaving.userDidRequestDisconnect()
+        #expect(!leaving.carriesSignals(in: .ready))
+
+        var retired = liveGate()
+        retired.retire()
+        #expect(!retired.carriesSignals(in: .ready))
+    }
+}
+
+/// Which of several overlapping connects owns the transport.
+struct SmallWebRTCConnectLedgerTests {
+
+    @Test func aLoneConnectOwnsTheTransport() {
+        var ledger = SmallWebRTCConnectLedger()
+        let ticket = ledger.connectDidBegin()
+        #expect(ledger.standing(of: ticket) == .current)
+    }
+
+    @Test func ofTwoOverlappingConnectsOnlyTheNewerOwnsTheTransport() {
+        var ledger = SmallWebRTCConnectLedger()
+        let older = ledger.connectDidBegin()
+        let newer = ledger.connectDidBegin()
+        #expect(ledger.standing(of: older) == .superseded)
+        #expect(ledger.standing(of: newer) == .current)
+    }
+
+    @Test func aDisconnectDuringAConnectLeavesItOwningNothing() {
+        var ledger = SmallWebRTCConnectLedger()
+        let joining = ledger.connectDidBegin()
+        ledger.disconnectDidBegin()
+        #expect(ledger.standing(of: joining) == .disconnected)
+    }
+
+    @Test func aConnectAfterADisconnectOwnsTheTransport() {
+        var ledger = SmallWebRTCConnectLedger()
+        let first = ledger.connectDidBegin()
+        ledger.disconnectDidBegin()
+        let second = ledger.connectDidBegin()
+        #expect(ledger.standing(of: first) == .disconnected)
+        #expect(ledger.standing(of: second) == .current)
     }
 }

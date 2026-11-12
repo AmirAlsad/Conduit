@@ -29,8 +29,20 @@
 //  over the data channel, in the envelope the package's Daily adapter uses.
 //
 //  Attempts: `SmallWebRTCConnectionGate` decides what each connect attempt reports
-//  and what a connect does with a session that is still up. `disconnect()` takes
-//  the session away and releases its client, so a later connect builds a new one.
+//  and what a connect does with a session that is still up: only a live, ready
+//  attempt is reported `.connected` again; anything else still up is taken over
+//  (left without the end-call signal, its client released, a new client joins).
+//
+//  Joins are the transport's own: the SDK's `connect` runs in a task the transport
+//  keeps (`SmallWebRTCJoin`). Of overlapping connects, the newest owns the transport
+//  (`SmallWebRTCConnectLedger`): it takes the earlier one's session over, and the
+//  earlier connect returns at once by throwing, touching nothing. `disconnect()`
+//  lets a join in flight finish (within `joinSettleBound`) before it signals and
+//  leaves, so the agent the join's offer started is told the call is over. A join
+//  that cannot finish in that bound has its peer connection closed; the SDK then
+//  never completes its connect (it waits for a data channel that will not open), and
+//  the server's own connection timeout ends that agent. `disconnect()` releases the
+//  client, so a later connect builds a new one.
 //
 //  Errors: every connect error is `.connectionFailed`. The SDK's HTTP error for a
 //  rejected offer carries only a message, no status code, so a 401 cannot be told
@@ -56,6 +68,9 @@ final class PipecatSmallWebRTCTransport: CallTransport {
     }
 
     private var session: Session?
+    /// The SDK connect in flight on `session`.
+    private var join: SmallWebRTCJoin?
+    private var ledger = SmallWebRTCConnectLedger()
 
     init() {
         let (stream, continuation) = AsyncStream.makeStream(of: TransportEvent.self)
@@ -83,47 +98,94 @@ final class PipecatSmallWebRTCTransport: CallTransport {
     nonisolated var canConnectWhileRinging: Bool { false }
 
     func connect(_ connection: CallConnection) async throws {
+        let ticket = ledger.connectDidBegin()
         var session = self.session ?? makeSession()
         self.session = session
-        switch session.events.gate.plan(for: Self.phase(of: session.client.state)) {
+        switch session.events.gate.plan(for: phase(of: session)) {
         case .join:
             break
         case .reportConnected:
+            Log.info(.transport, "SmallWebRTC connect: the session is up and its agent ready; reporting it connected")
             if let event = session.events.gate.reconfirmConnected() { continuation.yield(event) }
             return
-        case .awaitJoinUnderWay:
-            return
-        case .replaceSession:
-            await retire(session)
+        case .takeOver:
+            Log.warning(.transport, "SmallWebRTC connect: taking over a session that is not ready (\(session.client.state)); joining with a new client")
+            let stale = session
+            let staleJoin = join
+            join = nil
             session = makeSession()
             self.session = session
+            staleJoin?.abandon()
+            await Self.retire(stale)
+            try checkStanding(of: ticket, while: "taking a session over")
         }
 
         session.events.gate.connectDidStart()
-        do {
-            // A pairing agent's connection is the offer URL plus a short-lived
-            // bearer for it — the engine key itself never rides the offer leg.
-            // Each engine retry re-pairs and lands here with a fresh offer,
-            // which spawns a fresh bot server-side (context resets).
-            // The SDK copies these headers onto both the offer POST and the
-            // trickle-ICE PATCH.
-            let headers: [[String: String]] = connection.token.map { [["Authorization": "Bearer \($0)"]] } ?? []
-            let params = SmallWebRTCTransportConnectionParams(
-                webrtcRequestParams: APIRequest(endpoint: connection.url, headers: headers)
-            )
-            try await session.client.connect(transportParams: params)
-        } catch {
+        // A pairing agent's connection is the offer URL plus a short-lived bearer
+        // for it — the engine key itself never rides the offer leg. Each engine
+        // retry re-pairs and lands here with a fresh offer, which spawns a fresh
+        // bot server-side (context resets). The SDK copies these headers onto both
+        // the offer POST and the trickle-ICE PATCH.
+        let headers: [[String: String]] = connection.token.map { [["Authorization": "Bearer \($0)"]] } ?? []
+        let params = SmallWebRTCTransportConnectionParams(
+            webrtcRequestParams: APIRequest(endpoint: connection.url, headers: headers)
+        )
+        let pending = SmallWebRTCJoin(client: session.client, params: params)
+        join = pending
+        // The caller cancelling its connect ends this attempt, and the join stays
+        // recorded: the next connect takes it over, and a disconnect lets it finish
+        // to tell its agent the call is over.
+        let outcome = await withTaskCancellationHandler {
+            await pending.outcomeForConnect()
+        } onCancel: {
+            Task { @MainActor in pending.abandon() }
+        }
+        try checkStanding(of: ticket, while: "joining")
+        switch outcome {
+        case .joined:
+            join = nil
+        case .failed(let error):
+            join = nil
             session.events.gate.connectDidFail()
             Log.error(.transport, "SmallWebRTC connect failed: \(error)")
             throw TransportError.connectionFailed(String(describing: error))
+        case .abandoned:
+            session.events.gate.connectDidFail()
+            Log.info(.transport, "SmallWebRTC connect cancelled while joining")
+            throw CancellationError()
+        }
+    }
+
+    /// Throws when a newer connect or the host's `disconnect()` began after this
+    /// connect, which then owns nothing any more.
+    private func checkStanding(of ticket: SmallWebRTCConnectLedger.Ticket, while step: String) throws {
+        switch ledger.standing(of: ticket) {
+        case .current:
+            return
+        case .superseded:
+            Log.info(.transport, "SmallWebRTC connect: superseded by a newer connect while \(step)")
+            throw TransportError.connectionFailed("SmallWebRTC connect superseded by a newer one")
+        case .disconnected:
+            Log.info(.transport, "SmallWebRTC connect: the host disconnected while \(step)")
+            throw TransportError.connectionFailed("SmallWebRTC transport was disconnected while \(step)")
         }
     }
 
     func disconnect() async {
+        ledger.disconnectDidBegin()
         guard let session else { return }
         self.session = nil
         session.events.gate.userDidRequestDisconnect()
         let client = session.client
+        if let pending = join {
+            join = nil
+            pending.abandon()
+            // Let the join reach the agent its offer started, so it can be told.
+            await pending.settle(within: Self.joinSettleBound)
+            if !pending.hasSettled {
+                Log.warning(.transport, "SmallWebRTC disconnect: the join in flight did not finish within \(Self.joinSettleBound); closing it")
+            }
+        }
         // Deliberate hangup: explicit end signal so the engine ends at once.
         if Self.sendClientMessage("end-call", on: client) {
             try? await Task.sleep(for: .milliseconds(200))
@@ -137,14 +199,24 @@ final class PipecatSmallWebRTCTransport: CallTransport {
         client.delegate = nil
     }
 
-    /// Delivers a call-control signal to the agent, best effort.
+    /// How long `disconnect()` lets a join in flight finish before it closes it.
+    private static let joinSettleBound: Duration = .seconds(2)
+
+    /// Delivers a call-control signal to the agent: `.sent` once it was handed to the
+    /// session's open data channel while its attempt still has an agent, `.failed`
+    /// otherwise. The SDK reports nothing past that hand-off (see `sendClientMessage`).
     @discardableResult
     func send(_ signal: CallSignal) async -> CallSignalDelivery {
-        guard let client = session?.client else {
+        guard let session else {
             Log.info(.transport, "SmallWebRTC client message \(signal.rawValue) dropped: no session")
             return .failed
         }
-        return Self.sendClientMessage(signal.rawValue, on: client) ? .sent : .failed
+        let phase = phase(of: session)
+        guard session.events.gate.carriesSignals(in: phase) else {
+            Log.info(.transport, "SmallWebRTC client message \(signal.rawValue) dropped: no agent to hear it (\(phase), \(session.client.state))")
+            return .failed
+        }
+        return Self.sendClientMessage(signal.rawValue, on: session.client) ? .sent : .failed
     }
 
     /// Sends an RTVI client message (`{"id", "label": "rtvi-ai", "type": "client-message",
@@ -152,7 +224,9 @@ final class PipecatSmallWebRTCTransport: CallTransport {
     /// handed to the SDK. Goes through the Pipecat transport rather than
     /// `PipecatClient.sendClientMessage`, which refuses until the bot is ready: the
     /// data channel is open from `.connected`, and a Pipecat bot's RTVI processor
-    /// handles client messages without waiting for client-ready.
+    /// handles client messages without waiting for client-ready. The SDK's send
+    /// swallows its errors and discards the data channel's own result, so a message
+    /// lost in the channel (one closing before the SDK notices) still counts as handed over.
     @discardableResult
     private static func sendClientMessage(_ type: String, on client: PipecatClient) -> Bool {
         let state = client.state
@@ -170,9 +244,10 @@ final class PipecatSmallWebRTCTransport: CallTransport {
         }
     }
 
-    /// Leave a session that is being replaced without reporting anything from it,
-    /// and stop its audio manager before the next one starts.
-    private func retire(_ session: Session) async {
+    /// Leaves a session that is being replaced, without the end-call signal (the call
+    /// goes on in the session that replaces it) and without reporting anything from
+    /// it, and stops its audio manager before the next one starts.
+    private static func retire(_ session: Session) async {
         session.events.gate.retire()
         session.client.delegate = nil
         do { try await session.client.disconnect() }
@@ -180,12 +255,19 @@ final class PipecatSmallWebRTCTransport: CallTransport {
         session.client.release()
     }
 
+    /// A join in flight on the session counts as negotiating whatever the client's
+    /// state says, so a second connect never joins on that client.
+    private func phase(of session: Session) -> SmallWebRTCSessionPhase {
+        join == nil ? Self.phase(of: session.client.state) : .negotiating
+    }
+
     private static func phase(of state: TransportState) -> SmallWebRTCSessionPhase {
         switch state {
-        case .authenticating, .authenticated, .connecting, .connected: .joining
+        case .initializing, .initialized, .authenticating, .authenticated, .connecting: .negotiating
+        case .connected: .awaitingBot
         case .ready: .ready
         case .disconnecting: .leaving
-        case .initializing, .initialized, .disconnected, .error: .idle
+        case .disconnected, .error: .idle
         @unknown default: .leaving
         }
     }
@@ -213,8 +295,9 @@ final class PipecatSmallWebRTCTransport: CallTransport {
     }
 
     /// The SDK owns its AVAudioSession configuration and its playout never stopped,
-    /// so attaching starts nothing; the engine's `setMicEnabled` that follows reopens
-    /// capture. If a device pass shows CallKit contention, the upgrade is
+    /// so attaching starts nothing and returns at once: the agent is already audible,
+    /// so the `call-answered` or `call-resumed` the engine sends next reaches an agent
+    /// the user can hear. The engine's `setMicEnabled` that follows reopens capture. If a device pass shows CallKit contention, the upgrade is
     /// RTCAudioSession manual-audio gating with the unordered-edges pattern
     /// (potential_skills/callkit.md).
     func attachAudioSession() async {
@@ -228,6 +311,92 @@ final class PipecatSmallWebRTCTransport: CallTransport {
         guard let client = session?.client else { return }
         do { try await client.enableMic(enable: false) }
         catch { Log.error(.transport, "SmallWebRTC enableMic(false) on detach error: \(error)") }
+    }
+}
+
+/// The SDK's `connect` for one join, run in a task of the transport's own so the
+/// transport can stop waiting for it: the SDK's connect never returns once its peer
+/// connection was closed before the data channel opened.
+@MainActor
+private final class SmallWebRTCJoin {
+    enum Outcome {
+        case joined
+        case failed(any Error)
+        /// A newer connect, the host's disconnect or the caller's cancellation took
+        /// the join from its connect.
+        case abandoned
+    }
+
+    private var result: Result<Void, any Error>?
+    private var isAbandoned = false
+    private var connectWaiter: CheckedContinuation<Outcome, Never>?
+    private var settleWaiters: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var nextWaiterID = 0
+
+    var hasSettled: Bool { result != nil }
+
+    init(client: PipecatClient, params: SmallWebRTCTransportConnectionParams) {
+        Task { @MainActor [weak self] in
+            let result: Result<Void, any Error>
+            do {
+                try await client.connect(transportParams: params)
+                result = .success(())
+            } catch {
+                result = .failure(error)
+            }
+            self?.complete(result)
+        }
+    }
+
+    /// Waits for the SDK's connect, unless the join is abandoned first. Called once,
+    /// by the connect that started the join.
+    func outcomeForConnect() async -> Outcome {
+        if let outcome = currentOutcome { return outcome }
+        return await withCheckedContinuation { connectWaiter = $0 }
+    }
+
+    /// Waits for the SDK's connect to return, at most `bound`.
+    func settle(within bound: Duration) async {
+        guard result == nil else { return }
+        nextWaiterID += 1
+        let id = nextWaiterID
+        await withCheckedContinuation { continuation in
+            settleWaiters[id] = continuation
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: bound)
+                self?.settleWaiters.removeValue(forKey: id)?.resume()
+            }
+        }
+    }
+
+    /// Releases the connect waiting on this join. The SDK's connect runs on, so a
+    /// `disconnect()` can let it finish.
+    func abandon() {
+        isAbandoned = true
+        resumeConnect()
+    }
+
+    private var currentOutcome: Outcome? {
+        if isAbandoned { return .abandoned }
+        switch result {
+        case .success: return .joined
+        case .failure(let error): return .failed(error)
+        case nil: return nil
+        }
+    }
+
+    private func complete(_ result: Result<Void, any Error>) {
+        self.result = result
+        resumeConnect()
+        let waiters = settleWaiters
+        settleWaiters = [:]
+        waiters.values.forEach { $0.resume() }
+    }
+
+    private func resumeConnect() {
+        guard let outcome = currentOutcome, let waiter = connectWaiter else { return }
+        connectWaiter = nil
+        waiter.resume(returning: outcome)
     }
 }
 
@@ -249,7 +418,7 @@ private final class SmallWebRTCEventMapper: PipecatClientDelegate {
     private func mapState(_ state: TransportState) {
         switch state {
         case .initializing, .initialized, .authenticating, .authenticated, .connecting, .connected:
-            continuation.yield(.connecting)
+            if gate.isLive { continuation.yield(.connecting) }
         case .ready:
             reportReady()
         case .disconnecting:

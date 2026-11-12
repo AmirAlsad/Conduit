@@ -44,3 +44,32 @@ through the delegate and aren't connection-gated, so the unit suite shows one cl
 ordered pass. The misbehavior is device-only — verify the call lifecycle on hardware,
 and when a device bug appears, add the diagnostic to the debug spike's file log
 (`Conduit/Debug/DebugCallKitSpike.swift`; os.log isn't capturable with the env-driven launch).
+
+### A transport's connect overlaps another connect, or a disconnect, on the same session
+First seen: 2026-11-11
+Last seen: 2026-11-12
+Occurrences: 3
+
+**Pattern:** The engine calls `connect(_:)` on the same transport again while the
+previous attempt's join is still in flight or joined without a ready bot (its join
+deadline ran out, a hold paused it and the resume started another, a pre-connected
+ring's preparation failed after the answer), and calls `disconnect()` whenever the
+call ends, including mid-join. Adapters that keyed on the SDK's state alone refused
+the fresh credentials (Daily "still in the call"), let two SDK connects run on one
+room or client (LiveKit's `Room`, SmallWebRTC's `PipecatClient` during
+`initDevices`), or closed a join under the SDK so it completed with no owner.
+
+**Rule:**
+- Own the join: run the SDK connect in a task the adapter keeps, and give each
+  `connect(_:)` a generation; after every await, an older connect that lost the
+  transport throws and touches nothing.
+- A connect reports `.connected` again only for a live attempt whose agent is ready;
+  anything else still up is taken over without the end-call signal (the agent of the
+  fresh credentials may share the room) and with a new client.
+- `disconnect()` lets a join in flight finish within a bound, then signals and leaves.
+- `send(_:)` returns `.sent` only for a message handed to an open channel.
+
+**Why it's missed:** `FakeTransport` resolves connects at once and in order, so no
+test overlaps them; the adapters are device-only. Gate-level tests on the pure
+deciders (`DailyConnectionGate`, `LiveKitConnectGate`, `SmallWebRTCConnectionGate`)
+are what can pin the rules.

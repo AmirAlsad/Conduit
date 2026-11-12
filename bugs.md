@@ -7,6 +7,29 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### SmallWebRTC adapter refused fresh credentials and let joins outlive their owner
+First seen: 2026-11-12 (review against the package's fixed Daily and LiveKit adapters; not seen on device)
+
+**Pattern:** `PipecatSmallWebRTCTransport.connect` treated a session that was still
+joining, or joined with a bot that never got ready, as "a join under way" and
+returned without joining, so the engine's next attempt (after its join deadline, or
+a resume after a hold) ignored its fresh credentials and waited on a stale session
+that would never be ready. A second connect during the SDK's `initDevices` saw an
+"idle" client and started a second connect on it. `disconnect()` during the offer
+leg closed the peer connection under the SDK, whose connect then never returns, and
+left the agent the offer had started to the server's connection timeout. `send(_:)`
+reported success for a message the SDK might drop.
+
+**Rule:** The adapter owns its joins (`SmallWebRTCJoin`) and its connects take a
+ticket (`SmallWebRTCConnectLedger`): the newest connect owns the transport and takes
+anything not live-and-ready over (no end-call, client released, new client); an
+older connect throws once anything began after it, touching nothing. `disconnect()`
+lets a join in flight finish (2 s) so it can send end-call. `send(_:)` is `.sent`
+only on an open data channel of a live attempt.
+
+**Why it's missed:** the fakes never overlap a connect with another connect or a
+disconnect, and the adapter is device-only.
+
 ### Sounds derived from state transitions drifted from the call (ringback after reset, "Disconnected" twice)
 First seen: 2026-11-11 (pinned by host tests while moving to the engine's cues)
 
