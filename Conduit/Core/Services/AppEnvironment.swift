@@ -185,7 +185,21 @@ final class AppEnvironment {
         }
         #endif
 
+        #if DEBUG
+        let systemRingback = SystemRingback()
+        systemRingback.trace = { CallTrace.record($0) }
+        let playerRingback = AudioPlayerRingback()
+        playerRingback.trace = { CallTrace.record($0) }
+        let announcer = SpeechSpokenStateAnnouncer(
+            ringback: DebugSwitchableRingback(
+                systemSound: systemRingback,
+                audioPlayer: playerRingback,
+                trace: { CallTrace.record($0) }
+            )
+        )
+        #else
         let announcer = SpeechSpokenStateAnnouncer()
+        #endif
         let environment = AppEnvironment(
             modelContainer: container,
             keychain: KeychainService(),
@@ -201,6 +215,8 @@ final class AppEnvironment {
         #if DEBUG
         environment.callHost.trace = { CallTrace.record($0) }
         announcer.trace = { CallTrace.record($0) }
+        let engine = environment.callEngine
+        playerRingback.followAudioActivation { [weak engine] in engine?.isAudioActivated ?? false }
         CallTraceObserver.start(engine: environment.callEngine)
         #endif
         return environment

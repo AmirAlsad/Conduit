@@ -41,6 +41,9 @@ protocol RingbackPlaying: AnyObject {
 final class SystemRingback: RingbackPlaying {
     private var soundID: SystemSoundID = 0
     private var isRinging = false
+    #if DEBUG
+    var trace: ((String) -> Void)?
+    #endif
 
     func start() {
         guard soundID == 0 else { return }
@@ -52,11 +55,13 @@ final class SystemRingback: RingbackPlaying {
         let status = AudioServicesCreateSystemSoundID(url as CFURL, &id)
         guard status == noErr else {
             Log.error(.audio, "Ringback system sound create failed: \(status)")
+            trace("ringback (system sound): create failed, status \(status)")
             return
         }
         soundID = id
         isRinging = true
         playCycle()
+        trace("ringback (system sound): playing at the ringer volume")
         Log.info(.audio, "Playing ringback for call state: connecting")
     }
 
@@ -67,6 +72,12 @@ final class SystemRingback: RingbackPlaying {
         // the spoken "Connected" cue.
         AudioServicesDisposeSystemSoundID(soundID)
         soundID = 0
+    }
+
+    private func trace(_ line: @autoclosure () -> String) {
+        #if DEBUG
+        trace?(line())
+        #endif
     }
 
     /// Loop the ring by replaying each time the cycle finishes, until stopped.

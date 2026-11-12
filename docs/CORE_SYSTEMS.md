@@ -412,7 +412,11 @@ says "Connecting" once per call (a hold before then waits again from the resume)
 said into a live session), except `.moment(.connected)` of a call answered with its
 agent already there, which says nothing, and
 `.moment(.connectionLost)` says "Disconnected" (once per outage);
-`.moment(.held)` and `.moment(.resumed)` play nothing. The engine
+`.moment(.held)` and `.moment(.resumed)` play nothing. The ringback is
+`SystemRingback` (a looped system sound, at the ringer volume); DEBUG builds can
+pick an `AVAudioPlayer` in the app's session instead (Settings > Debug > Ringback,
+`DebugSwitchableRingback`, read at each ringing), which plays only once CallKit has
+activated the session, so that it never activates the session itself. The engine
 guarantees every loop is stopped by the time the call ends, a provider reset
 included, and no cues for a ring that is never answered. **The connect sequence**
 of a call the user placed: the engine holds the call in `.connecting` for at least
