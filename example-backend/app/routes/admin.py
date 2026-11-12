@@ -38,6 +38,7 @@ from app.rings import (
     CANCEL_ANSWERED,
     CANCEL_REFUSED,
     CANCEL_UNSUPPORTED,
+    RING_ENDED,
     TrackedRing,
     ring_bot_flags,
 )
@@ -178,7 +179,7 @@ async def cancel_ring(
         # The ring is over (answered, declined, timed out, …): nothing to withdraw.
         raise HTTPException(
             status_code=409,
-            detail={"call_id": ring.call_id, "status": ring.status, "reason": "ring ended"},
+            detail={"call_id": ring.call_id, "status": ring.status, "reason": RING_ENDED},
         )
     if ring.canceled:
         raise HTTPException(

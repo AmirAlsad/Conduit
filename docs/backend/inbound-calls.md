@@ -177,6 +177,14 @@ uv run python scripts/ring.py --agent live --ring-timeout 30 --preconnect media
   stays at `credentials`). In pairing mode the app's `/connect` then carries
   `"ring": {"call_id", "await_answer"}`, and the engine dispatches a **ring bot**
   for it. With `--inline` the ring bot is dispatched at ring time.
+  If that `/connect` lands after the ring already ended (a declined, busy,
+  unanswered or canceled receipt, or the engine's own cancel; for example the user
+  declined before the phone woke), the engine creates no room and dispatches no
+  bot: it answers `409` `{"call_id": …, "status": …, "reason": "ring ended"}`,
+  which the app treats as a failed pre-connect. A receipt that lands while the
+  room is being made ends the bot just dispatched and gets the same `409`. If the
+  ring was `answered` first, the pairing proceeds and the bot is given that
+  receipt as soon as it exists.
 
 A ring bot differs from a normal bot in three ways:
 

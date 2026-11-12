@@ -22,6 +22,9 @@ _MIN_RING_TIMEOUT_SECS = 10
 # The cancel endpoint's 409 reason when the device doesn't list the "cancel"
 # push feature and the ring can't be withdrawn in band.
 CANCEL_UNSUPPORTED = "cancel unsupported by device"
+# The 409 reason when a ring is already over: a cancel, or a pairing request
+# made for it, came too late.
+RING_ENDED = "ring ended"
 # ...and when the ring's bot has itself seen the call answered, before the
 # answered receipt reached the engine.
 CANCEL_ANSWERED = "ring answered"

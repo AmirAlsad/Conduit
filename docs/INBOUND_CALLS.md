@@ -166,6 +166,14 @@ When a ring asks for `preconnect` (§5), the app may call the pairing endpoint
 answers (the `media` tier): the agent you dispatch must then stay silent until it
 hears `call-answered` (§6). Without `ring` the request is an ordinary pairing call.
 
+The ring may already be over when this request lands (the user declined, or you
+canceled it, while the app was waking). Dispatch no agent for a ring whose first
+receipt (§4) is anything but `answered`: refuse the request with a non-2xx. The
+reference engine answers `409` with
+`{"call_id": …, "status": "<the receipt, or canceled>", "reason": "ring ended"}`.
+The app treats it as a failed preparation, which never ends a ring. A ring that
+was `answered` first still gets its room and agent.
+
 ---
 
 ## 3. What the app does

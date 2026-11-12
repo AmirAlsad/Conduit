@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from app.apns import ApnsResult
 from app.config import settings
 from app.main import app
-from app.rings import CANCEL_ANSWERED, CANCEL_UNSUPPORTED, RingTracker, TrackedRing, ring_deadline_secs
+from app.rings import RING_ENDED, CANCEL_ANSWERED, CANCEL_UNSUPPORTED, RingTracker, TrackedRing, ring_deadline_secs
 
 from test_connect_flow import FakeDaily, FakeDispatcher, FakeLiveKit
 from test_inbound import AUTH, FEATURES, NAMED_BODY, REGISTER_BODY, FakeApns
@@ -288,6 +288,85 @@ def test_connect_with_ring_for_smallwebrtc_dispatches_nothing():
         assert r.status_code == 200, r.text
         assert app.state.dispatcher.calls == []
         assert app.state.rings.get("abc") is None
+
+
+def _pair(c, call_id, await_answer=True):
+    return c.post(
+        "/connect/loopback",
+        json={"transport": "daily", "ring": {"call_id": call_id, "await_answer": await_answer}},
+        headers=AUTH,
+    )
+
+
+def test_connect_for_a_ring_that_already_ended_dispatches_nothing():
+    # The user declined before the phone's pre-connect request landed.
+    for status in ("declined", "busy", "suppressed_by_focus", "unanswered", "canceled", "exploded"):
+        with TestClient(app) as c:
+            _setup(c)
+            call_id, _ = _ring(c, preconnect="media")
+            _receipt(c, call_id, status)
+            r = _pair(c, call_id)
+            assert r.status_code == 409, status
+            assert r.json()["detail"] == {"call_id": call_id, "status": status, "reason": RING_ENDED}
+            assert app.state.dispatcher.calls == [], status
+            assert app.state.rings.get(call_id).room_key is None
+
+
+def test_connect_for_a_canceled_ring_dispatches_nothing():
+    with TestClient(app) as c:
+        _setup(c)
+        call_id, _ = _ring(c, preconnect="media")
+        assert _cancel(c, call_id).status_code == 200
+        r = _pair(c, call_id)
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["status"] == "canceled"
+        assert app.state.dispatcher.calls == []
+
+
+def test_connect_for_an_answered_ring_still_pairs_and_hands_the_bot_the_receipt():
+    # The receipt was first; the call is live, so the phone must still get its
+    # room, and the bot (dispatched after the receipt) gets the fallback anyway.
+    with TestClient(app) as c:
+        _setup(c)
+        call_id, _ = _ring(c, preconnect="media")
+        _receipt(c, call_id, "answered")
+        r = _pair(c, call_id)
+        assert r.status_code == 200, r.text
+        assert len(app.state.dispatcher.calls) == 1
+        assert app.state.dispatcher.sent == [("room-abc", "answered")]
+
+
+def test_connect_ending_a_ring_during_provisioning_ends_the_bot_it_just_made():
+    class EndingDaily(FakeDaily):
+        async def create_room(self, *, exp_secs, name=None):
+            # The receipt lands while the room is being created: nothing is
+            # attached to the ring yet, so it could not end a bot.
+            app.state.rings.get(self.call_id).status = "declined"
+            return await super().create_room(exp_secs=exp_secs, name=name)
+
+    with TestClient(app) as c:
+        daily = EndingDaily()
+        _setup(c, daily=daily)
+        call_id, _ = _ring(c, preconnect="media")
+        daily.call_id = call_id
+        r = _pair(c, call_id)
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["status"] == "declined"
+        assert app.state.dispatcher.disconnected == ["room-abc"]
+
+
+def test_connect_for_another_agents_ring_is_unaffected_by_its_status():
+    with TestClient(app) as c:
+        _setup(c)
+        call_id, _ = _ring(c, preconnect="media")
+        _receipt(c, call_id, "declined")
+        r = c.post(
+            "/connect/live",
+            json={"transport": "daily", "ring": {"call_id": call_id, "await_answer": True}},
+            headers=AUTH,
+        )
+        assert r.status_code == 200, r.text
+        assert len(app.state.dispatcher.calls) == 1
 
 
 def test_tracker_adopts_unknown_rings_but_not_other_agents():
