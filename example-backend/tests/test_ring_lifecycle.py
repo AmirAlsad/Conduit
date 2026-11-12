@@ -190,6 +190,21 @@ def test_connect_with_ring_dispatches_a_ring_bot_and_tracks_it():
         )
 
 
+def test_connect_with_an_uppercase_ring_id_attaches_to_the_tracked_ring():
+    # The app's engine formats call ids with Swift's uuidString (uppercase).
+    with TestClient(app) as c:
+        _setup(c)
+        call_id, _ = _ring(c, preconnect="credentials", ring_timeout=20)
+        r = c.post(
+            "/connect/loopback",
+            json={"transport": "daily", "ring": {"call_id": call_id.upper(), "await_answer": False}},
+            headers=AUTH,
+        )
+        assert r.status_code == 200, r.text
+        assert _deadline(_argv()) == 20 + settings.ring_deadline_margin_secs
+        assert app.state.rings.get(call_id).ring_bot
+
+
 def test_connect_without_ring_is_unchanged():
     with TestClient(app) as c:
         _setup(c)
@@ -248,6 +263,19 @@ def test_answered_receipt_releases_the_ring_bot():
         _receipt(c, call_id, "declined")
         assert app.state.dispatcher.disconnected == []
         assert app.state.rings.get(call_id).status == "answered"
+
+
+def test_receipts_match_their_ring_whatever_the_ids_case():
+    with TestClient(app) as c:
+        _setup(c)
+        call_id, _ = _ring(c, inline=True, preconnect="media")
+        _receipt(c, call_id.upper(), "answered")
+        assert app.state.dispatcher.sent == [("room-abc", "answered")]
+        assert app.state.rings.get(call_id).status == "answered"
+
+        call_id, _ = _ring(c, inline=True, preconnect="credentials")
+        _receipt(c, call_id.upper(), "declined")
+        assert app.state.dispatcher.disconnected == ["room-abc"]
 
 
 def test_non_answered_receipts_end_the_ring_bot():
@@ -344,6 +372,15 @@ def test_cancel_unknown_ring_or_wrong_agent_404s():
         call_id, _ = _ring(c)
         assert _cancel(c, call_id, agent="live").status_code == 404
         assert len(app.state.apns.sends) == 1  # only the ring
+
+
+def test_cancel_accepts_an_uppercase_id():
+    with TestClient(app) as c:
+        _setup(c)
+        call_id, _ = _ring(c)
+        r = _cancel(c, call_id.upper())
+        assert r.status_code == 200, r.text
+        assert r.json()["call_id"] == call_id
 
 
 def test_cancel_after_a_receipt_or_a_cancel_409s():

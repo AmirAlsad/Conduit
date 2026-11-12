@@ -9,11 +9,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 
 Transport = Literal["daily", "livekit", "smallwebrtc"]
 Preconnect = Literal["credentials", "media"]
 PushFeature = Annotated[str, Field(min_length=1, max_length=64)]
+# A ring's call_id as the app sends it back. The engine issues lowercase UUIDs, and
+# the app's engine writes them in whatever case its platform formats a UUID in
+# (Swift's uuidString is uppercase), so they're folded before any lookup.
+CallID = Annotated[str, Field(min_length=1), AfterValidator(str.lower)]
 
 # The receipt statuses the app sends today (docs/INBOUND_CALLS.md §4). Receipts are
 # not validated against this set: a server must accept statuses it doesn't know.
@@ -31,7 +35,7 @@ class RingContext(BaseModel):
     """The ring a pairing request is made for: the app sends it when it fetches
     credentials while the phone is still ringing (``preconnect``)."""
 
-    call_id: str = Field(..., min_length=1)
+    call_id: CallID
     # True when the app will join the room before the user answers ("media"):
     # the bot must then stay silent until it hears call-answered.
     await_answer: bool = False
@@ -102,7 +106,7 @@ class RingRequest(BaseModel):
 class RingCancelRequest(BaseModel):
     """POST /admin/ring/{agent_id}/cancel — withdraw a ring that is still ringing."""
 
-    call_id: str = Field(..., min_length=1)
+    call_id: CallID
 
 
 class RingCancelResponse(BaseModel):
@@ -134,7 +138,7 @@ class RingStatusRequest(BaseModel):
     side. ``status`` is any string: RING_STATUSES lists today's values, and newer
     apps may send more."""
 
-    call_id: str = Field(..., min_length=1)
+    call_id: CallID
     status: str = Field(..., min_length=1, max_length=64)
 
 
