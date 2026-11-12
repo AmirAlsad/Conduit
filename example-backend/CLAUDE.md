@@ -10,7 +10,8 @@ independent from the iOS app at the repo root; the app's build/test instructions
 agent is reachable from the Conduit iOS app. It is **not a service Conduit operates**:
 each developer runs it under their own accounts and API keys, which is why the app's
 "no backend of ours" principle still holds. `loopback` and `live` are reference agents
-you replace with your own.
+you replace with your own; `tone` is a keyless test agent (a continuous tone from the
+moment the human joins) for on-device audio-leak checks, not an example to copy.
 
 Start with [`README.md`](./README.md) and
 [`docs/bring-your-own-agent.md`](./docs/bring-your-own-agent.md).
@@ -19,8 +20,11 @@ Start with [`README.md`](./README.md) and
 
 - **Python 3.12, `uv`-managed, FastAPI + Pipecat.**
 - `app/` — always-on FastAPI **dispatcher**: mints room credentials, dispatches an
-  agent into a room at call time, handles Daily/LiveKit webhooks.
-- `bot/` — launch-agnostic **bot engine** where the agent pipeline runs.
+  agent into a room at call time, handles Daily/LiveKit webhooks, sends the VoIP
+  pushes and tracks each ring (`rings.py`: receipts, cancels, the ring's bot).
+- `bot/` — launch-agnostic **bot engine** where the agent pipeline runs;
+  `call_control.py` handles the app's `call-answered` / `call-held` / `call-resumed`
+  messages (the audio gates a pipeline returns in `BotBuild.gates`).
 - `clients/web/` — a Vite/React test client (Daily only).
 - `tests/` — pytest suite (`pytest-asyncio`).
 

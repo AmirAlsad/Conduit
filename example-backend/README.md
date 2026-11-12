@@ -149,6 +149,11 @@ long-lived direct token won't sabotage reconnection-with-backoff.
   greet-on-connect, barge-in, reconnection-safe teardown. **Copy this** as the
   starting point for your own. Swap any stage in `bot/pipelines/live.py`
   (TTS is also runtime-selectable via `TTS_PROVIDER`).
+- **`tone`** — a test agent, not an example: a continuous 440 Hz tone from the moment
+  a human joins, no keys, and it ignores client-ready, `call-answered` and hold. Ring
+  it pre-connected (`scripts/ring.py --agent tone --inline --preconnect media`) to
+  hear whether a ringing phone leaks any audio; see
+  [Inbound calls](../docs/backend/inbound-calls.md).
 
 ---
 
