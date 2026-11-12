@@ -41,6 +41,23 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      # xcodebuild's own name/OS lookup found no simulators here ("Unable to find a
+      # device matching the provided destination specifier") even though the image
+      # ships the runtime, so resolve the device explicitly and pass its id.
+      - name: Select the iPhone 16 / iOS 18.6 simulator
+        run: |
+          set -euo pipefail
+          xcrun simctl list runtimes
+          UDID=$(xcrun simctl list devices available -j | jq -r '
+            .devices | to_entries[]
+            | select(.key | endswith("iOS-18-6"))
+            | .value[] | select(.name == "iPhone 16") | .udid' | head -n 1)
+          if [ -z "$UDID" ]; then
+            UDID=$(xcrun simctl create "iPhone 16" "iPhone 16" "com.apple.CoreSimulator.SimRuntime.iOS-18-6")
+          fi
+          echo "Using simulator $UDID"
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+
       - name: Run tests
         # OS pinned to 18.6 — the iOS 26 simulator ships a broken accessibility
         # subsystem (the application AX frame reports as 0x0 with no children),
@@ -61,7 +78,7 @@ jobs:
           xcodebuild \
             -scheme Conduit \
             -disableAutomaticPackageResolution \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.6' \
+            -destination "platform=iOS Simulator,id=$SIM_UDID" \
             -resultBundlePath TestResults.xcresult \
             test 2>&1 | tee xcodebuild.log
 
