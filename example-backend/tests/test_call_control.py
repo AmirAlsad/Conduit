@@ -492,6 +492,7 @@ async def test_call_answered_inside_the_grace_releases_the_bot_once():
 async def test_the_receipt_stops_the_ring_deadline_during_the_grace():
     call, _, worker, _, _ = _make(await_answer=True, deadline=0.05, receipt_grace=0.2)
     call.start()
+    await call.human_joined("phone")
     await _receipt_line(call)
     await asyncio.sleep(0.12)
     assert worker.cancelled == 0
@@ -522,7 +523,101 @@ async def test_stopping_the_bot_drops_a_pending_receipt_release():
     assert greet.count == 0 and not call.answered
 
 
-def test_the_receipt_grace_is_a_setting():
-    from app.config import settings
+async def test_the_receipt_grace_starts_only_once_the_device_is_in_the_room():
+    # The receipt is sent at the answer, often before the app has (re)joined: the
+    # grace is counted from the later of the receipt and the device's join.
+    call, _, _, greet, gates = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    await _receipt_line(call)
+    await asyncio.sleep(0.2)
+    assert not call.answered and greet.count == 0  # nobody in the room yet
+    await call.human_joined("phone")
+    await asyncio.sleep(0.05)
+    assert not call.answered  # a full grace from the join, not from the receipt
+    await call.client_ready()
+    await asyncio.sleep(0.1)
+    assert call.answered and greet.count == 1
+    assert all(g.is_open for g in gates)
+    call.stop()
 
-    assert settings.answered_receipt_grace_secs > 0
+
+async def test_call_answered_after_a_late_join_still_wins_the_grace():
+    call, _, _, greet, _ = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    await _receipt_line(call)
+    await call.human_joined("phone")
+    await call.client_ready()
+    await call.handle("call-answered")
+    assert call.answered and greet.count == 1
+    await asyncio.sleep(0.2)
+    assert greet.count == 1
+    call.stop()
+
+
+async def test_the_device_leaving_stops_the_grace_and_its_return_restarts_it():
+    call, _, _, greet, _ = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    await call.human_joined("phone-1")
+    await call.client_ready()
+    await _receipt_line(call)
+    await asyncio.sleep(0.05)
+    call.human_left("phone-1")
+    await asyncio.sleep(0.1)
+    assert not call.answered  # the grace never ran out with the device there
+    await call.human_joined("phone-2")
+    await asyncio.sleep(0.05)
+    assert not call.answered  # restarted in full
+    await asyncio.sleep(0.1)
+    assert call.answered and greet.count == 1
+    call.stop()
+
+
+async def test_a_reconnect_that_joins_before_the_old_participant_leaves_keeps_the_grace():
+    call, _, _, _, _ = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    await call.human_joined("phone-1")
+    await _receipt_line(call)
+    await call.human_joined("phone-2")
+    call.human_left("phone-1")
+    await asyncio.sleep(0.15)
+    assert call.answered
+    call.stop()
+
+
+async def test_a_cancel_after_the_receipt_is_refused_while_the_device_is_away():
+    call, _, worker, _, _ = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    await call.human_joined("phone")
+    await _receipt_line(call)
+    call.human_left("phone")
+    assert await call.cancel() is False
+    assert worker.cancelled == 0
+    call.stop()
+
+
+async def test_daily_and_livekit_leaves_reach_the_receipt_wait():
+    for transport_type, join, leave, join_args, leave_args in (
+        ("daily", "on_participant_joined", "on_participant_left", ({"id": "p1"},), ({"id": "p1"}, "left")),
+        ("livekit", "on_participant_connected", "on_participant_left", ("p1",), ("p1", "left")),
+    ):
+        call, teardown, _, _, _ = _make(await_answer=True, deadline=60, receipt_grace=0.05)
+        t = FakeLiveKitTransport() if transport_type == "livekit" else FakeEvents()
+        _wire_presence(t, transport_type, teardown, call, _log)
+        await t.handlers[join](t, *join_args)
+        await _receipt_line(call)
+        await t.handlers[leave](t, *leave_args)
+        await asyncio.sleep(0.1)
+        assert not call.answered, transport_type
+        teardown._cancel_timer()
+        call.stop()
+
+
+def test_the_receipt_grace_is_a_setting_of_at_least_five_seconds():
+    # The push contract: release on the receipt only if call-answered has not come
+    # 5 or more seconds after both the receipt and the device being in the room.
+    import pytest
+    from pydantic import ValidationError
+
+    from app.config import Settings, settings
+
+    assert settings.answered_receipt_grace_secs >= 5
+    assert Settings().answered_receipt_grace_secs == 5
+    for bad in (4, 0, -1):
+        with pytest.raises(ValidationError):
+            Settings(answered_receipt_grace_secs=bad)
+    assert Settings(answered_receipt_grace_secs=8).answered_receipt_grace_secs == 8

@@ -274,12 +274,14 @@ Your agent must:
    the phone rings for the app's own configured timeout (60 s by default, but it
    can be longer or unlimited), which you can only assume. Send `ring_timeout`
    when you want a firm bound.
-4. Fall back on receipts: `answered` may release the greeting (an app without
-   engine 0.2 joins only after the answer and never sends `call-answered`), but
-   only after a short grace (a few seconds) in which `call-answered` has not
-   arrived: the app sends `answered` at the moment of answer, before its audio is
-   up, and `call-answered` once it is, so a greeting released by the receipt can
-   play into audio that is not there yet;
+4. Use receipts as a fallback, not as the signal: wait for `call-answered`, and
+   let `answered` release the greeting only if `call-answered` has not come 5 or
+   more seconds after both the receipt and the device being in the room,
+   whichever is later (a `call-answered` lost on the way). The app sends
+   `answered` at the moment of answer, before its audio is up and often before it
+   has (re)joined, and `call-answered` once it is, so a greeting released on the
+   receipt itself plays into audio that is not up yet. The reference engine waits
+   `ANSWERED_RECEIPT_GRACE_SECS` (default 5);
    `declined`, `unanswered`, `canceled`, `busy` or `suppressed_by_focus` mean end
    the agent. So send `status_url` with every pre-connected inline ring.
 

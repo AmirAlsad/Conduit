@@ -108,11 +108,12 @@ def _wire_presence(
         @transport.event_handler("on_participant_joined")
         async def _on_join(transport, participant):  # noqa: ANN001
             controller.human_joined(_daily_pid(participant))
-            await call.human_joined()
+            await call.human_joined(_daily_pid(participant))
 
         @transport.event_handler("on_participant_left")
         async def _on_left(transport, participant, reason):  # noqa: ANN001
             controller.human_left(_daily_pid(participant))
+            call.human_left(_daily_pid(participant))
 
     elif transport_type == "livekit":
 
@@ -121,7 +122,7 @@ def _wire_presence(
             controller.human_joined(participant_id)
             # The Conduit LiveKit adapter sends no RTVI client-ready (and it couldn't
             # reach RTVI anyway, see below), so the first join stands in for it.
-            if await call.human_joined():
+            if await call.human_joined(participant_id):
                 await call.client_ready()
 
         # A human already in the room when the bot connects (the phone can beat a
@@ -132,13 +133,14 @@ def _wire_presence(
         @transport.event_handler("on_first_participant_joined")
         async def _on_first(transport, participant_id):  # noqa: ANN001
             controller.human_joined(participant_id)
-            if await call.human_joined():
+            if await call.human_joined(participant_id):
                 await transport.input().push_frame(ClientConnectedFrame())
                 await call.client_ready()
 
         @transport.event_handler("on_participant_left")
         async def _on_left(transport, participant_id, reason):  # noqa: ANN001
             controller.human_left(participant_id)
+            call.human_left(participant_id)
 
         # Pipecat's LiveKit input path re-wraps incoming data-channel messages as
         # OUTPUT frames, so client RTVI messages never reach the RTVI processor —

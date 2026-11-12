@@ -196,13 +196,15 @@ A ring bot differs from a normal bot in three ways:
   app, or a bot ends mid-ring on a phone still ringing. A sender that wants a firm
   bound should always send `ring_timeout`.
 - For `media` it is dispatched with `--await-answer`: no audio and no greeting
-  until the app's `call-answered` message, or, as a fallback, the ring's
-  `answered` receipt (relayed to the bot by the engine; that covers an app that
-  never sends `call-answered`). The app sends the receipt at the moment of
-  answer, before its audio is up, and `call-answered` once it is, so the receipt
-  always arrives first: the bot waits `ANSWERED_RECEIPT_GRACE_SECS` (default 4)
-  after it for `call-answered`, and releases itself only if that has not come.
-  The receipt does stop the ring deadline at once.
+  until the app's `call-answered` message, or, as a fallback for a lost one, the
+  ring's `answered` receipt (relayed to the bot by the engine). The app sends the
+  receipt at the moment of answer, before its audio is up and often before it
+  has (re)joined, and `call-answered` once it is, so the receipt always arrives
+  first: the bot releases itself only if `call-answered` has not come
+  `ANSWERED_RECEIPT_GRACE_SECS` (default 5, at least 5 as the push contract asks)
+  after both the receipt and the device being in the room, whichever is later.
+  The device leaving the room stops that wait, and its return starts it again in
+  full. The receipt does stop the ring deadline at once.
 - The ring's first receipt steers it: `answered` starts that fallback, any other
   status ends it at once. (A plain inline ring's bot is ended the same way, but has no deadline
   and no control pipe.)

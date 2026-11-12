@@ -14,9 +14,10 @@ from pydantic import AfterValidator, BaseModel, Field
 Transport = Literal["daily", "livekit", "smallwebrtc"]
 Preconnect = Literal["credentials", "media"]
 PushFeature = Annotated[str, Field(min_length=1, max_length=64)]
-# A ring's call_id as the app sends it back. The engine issues lowercase UUIDs, and
-# the app's engine writes them in whatever case its platform formats a UUID in
-# (Swift's uuidString is uppercase), so they're folded before any lookup.
+# A ring's call_id as the app sends it back. The engine issues lowercase UUIDs; the
+# app's engine sends lowercase from 0.2 on (earlier engines sent Swift's uppercase
+# uuidString), and the push contract says to compare ids case-insensitively, so
+# every call_id is folded before any lookup.
 CallID = Annotated[str, Field(min_length=1), AfterValidator(str.lower)]
 
 # The receipt statuses the app sends today (docs/INBOUND_CALLS.md §4). Receipts are

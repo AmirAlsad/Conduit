@@ -254,9 +254,12 @@ entrypoint handles them for you (`bot/call_control.py`):
 
 - **Await-answer.** A bot dispatched with `--await-answer` (the app joined while
   the phone still rang) keeps the pipeline's audio gates closed and doesn't greet
-  until `call-answered`, or the ring's `answered` receipt if `call-answered`
-  has not come within `ANSWERED_RECEIPT_GRACE_SECS` of it (the receipt is sent at
-  the moment of answer, before the app's audio is up). With `--ring-deadline` it
+  until `call-answered`. The ring's `answered` receipt is only the fallback for a
+  lost `call-answered`: it releases the bot if `call-answered` has not come
+  `ANSWERED_RECEIPT_GRACE_SECS` after both the receipt and the device being in
+  the room, whichever is later (the receipt is sent at the moment of answer,
+  before the app's audio is up and often before it has rejoined; the device
+  leaving stops that wait and its return restarts it). With `--ring-deadline` it
   ends if no answer comes in time; the receipt also stops that deadline.
 - **Hold.** `call-held` interrupts the bot and closes its audio gates (no turns,
   no speech) until `call-resumed`; a human who drops while held gets
@@ -286,9 +289,11 @@ return them as `BotBuild(gates=…)` — see `bot/pipelines/live.py`.
   then rings for its own configured timeout (60 s by default, but the app can make
   it longer or unlimited), so match it to your app's. A sender that wants a firm
   bound should always send `ring_timeout` (to devices that list the feature).
-- **`ANSWERED_RECEIPT_GRACE_SECS`** (default `4`) — how long a ring bot that got
-  the ring's `answered` receipt waits for the app's `call-answered` before it
-  treats the receipt as the answer.
+- **`ANSWERED_RECEIPT_GRACE_SECS`** (default `5`, must be >= 5, the push
+  contract's floor) — how long a ring bot that got the ring's `answered` receipt
+  waits for the app's `call-answered`, counted from the receipt or the device
+  being in the room, whichever is later, before it treats the receipt as the
+  answer.
 
 See `.env.example` for the full list and which feature needs which key.
 

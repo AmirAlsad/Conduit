@@ -6,10 +6,13 @@ The Conduit app sends RTVI client-messages beside ``end-call``
 - ``call-answered``: the user answered a ring this bot was dispatched for. A bot
   dispatched with ``--await-answer`` (the app joins while the phone still rings)
   produces no audio and does not greet until it hears this. The ring's
-  ``answered`` receipt, relayed by the dispatcher, is only a fallback: the app
-  sends it at the moment of answer, before its audio is up, and ``call-answered``
-  once it is, so the receipt releases the bot only after a short grace
-  (``receipt_grace_secs``) in which ``call-answered`` has not arrived.
+  ``answered`` receipt, relayed by the dispatcher, is only a fallback for a lost
+  ``call-answered``: the app sends it at the moment of answer, before its audio is
+  up and often before it has (re)joined, and ``call-answered`` once it is. So the
+  receipt releases the bot only if ``call-answered`` has not come
+  ``receipt_grace_secs`` (5 or more, the push contract's floor) after both the
+  receipt and the device being in the room, whichever is later. The device
+  leaving stops that wait, and its return starts it again in full.
 - ``call-held`` / ``call-resumed``: the call went on hold (e.g. a cellular call)
   and back. Held: the bot is interrupted, hears nothing and says nothing, and a
   human leaving gets the longer held grace window.
@@ -32,6 +35,9 @@ from app.obs import event
 CALL_ANSWERED = "call-answered"
 CALL_HELD = "call-held"
 CALL_RESUMED = "call-resumed"
+
+# Stands for a client that reported ready on a transport that reports no join.
+READY_CLIENT = "ready-client"
 
 
 class AudioGate(FrameProcessor):
@@ -82,7 +88,11 @@ class CallControl:
         self._awaiting = await_answer
         self._deadline_secs = ring_deadline_secs
         self._receipt_grace_secs = receipt_grace_secs
+        self._receipt_seen = False
         self._receipt_task: asyncio.Task | None = None
+        # The device's participants in the room (a reconnect can join a new one
+        # before the old one leaves).
+        self._present: set[str] = set()
         self._log = log
         # A bot not dispatched for a ring was answered before it existed.
         self._answered = not (await_answer or ring_deadline_secs is not None)
@@ -125,15 +135,29 @@ class CallControl:
             await self._run_greet()
             return
         self._ready = True
+        if not self._present:
+            # A ready client is in the room, even where no join was reported.
+            self._present.add(READY_CLIENT)
+        await self._arm_receipt_release()
         await self._maybe_greet()
 
-    async def human_joined(self) -> bool:
+    async def human_joined(self, participant_id: str = "human") -> bool:
         """A human joined. Returns True for the first join of this bot."""
         first = not self._joined
         self._joined = True
+        self._present.add(participant_id)
         if not self._awaiting:
             await self.answer("join")
+        await self._arm_receipt_release()
         return first
+
+    def human_left(self, participant_id: str = "human") -> None:
+        """A human left. With nobody left in the room, a pending receipt release
+        stops; the next join starts its wait again in full."""
+        self._present.discard(participant_id)
+        self._present.discard(READY_CLIENT)
+        if not self._present:
+            self._drop_receipt_release()
 
     # --- signals ---
 
@@ -166,7 +190,7 @@ class CallControl:
         the call answered, and say which through ``announce`` before the (slow)
         teardown. An answer the bot has not seen yet loses the race; that window
         is the receipt's flight time."""
-        ended = not (self._answered or self._receipt_task is not None)
+        ended = not (self._answered or self._receipt_seen)
         if announce is not None:
             announce(ended)
         if not ended:
@@ -180,17 +204,21 @@ class CallControl:
     async def receipt_answered(self) -> None:
         """The ring's ``answered`` receipt. The phone has answered, so the ring
         deadline no longer applies; the bot is released only if ``call-answered``
-        has not come by the end of the grace."""
-        if self._answered or self._receipt_task is not None:
+        has not come by the end of the grace, counted from the receipt or the
+        device being in the room, whichever is later."""
+        if self._answered or self._receipt_seen:
             return
+        self._receipt_seen = True
         if self._deadline_task and not self._deadline_task.done():
             self._deadline_task.cancel()
         self._deadline_task = None
-        if self._receipt_grace_secs <= 0:
-            await self.answer("receipt")
-            return
-        event(self._log, "bot.receipt_answered", grace_secs=self._receipt_grace_secs)
-        self._receipt_task = asyncio.create_task(self._release_after_grace())
+        event(
+            self._log,
+            "bot.receipt_answered",
+            grace_secs=self._receipt_grace_secs,
+            device_in_room=bool(self._present),
+        )
+        await self._arm_receipt_release()
 
     async def hold(self) -> None:
         if self._held:
@@ -213,6 +241,17 @@ class CallControl:
         event(self._log, "bot.call_resumed")
 
     # --- internals ---
+
+    async def _arm_receipt_release(self) -> None:
+        """Start the receipt's grace once both it and the device are there."""
+        if self._answered or not self._receipt_seen or not self._present:
+            return
+        if self._receipt_task is not None:
+            return
+        if self._receipt_grace_secs <= 0:
+            await self.answer("receipt")
+            return
+        self._receipt_task = asyncio.create_task(self._release_after_grace())
 
     def _drop_receipt_release(self) -> None:
         task, self._receipt_task = self._receipt_task, None
