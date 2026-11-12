@@ -107,7 +107,7 @@ them with the token and echoes them in every ring push. Older builds omit them, 
 the push then omits the keys too — the app rings under its own name for the agent.
 `scripts/ring.py` prints the name it rang as. Newer builds also send
 `push_features`, the optional push features their call engine supports (today
-`cancel` and `ring_timeout`); the engine stores the list, keeping names it
+`cancel`, `ring_timeout` and `preconnect`); the engine stores the list, keeping names it
 doesn't know, and uses a feature only with a registration that lists it. Older
 builds omit it, which the engine stores as an empty list. Existing registry
 databases pick up the new columns automatically on the next start.
@@ -165,7 +165,13 @@ uv run python scripts/ring.py --agent live --ring-timeout 30 --preconnect media
   the `ring_timeout` push feature; otherwise the phone rings for its own
   default, the ring bot's deadline assumes that default, and the ring response's
   `ring_timeout` is `null`.
-- **`preconnect`** asks the app to prepare while the phone rings:
+- **`preconnect`** asks the app to prepare while the phone rings. Like
+  `ring_timeout`, the engine sends it only to a registration that lists the
+  `preconnect` push feature. Otherwise the ring goes out as if it had not been
+  requested: no `preconnect` key, no ring bot, no await-answer (an `--inline` bot
+  is then a plain inline bot), the ring response's `preconnect` is `null`, and the
+  engine logs `ring.preconnect_unsupported`. An older app would otherwise answer
+  into a bot whose audio is closed. When it is sent:
   `credentials` fetches `/connect/{agent_id}` during the ring; `media` also
   joins the room before the answer (only where the transport supports it; Daily
   stays at `credentials`). In pairing mode the app's `/connect` then carries

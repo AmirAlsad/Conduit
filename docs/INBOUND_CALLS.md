@@ -55,7 +55,7 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
   "agent_id": "<the agent's UUID in the app>",
   "display_name": "<optional>",          // the caller name the user gave the agent in the app
   "handle": "<optional>",                // the CallKit handle the app uses for it
-  "push_features": ["cancel", "ring_timeout"]   // optional — see below
+  "push_features": ["cancel", "ring_timeout", "preconnect"]   // optional — see below
 }
 ```
 
@@ -66,7 +66,8 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
 - The app sends `display_name` cut to at most 120 characters (Unicode code points)
   and a `handle` well under 256; accept at least those lengths.
 - `push_features` lists the optional push features the app's call engine supports
-  (`CallEngine.supportedPushFeatures`): today `ring_timeout` (§2) and `cancel` (§5).
+  (`CallEngine.supportedPushFeatures`): today `ring_timeout` (§2), `preconnect` (§5)
+  and `cancel` (§5).
   Store it with the token and use a feature only with a registration that lists it.
   Keep names you don't know (later engines add more) and ignore them when ringing.
   Older builds omit the key: treat that as an empty list, so they get neither.
@@ -122,8 +123,12 @@ authorization: bearer <APNs JWT signed with your .p8>
 All values are strings. `ring_timeout` and `preconnect` need a Conduit build on
 call engine 0.2 or later; older builds ignore them, so a ring that carries them
 still rings exactly as before. Send `ring_timeout` only when the registration's
-`push_features` lists `ring_timeout` (§1); otherwise the phone rings for its own
-timeout, so time anything you tie to the ring from that.
+`push_features` lists `ring_timeout`, and `preconnect` only when it lists
+`preconnect` (§1). Without `ring_timeout` the phone rings for its own timeout, so
+time anything you tie to the ring from that. Without `preconnect` the app will
+not prepare, so a `media` agent you dispatched would sit in a room whose audio you
+hold closed, waiting for a `call-answered` that never comes: ring such a device as
+if you had not asked for pre-connect, and dispatch a plain agent.
 
 **Ring timeout.** The app ends a ring nobody answers after its own timeout
 (60 s by default) and reports `unanswered` (§4). `ring_timeout` shortens one

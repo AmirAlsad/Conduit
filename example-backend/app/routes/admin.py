@@ -9,8 +9,10 @@
   in-band (the agent leaves the pre-connected room) or with a cancel push.
 
 Optional push keys go only to devices whose registration lists the matching
-push feature ("ring_timeout", "cancel"): an older app would ignore a
-ring_timeout, and would show a cancel push as a brief incoming call.
+push feature ("ring_timeout", "preconnect", "cancel"): an older app would ignore
+a ring_timeout or a preconnect (and answer a pre-connected ring into a bot that
+waits for a call-answered it never sends), and would show a cancel push as a
+brief incoming call.
 """
 
 from __future__ import annotations
@@ -85,13 +87,18 @@ async def ring(
         event(_log, "ring.ring_timeout_unsupported", agent=agent_id)
     if ring_timeout is not None:
         payload["ring_timeout"] = str(ring_timeout)
-    if req.preconnect is not None:
-        payload["preconnect"] = req.preconnect
+    # Without the feature the ring is exactly one that never asked: no push key,
+    # no ring bot, no await-answer.
+    preconnect = req.preconnect if "preconnect" in reg.push_features else None
+    if req.preconnect is not None and preconnect is None:
+        event(_log, "ring.preconnect_unsupported", agent=agent_id)
+    if preconnect is not None:
+        payload["preconnect"] = preconnect
     ring = TrackedRing(
         call_id=payload["call_id"],
         agent_id=agent_id,
         mode="inline" if req.inline else "pairing",
-        preconnect=req.preconnect,
+        preconnect=preconnect,
         ring_timeout=ring_timeout,
     )
     if req.inline:
@@ -102,9 +109,9 @@ async def ring(
         # also a ring bot, with a deadline and a control pipe.
         transport = resolve_transport(agent, req.transport)
         ring_flags = None
-        if req.preconnect is not None:
+        if preconnect is not None:
             ring_flags = ring_bot_flags(
-                ring_timeout=ring_timeout, await_answer=req.preconnect == "media"
+                ring_timeout=ring_timeout, await_answer=preconnect == "media"
             )
         try:
             settings.require(*agent.required_settings)
@@ -118,7 +125,7 @@ async def ring(
         ring.room_key = room_key
         ring.transport = transport
         ring.ring_bot = ring_flags is not None
-        ring.awaits_answer = req.preconnect == "media"
+        ring.awaits_answer = preconnect == "media"
 
     # Tracked before the push: the app may pair for this ring (preconnect) before
     # APNs has even answered us.
@@ -144,6 +151,7 @@ async def ring(
         display_name=reg.display_name,
         mode=ring.mode,
         ring_timeout=ring.ring_timeout,
+        preconnect=ring.preconnect,
         apns_status=result.status,
         apns_id=result.apns_id,
     )

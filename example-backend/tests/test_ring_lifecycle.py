@@ -18,7 +18,10 @@ from test_inbound import AUTH, FEATURES, NAMED_BODY, REGISTER_BODY, FakeApns
 _BASE_KEYS = {"agent_id", "call_id", "status_url"}
 # An app on call engine 0.2+, which lists the push features; REGISTER_BODY is
 # an older app, which lists none.
-FEATURED_BODY = {**REGISTER_BODY, "push_features": FEATURES}
+ALL_FEATURES = [*FEATURES, "preconnect"]
+FEATURED_BODY = {**REGISTER_BODY, "push_features": ALL_FEATURES}
+# Takes a pre-connected ring but no cancel push.
+NO_CANCEL_BODY = {**REGISTER_BODY, "push_features": ["preconnect"]}
 
 
 class PresenceDaily(FakeDaily):
@@ -113,10 +116,14 @@ def test_ring_response_reports_the_ring_timeout_sent():
         assert r.json()["ring_timeout"] is None
 
 
+# Lists preconnect (and cancel) but not ring_timeout.
+NO_TIMEOUT_BODY = {**REGISTER_BODY, "push_features": ["cancel", "preconnect"]}
+
+
 def test_ring_bot_deadline_assumes_the_default_when_ring_timeout_is_not_sent():
     # The device rings for its own default, so the bot must not give up at 30 s.
     with TestClient(app) as c:
-        _setup(c, body=REGISTER_BODY)
+        _setup(c, body=NO_TIMEOUT_BODY)
         _, payload = _ring(c, inline=True, preconnect="credentials", ring_timeout=30)
         assert "ring_timeout" not in payload
         assert _deadline(_argv()) == settings.ring_timeout_secs + settings.ring_deadline_margin_secs
@@ -124,7 +131,7 @@ def test_ring_bot_deadline_assumes_the_default_when_ring_timeout_is_not_sent():
 
 def test_pairing_ring_bot_deadline_assumes_the_default_when_ring_timeout_is_not_sent():
     with TestClient(app) as c:
-        _setup(c, body=REGISTER_BODY)
+        _setup(c, body=NO_TIMEOUT_BODY)
         call_id, _ = _ring(c, preconnect="media", ring_timeout=20)
         r = c.post(
             "/connect/loopback",
@@ -166,6 +173,43 @@ def test_inline_credentials_ring_gets_a_deadline_but_does_not_await():
 def test_ring_deadline_respects_the_apps_ten_second_floor():
     assert ring_deadline_secs(3) == 10 + settings.ring_deadline_margin_secs
     assert ring_deadline_secs(None) == settings.ring_timeout_secs + settings.ring_deadline_margin_secs
+
+
+def test_preconnect_is_left_out_for_a_device_without_the_feature():
+    # An older app would answer an inline media ring into a bot whose audio is
+    # closed and that waits for a call-answered the app never sends.
+    for features in ([], ["cancel", "ring_timeout"]):
+        body = {**REGISTER_BODY, "push_features": features}
+        for kwargs in ({}, {"inline": True}):
+            with TestClient(app) as c:
+                _setup(c, body=body)
+                r = c.post(
+                    "/admin/ring/loopback",
+                    json={**kwargs, "preconnect": "media"},
+                    headers=AUTH,
+                )
+                assert r.status_code == 200, r.text
+                assert r.json()["preconnect"] is None
+                payload = app.state.apns.sends[-1][2]
+                assert "preconnect" not in payload
+                ring = app.state.rings.get(payload["call_id"])
+                assert ring.preconnect is None and not ring.ring_bot and not ring.awaits_answer
+                if kwargs:
+                    # Dispatched exactly like a plain inline ring.
+                    assert "--await-answer" not in _argv()
+                    assert "--ring-deadline" not in _argv()
+                    assert app.state.dispatcher.controls == [False]
+                else:
+                    assert app.state.dispatcher.calls == []
+
+
+def test_ring_response_reports_the_preconnect_sent():
+    with TestClient(app) as c:
+        _setup(c)
+        r = c.post("/admin/ring/loopback", json={"preconnect": "credentials"}, headers=AUTH)
+        assert r.json()["preconnect"] == "credentials"
+        r = c.post("/admin/ring/loopback", json={}, headers=AUTH)
+        assert r.json()["preconnect"] is None
 
 
 # --- pairing during the ring ---
@@ -482,7 +526,7 @@ def test_cancel_in_band_needs_no_feature():
         ("livekit", {"livekit": PresenceLiveKit(present=True)}),
     ):
         with TestClient(app) as c:
-            _setup(c, body=REGISTER_BODY, **kwargs)
+            _setup(c, body=NO_CANCEL_BODY, **kwargs)
             call_id, _ = _ring(c, inline=True, preconnect="media", transport=transport)
             r = _cancel(c, call_id)
             assert r.status_code == 200, r.text
@@ -497,7 +541,7 @@ def test_cancel_in_band_needs_no_feature():
 def test_cancel_pre_connected_ring_without_the_human_or_the_feature_is_refused():
     with TestClient(app) as c:
         daily = PresenceDaily(present=False)
-        _setup(c, body=REGISTER_BODY, daily=daily)
+        _setup(c, body=NO_CANCEL_BODY, daily=daily)
         call_id, _ = _ring(c, inline=True, preconnect="media")
         r = _cancel(c, call_id)
         assert r.status_code == 409, r.text

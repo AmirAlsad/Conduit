@@ -86,3 +86,12 @@ def test_ring_notes_a_ring_timeout_the_device_could_not_take(monkeypatch, capsys
     assert "Ring timeout not sent" in capsys.readouterr().out
     _run(monkeypatch, ["--agent", "live", "--ring-timeout", "20"], [(200, {**_RANG[1], "ring_timeout": 20})])
     assert "Ring timeout not sent" not in capsys.readouterr().out
+
+
+def test_ring_notes_a_preconnect_the_device_could_not_take(monkeypatch, capsys):
+    rang = (200, {**_RANG[1], "preconnect": None})
+    _run(monkeypatch, ["--agent", "live", "--preconnect", "media"], [rang])
+    assert "Pre-connect not sent" in capsys.readouterr().out
+    _run(monkeypatch, ["--agent", "live", "--preconnect", "media"], [(200, {**_RANG[1], "preconnect": "media"})])
+    out = capsys.readouterr().out
+    assert "Pre-connect not sent" not in out and "Pre-connect requested: media" in out

@@ -35,7 +35,7 @@ Start with [`README.md`](./README.md) and
 - Register the Daily direct-mode webhook: `uv run python scripts/daily_webhook.py register --base-url <host>`
   (LiveKit's webhook is dashboard-only — see `docs/direct-mode.md`)
 - Ring the device (inbound call; needs the `APNS_*` vars): `uv run python scripts/ring.py --agent <id> [--inline [--transport daily|livekit]] [--ring-timeout <s>] [--preconnect credentials|media] [--cancel-after <s>]`
-  (`--cancel <call_id>` withdraws a ring instead; `--base-url`, `--json`. `ring_timeout` and cancel pushes go only to devices whose registration lists that push feature)
+  (`--cancel <call_id>` withdraws a ring instead; `--base-url`, `--json`. `ring_timeout`, `preconnect` and cancel pushes go only to devices whose registration lists that push feature)
 - Print a conduit:// pairing link + QR for the app: `uv run python scripts/pair.py --agent <id> [--no-key] [--inbound]`
   (the link embeds `ENGINE_API_KEY` unless `--no-key` — treat it like the key; shape is a contract with the app's `DeepLinkParser`)
 

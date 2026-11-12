@@ -91,8 +91,9 @@ class RingRequest(BaseModel):
     is dispatched before the user answers, and ended when the ring's first receipt
     is anything but "answered".
 
-    ``ring_timeout`` rides the push only to a device whose registration lists the
-    "ring_timeout" push feature; any other device rings for its own default."""
+    ``ring_timeout`` and ``preconnect`` ride the push only to a device whose
+    registration lists the "ring_timeout" / "preconnect" push feature; any other
+    device rings for its own default, and a ``preconnect`` is dropped."""
 
     inline: bool = False
     transport: Transport | None = None
@@ -128,6 +129,10 @@ class RingResponse(BaseModel):
     # device doesn't list the "ring_timeout" push feature (it then rings for its
     # own default).
     ring_timeout: int | None = None
+    # Likewise the preconnect the push carried: None when none was requested or the
+    # device doesn't list the "preconnect" push feature (the ring then behaves as
+    # one that never asked, and no ring bot is dispatched for it).
+    preconnect: Preconnect | None = None
     apns_status: int
     apns_id: str | None = None
 
