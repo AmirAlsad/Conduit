@@ -87,9 +87,10 @@ final class AppEnvironment {
         )
         self.callEngine = makeCallEngine(CallEngineConfiguration(
             unknownCallerName: "Agent",
-            // The ringback's start delay and first tone play in full before the
-            // call shows connected and "Connected" is spoken.
-            minimumConnectingDuration: Ringback.minimumConnectingDuration,
+            // A placed call's ringback plays its start delay and first tone in full
+            // before the call shows connected and "Connected" is spoken. Answered
+            // calls have no ringback and are never held connecting.
+            minimumOutgoingConnectingDuration: Ringback.minimumOutgoingConnectingDuration,
             isPushToTalkEnabled: isPushToTalkEnabled
         ))
         callEngine.delegate = callHost
@@ -149,7 +150,7 @@ final class AppEnvironment {
         }
 
         #if DEBUG
-        CallTrace.startSession("launch: daily ring-join \(DebugDailyRingJoin.current().rawValue)")
+        CallTrace.startSession("launch")
         CallTrace.captureEngineLog()
         #endif
 
@@ -166,7 +167,7 @@ final class AppEnvironment {
         makeCallEngine = { CallEngine(configuration: $0) }
         transportFactory = { kind in
             let transport: CallTransport = switch kind {
-            case .daily: makeDailyTransport()
+            case .daily: PipecatDailyTransport()
             case .livekit: LiveKitTransport()
             case .smallwebrtc: PipecatSmallWebRTCTransport()
             }
@@ -194,15 +195,6 @@ final class AppEnvironment {
         CallTraceObserver.start(engine: environment.callEngine)
         #endif
         return environment
-    }
-
-    /// The Daily transport; in DEBUG, with the ring-join strategy chosen in Settings.
-    private static func makeDailyTransport() -> CallTransport {
-        #if DEBUG
-        DebugDailyRingJoin.makeTransport()
-        #else
-        PipecatDailyTransport()
-        #endif
     }
 
     /// The process-wide live environment. The SwiftUI `App` and the UIKit

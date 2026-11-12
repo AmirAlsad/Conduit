@@ -33,9 +33,6 @@ struct SettingsView: View {
                     .accessibilityIdentifier(AccessibilityID.Settings.agentSetupLink)
             }
 
-            #if DEBUG
-            DebugRingJoinSection()
-            #endif
         }
         .navigationTitle("Settings")
         .brandMarkToolbar()

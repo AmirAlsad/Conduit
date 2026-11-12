@@ -11,10 +11,12 @@
 //  the app's session was inaudible throughout a Daily call, while speech in the
 //  system's session was heard and left the call's session unchanged.
 //
-//  The `.connecting` state plays a phone ringback (`Ringback`) instead of speaking,
-//  starting `Ringback.startDelay` after the cue. The call engine keeps the call
-//  connecting long enough for the first tone (`Ringback.minimumConnectingDuration`),
-//  so a stop always comes after it and stops the ringback at once.
+//  Repeating `.connecting` plays a phone ringback (`Ringback`) instead of speaking,
+//  starting `Ringback.startDelay` after the cue; the host repeats it only for a call
+//  the user placed. The call engine keeps such a call connecting long enough for
+//  the first tone (`Ringback.minimumOutgoingConnectingDuration`), so a stop always
+//  comes after it and stops the ringback at once. Announced once, `.connecting` is
+//  spoken ("Connecting").
 //
 //  An announcement's completion runs when the synthesizer reports its utterance
 //  finished or cancelled, or when `stopNow()` cuts it off, so the host knows when

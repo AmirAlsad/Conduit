@@ -52,7 +52,7 @@ struct AppWiringTests {
 
         #expect(Ringback.startDelay == .milliseconds(500))
         #expect(Ringback.toneLength == .milliseconds(2100))
-        #expect(configuration?.minimumConnectingDuration == Ringback.startDelay + Ringback.toneLength)
+        #expect(configuration?.minimumOutgoingConnectingDuration == Ringback.startDelay + Ringback.toneLength)
     }
 
     @Test func launchWiresSaveTimeRegistrationToTheHost() {

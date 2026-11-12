@@ -2,8 +2,9 @@
 //  Ringback.swift
 //  Conduit
 //
-//  The phone ringback the announcer plays while a call connects, and its timing,
-//  which the call engine's minimum connecting time is set from.
+//  The phone ringback the announcer plays while a call the user placed connects,
+//  and its timing, which the call engine's outgoing minimum connecting time is set
+//  from. An answered call gets no ringback.
 //
 //  iOS suppresses ordinary app audio (`AVAudioPlayer`) inside a CallKit VoIP
 //  session, so the tone rides the privileged system-sound server
@@ -20,10 +21,11 @@ enum Ringback {
     static let startDelay: Duration = .milliseconds(500)
     /// The audible part of one `phone-ring.caf` cycle.
     static let toneLength: Duration = .milliseconds(2100)
-    /// How long the engine keeps a call connecting at least
-    /// (`CallEngineConfiguration.minimumConnectingDuration`), so the first tone plays
-    /// in full before the call is reported connected and "Connected" is spoken.
-    static let minimumConnectingDuration = startDelay + toneLength
+    /// How long the engine keeps a call the user placed connecting at least
+    /// (`CallEngineConfiguration.minimumOutgoingConnectingDuration`), so the first
+    /// tone plays in full before the call is reported connected and "Connected" is
+    /// spoken.
+    static let minimumOutgoingConnectingDuration = startDelay + toneLength
 }
 
 /// Plays the ringback on a loop until stopped.
