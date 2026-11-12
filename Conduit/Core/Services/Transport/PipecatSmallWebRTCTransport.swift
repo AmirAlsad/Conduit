@@ -16,8 +16,17 @@
 //  Audio-session note: the SDK configures `AVAudioSession` itself (category,
 //  mode, port overrides) with no manual-audio gate, so — like Daily — we join
 //  with the mic DISABLED and only enable capture via `setMicEnabled`, which the
-//  engine calls after CallKit activation. `attachAudioSession`/
-//  `detachAudioSession` are no-ops pending the on-device audio verdict.
+//  engine calls after CallKit activation. For the same reason it cannot connect
+//  while a call rings (`canConnectWhileRinging` is false): its connect would
+//  configure the session under the ringtone.
+//
+//  Hold: the SDK exposes no control over the agent's playout (its peer
+//  connection and remote track are internal), so `detachAudioSession` can stop
+//  capture but not playout. A held call stays silent only because the agent
+//  honours `call-held`, which `send(_:)` delivers.
+//
+//  Call-control signals and the end-call signal travel as RTVI client messages
+//  over the data channel, in the envelope the package's Daily adapter uses.
 //
 //  Attempts: `SmallWebRTCConnectionGate` decides what each connect attempt reports
 //  and what a connect does with a session that is still up. `disconnect()` takes
@@ -71,6 +80,8 @@ final class PipecatSmallWebRTCTransport: CallTransport {
 
     // MARK: - CallTransport
 
+    nonisolated var canConnectWhileRinging: Bool { false }
+
     func connect(_ connection: CallConnection) async throws {
         var session = self.session ?? makeSession()
         self.session = session
@@ -114,9 +125,7 @@ final class PipecatSmallWebRTCTransport: CallTransport {
         session.events.gate.userDidRequestDisconnect()
         let client = session.client
         // Deliberate hangup: explicit end signal so the engine ends at once.
-        // SmallWebRTC's data channel delivers client RTVI messages cleanly, so
-        // the plain client-message path works (unlike LiveKit's raw envelope).
-        if (try? client.sendClientMessage(msgType: "end-call")) != nil {
+        if Self.sendClientMessage("end-call", on: client) {
             try? await Task.sleep(for: .milliseconds(200))
         }
         do { try await client.disconnect() }
@@ -126,6 +135,38 @@ final class PipecatSmallWebRTCTransport: CallTransport {
         // its own route (speaker) on every later route change, in calls on any transport.
         client.release()
         client.delegate = nil
+    }
+
+    /// Delivers a call-control signal to the agent, best effort.
+    func send(_ signal: CallSignal) async {
+        guard let client = session?.client else {
+            Log.info(.transport, "SmallWebRTC client message \(signal.rawValue) dropped: no session")
+            return
+        }
+        Self.sendClientMessage(signal.rawValue, on: client)
+    }
+
+    /// Sends an RTVI client message (`{"id", "label": "rtvi-ai", "type": "client-message",
+    /// "data": {"t": type, "d": null}}`) on the data channel and returns whether it was
+    /// handed to the SDK. Goes through the Pipecat transport rather than
+    /// `PipecatClient.sendClientMessage`, which refuses until the bot is ready: the
+    /// data channel is open from `.connected`, and a Pipecat bot's RTVI processor
+    /// handles client messages without waiting for client-ready.
+    @discardableResult
+    private static func sendClientMessage(_ type: String, on client: PipecatClient) -> Bool {
+        let state = client.state
+        guard state == .connected || state == .ready else {
+            Log.info(.transport, "SmallWebRTC client message \(type) dropped: the data channel is not open (\(state))")
+            return false
+        }
+        do {
+            try client.transport.sendMessage(message: .clientMessage(msgType: type))
+            Log.info(.transport, "SmallWebRTC client message \(type) sent")
+            return true
+        } catch {
+            Log.warning(.transport, "SmallWebRTC client message \(type) failed: \(error)")
+            return false
+        }
     }
 
     /// Leave a session that is being replaced without reporting anything from it,
@@ -170,14 +211,22 @@ final class PipecatSmallWebRTCTransport: CallTransport {
         catch { Log.error(.audio, "SmallWebRTC setAudioDevice(\(id)) error: \(error)") }
     }
 
+    /// The SDK owns its AVAudioSession configuration and its playout never stopped,
+    /// so attaching starts nothing; the engine's `setMicEnabled` that follows reopens
+    /// capture. If a device pass shows CallKit contention, the upgrade is
+    /// RTCAudioSession manual-audio gating with the unordered-edges pattern
+    /// (potential_skills/callkit.md).
     func attachAudioSession() async {
-        // The SDK owns its AVAudioSession configuration; nothing to attach. If
-        // the device pass shows CallKit contention, the upgrade is RTCAudioSession
-        // manual-audio gating with the unordered-edges pattern (potential_skills/callkit.md).
+        Log.info(.audio, "SmallWebRTC attach (capture follows the engine's mic)")
     }
 
+    /// Stops capture (the engine reopens it with `setMicEnabled` after the next
+    /// attach). Playout cannot be stopped through the SDK (see the header).
     func detachAudioSession() async {
-        // See attachAudioSession.
+        Log.info(.audio, "SmallWebRTC detach: capture off; the agent's playout keeps running")
+        guard let client = session?.client else { return }
+        do { try await client.enableMic(enable: false) }
+        catch { Log.error(.transport, "SmallWebRTC enableMic(false) on detach error: \(error)") }
     }
 }
 
