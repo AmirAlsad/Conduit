@@ -12,8 +12,8 @@ SmallWebRTC adapter is `Conduit/Core/Services/Transport/`.
 
 ### System callbacks fire more than once and out of order vs. your code
 First seen: 2026-06-07
-Last seen: 2026-11-11
-Occurrences: 4
+Last seen: 2026-11-12
+Occurrences: 5
 
 **Pattern:** Logic that assumes a single, ordered sequence breaks when CallKit
 re-enters or reorders. (1) Ending a call by requesting the system end AND driving the
@@ -26,6 +26,9 @@ an activation that had already attached (`.default`) mid-fetch — dead mic on t
 call after a cold launch, where the fetch is slowest. (4) An activation that landed before
 the engine had created the transport (while dialing, or before `answer()`) attached
 nothing, and an End during `startOutgoingCall` was overwritten when the await returned.
+(5) After a phone call on iOS 27, edges never came at all: no un-hold, no
+`didActivate` after the app's resume, no interruption-ended notification, so the
+call stayed resumed, silent and "interrupted".
 
 **Rule:**
 - Make every terminal transition idempotent (`guard !state.isTerminal`) and clear
@@ -35,6 +38,9 @@ nothing, and an End during `startOutgoingCall` was overwritten when the await re
   `isAudioActivated` flag, so whichever lands last leaves the correct state.
 - Never assume "I requested X, so X happens once, now." The system decides when and
   how many times.
+- Never wait on a single system edge with no bound: give every wait a second edge
+  that also ends it (an activation of a call that is not held ends an interruption)
+  or a bounded re-request (a resume with no activation is asked for again).
 - After every `await` on the call path, re-check it is still the same call (state,
   transport identity) before acting; a transport created after activation attaches at once.
 

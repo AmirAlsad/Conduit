@@ -7,6 +7,29 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### A phone call during an engine call left it resumed but silent and "Paused"
+First seen: 2026-11-12 (device, iOS 27.0, Daily)
+
+**Pattern:** The user accepted a phone call; CallKit held the engine call by itself
+(correct). When the phone call ended, three system edges the engine was waiting on
+never came: CallKit did not un-hold the call, did not activate its audio after the
+app's own resume, and `AVAudioSession` never posted the interruption's end. The
+call ended up not held, with no audio and `isInterrupted` stuck true ("Paused")
+with no way out; a second hold-then-resume by hand did bring `didActivate`.
+
+**Rule:** Never let a state wait on one system callback alone. In the engine
+(ConduitCallEngine 0.2): a CallKit activation of a call that is not held ends an
+interruption by itself; a resume with no activation within 2 s is re-requested as a
+silent hold-and-resume pair, at most 3 times, never against a hold asked for
+meanwhile; and a hold iOS made is resumed by the engine once `CXCallObserver`
+shows every other call seen during it has ended (`resumesAfterSystemHold`).
+
+**Why it's missed:** the fakes deliver every edge a test asks for; nothing modelled
+an edge that never arrives. The mic-rule permutations now include "the end never
+arrives" and finish each order with a way-out check.
+
+---
+
 ### SmallWebRTC adapter refused fresh credentials and let joins outlive their owner
 First seen: 2026-11-12 (review against the package's fixed Daily and LiveKit adapters; not seen on device)
 

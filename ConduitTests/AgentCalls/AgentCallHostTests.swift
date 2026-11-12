@@ -666,6 +666,54 @@ struct AgentCallHostTests {
         #expect(h.transport.isMicEnabled)
     }
 
+    /// A phone call the user accepts holds the agent call; when it ends, the engine
+    /// resumes the call by itself (iOS does not), quietly, and the agent call has
+    /// its mic again once CallKit hands the audio back, with no "Paused" left over.
+    @Test func aPhoneCallTakenDuringACallGivesItBackWhenItEnds() async throws {
+        let h = try AgentCallHostHarness(sleep: AgentCallHostHarness.realTimeSleep)
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        h.announcer.finishAnnouncements()
+        await h.system.awaitPendingWork()
+        let callID = try #require(h.system.startedCallIDs.first)
+        let announced = h.announcer.announced
+
+        let phoneCall = h.system.startOtherCall()
+        #expect(await h.system.setHeldFromSystem(callID, onHold: true))
+        h.system.beginAudioInterruption()
+        h.system.deactivateAudioSession()
+        await h.system.awaitPendingWork()
+        #expect(InCallStatus.pausedText(for: h.engine.state, isOnHold: h.engine.isOnHold, isInterrupted: h.engine.isInterrupted) == InCallStatus.onHold)
+
+        await h.system.endOtherCall(phoneCall)
+        #expect(!h.engine.isOnHold)
+        #expect(h.system.holdRequests.map(\.onHold) == [false])
+
+        await h.system.activateAudioSession()
+
+        #expect(!h.engine.isInterrupted)
+        #expect(InCallStatus.pausedText(for: h.engine.state, isOnHold: h.engine.isOnHold, isInterrupted: h.engine.isInterrupted) == nil)
+        #expect(h.transport.isAudioAttached)
+        #expect(h.transport.isMicEnabled)
+        #expect(h.transport.sentSignals.suffix(2) == [.held, .resumed])
+        #expect(h.announcer.announced == announced)
+    }
+
+    @Test func aHoldFromTheCallScreenStaysWhenAPhoneCallEnds() async throws {
+        let h = try AgentCallHostHarness(sleep: AgentCallHostHarness.realTimeSleep)
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        let phoneCall = h.system.startOtherCall()
+
+        await h.engine.setOnHold(true)
+        await h.system.endOtherCall(phoneCall)
+
+        #expect(h.engine.isOnHold)
+        #expect(h.system.holdRequests.map(\.onHold) == [true])
+    }
+
     /// iOS may never post an interruption's end (it did not after a phone call on
     /// iOS 27): CallKit handing the call its audio back ends "Paused" by itself.
     @Test func anInterruptionWhoseEndNeverComesDoesNotLeaveTheCallPaused() async throws {

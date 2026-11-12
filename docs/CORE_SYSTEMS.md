@@ -492,7 +492,13 @@ Key behaviors:
   that CallKit does not follow with an audio activation within 2 s (seen after a
   phone call on iOS 27) is asked for again: the engine holds and resumes the call
   through CallKit, silently, up to 3 times per resume, stopping at the activation,
-  a hold or the call's end, and never overriding a hold asked for meanwhile. The
+  a hold or the call's end, and never overriding a hold asked for meanwhile.
+  CallKit does not resume an app's call when the phone call it was held for ends,
+  so the engine does (`resumesAfterSystemHold`, default on, which the app keeps):
+  for a hold iOS made (one not requested through `setOnHold`), it watches the
+  device's calls through `CXCallObserver` and resumes once every other call seen
+  during the hold has ended and none is left. A hold from the call screen's hold
+  control is never resumed by the engine. The
   transport must stop and restart playout there: LiveKit and Daily do (Daily by
   unsubscribing from the agent's audio), SmallWebRTC cannot, so a held SmallWebRTC
   call is silent only if the agent honours `call-held`.
