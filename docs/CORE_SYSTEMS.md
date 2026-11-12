@@ -166,12 +166,23 @@ unit-tested), the same rules as the package's Daily adapter: one `.connected` pe
 attempt, and nothing that steers the engine once the attempt has reported a
 disconnect, its connect has thrown, or the host has disconnected (so a failed
 reconnect attempt is not counted twice, and a late bot-left cannot end a
-reconnecting call). A connect that finds the session still up never resets that
-reporting: a ready live attempt reports `.connected` again, a join still under way
-is left to finish, and a session whose attempt is over is retired silently and
-replaced. Every connect error is `.connectionFailed`: the SDK's offer error has no
-status code, and a rejected API key is caught exactly by pairing
-(`PairingError.unauthorized` → `.authenticationFailed`).
+reconnecting call). A connect that finds the session still up reports `.connected`
+again only for a live attempt whose agent is ready; anything else still up (a join
+in flight, a joined session whose bot never got ready, an attempt that is over, a
+session leaving) is taken over, as the Daily adapter does: left without the
+end-call signal, its client released, and the fresh credentials joined with a new
+client. The adapter owns its joins: the SDK's connect runs in a task it keeps
+(`SmallWebRTCJoin`), and each connect takes a ticket (`SmallWebRTCConnectLedger`),
+so of overlapping connects only the newest owns the transport and an older one
+throws without touching it; `disconnect()` lets a join in flight finish (2 s) so it
+can tell the agent its offer started that the call is over. `send(_:)` returns
+`.sent` only for a message handed to the open data channel of a live attempt,
+`.failed` otherwise; the SDK reports nothing past that hand-off (it swallows send
+errors and the data channel's result), and its connect never returns once its peer
+connection was closed before the data channel opened, so a join closed that way is
+left to the server's connection timeout. Every connect error is `.connectionFailed`:
+the SDK's offer error has no status code, and a rejected API key is caught exactly
+by pairing (`PairingError.unauthorized` → `.authenticationFailed`).
 
 All three adapters send the engine's **`end-call` signal** in `disconnect()` — a
 deliberate hangup ends the bot at once instead of burning its human-absent grace
@@ -337,7 +348,9 @@ Outgoing targets allow none. Conduit's delegate is `AgentCallHost`
 missed-call notification for every missed ring, donates outgoing calls to Siri on
 `dialing → connecting`, and plays the engine's cues: `.start(.connecting)` loops
 the ringback tone, `.start(.retrying)` repeats "Retrying", `.stop` ends the loop,
-`.moment(.connected)` / `.moment(.reconnected)` say "Connected", and
+`.moment(.connected)` / `.moment(.reconnected)` say "Connected" (the engine sends
+`.moment(.connected)` only once CallKit has activated the call's audio, so it is
+said into a live session), and
 `.moment(.connectionLost)` says "Disconnected" (once per outage);
 `.moment(.held)` and `.moment(.resumed)` play nothing. The engine
 guarantees every loop is stopped by the time the call ends, a provider reset
