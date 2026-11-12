@@ -145,6 +145,11 @@ final class AppEnvironment {
             )
         }
 
+        #if DEBUG
+        CallTrace.startSession("launch: daily ring-join \(DebugDailyRingJoin.current().rawValue)")
+        CallTrace.captureEngineLog()
+        #endif
+
         let makeCallEngine: (CallEngineConfiguration) -> CallEngine
         let transportFactory: (TransportKind) -> CallTransport
         let simulatedCallSystem: SimulatedCallSystem?
@@ -182,7 +187,6 @@ final class AppEnvironment {
             makeCallEngine: makeCallEngine
         )
         #if DEBUG
-        CallTrace.startSession("launch: daily ring-join \(DebugDailyRingJoin.current().rawValue)")
         environment.callHost.trace = { CallTrace.record($0) }
         CallTraceObserver.start(engine: environment.callEngine)
         #endif

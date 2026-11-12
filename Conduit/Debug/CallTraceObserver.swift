@@ -3,10 +3,13 @@
 //  Conduit
 //
 //  DEBUG-only: writes the engine's observable call state that no delegate
-//  callback reports into the call trace — the ring's pre-connect phase, hold,
-//  CallKit audio activation (as the engine counts it: an activation it ignores,
-//  such as one during an unanswered ring, does not show), interruption and mute.
-//  Changes made in one main-actor turn are seen together, as their final values.
+//  callback reports into the call trace — hold, CallKit audio activation (as the
+//  engine counts it: an activation it ignores, such as one during an unanswered
+//  ring, does not show; the raw activations are in the engine log lines),
+//  interruption and mute. Changes made in one main-actor turn are seen together,
+//  as their final values. The ring's pre-connect phase is not here: Observation
+//  loses its fast intermediate phases, so the call host traces each change from
+//  the delegate callback.
 //
 
 #if DEBUG
@@ -16,7 +19,6 @@ import Observation
 @MainActor
 final class CallTraceObserver {
     private struct Snapshot: Equatable {
-        var ringPreparation: RingPreparationPhase
         var isOnHold: Bool
         var isAudioActivated: Bool
         var isInterrupted: Bool
@@ -41,7 +43,6 @@ final class CallTraceObserver {
     private func observe() {
         let snapshot = withObservationTracking {
             Snapshot(
-                ringPreparation: engine.ringPreparationPhase,
                 isOnHold: engine.isOnHold,
                 isAudioActivated: engine.isAudioActivated,
                 isInterrupted: engine.isInterrupted,
@@ -57,13 +58,10 @@ final class CallTraceObserver {
         defer { last = new }
         guard let last else {
             CallTrace.record("""
-            engine: ringPreparation=\(new.ringPreparation) onHold=\(new.isOnHold) \
+            engine: onHold=\(new.isOnHold) \
             audioActivated=\(new.isAudioActivated) interrupted=\(new.isInterrupted) muted=\(new.isMuted)
             """)
             return
-        }
-        if new.ringPreparation != last.ringPreparation {
-            CallTrace.record("ring preparation: \(last.ringPreparation) -> \(new.ringPreparation)")
         }
         if new.isOnHold != last.isOnHold {
             CallTrace.record(new.isOnHold ? "hold: on" : "hold: off")

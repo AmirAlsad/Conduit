@@ -99,6 +99,14 @@ final class AgentCallHost: CallEngineDelegate {
         interactionDonor.donateOutgoingCall(to: agent)
     }
 
+    func callEngine(
+        _ engine: CallEngine,
+        didChangeRingPreparationPhaseFrom old: RingPreparationPhase,
+        to new: RingPreparationPhase
+    ) {
+        trace("ring preparation: \(old) -> \(new)")
+    }
+
     func callEngine(_ engine: CallEngine, cue: CallCue) {
         trace("cue: \(cue)")
         switch cue {
