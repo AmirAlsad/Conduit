@@ -27,3 +27,5 @@ os.environ["APNS_KEY_BASE64"] = ""
 os.environ["APNS_KEY_ID"] = ""
 os.environ["APNS_TEAM_ID"] = ""
 os.environ["APNS_TOPIC"] = ""
+# Likewise pin what the developer .env may set and the tests assume unset.
+os.environ["PUBLIC_BASE_URL"] = ""
