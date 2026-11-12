@@ -298,7 +298,18 @@ To withdraw a ring that is still ringing:
   endpoint then refuses with `409` and `reason` `"cancel unsupported by device"`,
   and leaves the ring and its agent running.
 
-A cancel that arrives after the ring was answered changes nothing on the phone.
+A cancel push that arrives after the ring was answered changes nothing on the
+phone, but an agent that leaves a room the user has already answered into ends the
+live call, and on a pre-connected ring the room holds the phone both before and
+after the answer. So an agent must not leave for a cancel once it has seen the
+answer itself (`call-answered`, §6, or the human's audio), and must not act on a
+cancel after the ring's `answered` receipt (§4). The `answered` receipt is sent at
+the moment of answer, but `call-answered` only once audio is up, so the agent can
+hold either one first. What stays racy is only the receipt's flight time: a cancel
+that reaches the agent in the moment between the user answering and either signal
+arriving cannot be told from one that came first. The reference engine's cancel
+endpoint returns `409` for both (`reason` `"ring ended"` after a receipt,
+`"ring answered"` when its ring bot saw the answer first) and leaves the bot alone.
 
 ---
 

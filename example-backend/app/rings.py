@@ -22,6 +22,16 @@ _MIN_RING_TIMEOUT_SECS = 10
 # The cancel endpoint's 409 reason when the device doesn't list the "cancel"
 # push feature and the ring can't be withdrawn in band.
 CANCEL_UNSUPPORTED = "cancel unsupported by device"
+# ...and when the ring's bot has itself seen the call answered, before the
+# answered receipt reached the engine.
+CANCEL_ANSWERED = "ring answered"
+
+# The ring-bot control protocol (dispatcher stdin -> bot, bot stdout -> dispatcher).
+# A "cancel" line asks the bot to end unless it knows the call was answered; the
+# bot's one-line verdict comes back on stdout behind this prefix.
+CONTROL_REPLY_PREFIX = "@conduit-control "
+CANCEL_ENDED = "ended"
+CANCEL_REFUSED = "refused"
 
 
 @dataclass

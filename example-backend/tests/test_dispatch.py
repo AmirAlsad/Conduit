@@ -3,6 +3,7 @@
 import asyncio
 
 from app.dispatch import Dispatcher
+from app.rings import CANCEL_ENDED, CANCEL_REFUSED, CONTROL_REPLY_PREFIX
 from app.registry import SQLiteRegistry
 
 
@@ -178,3 +179,92 @@ async def test_plain_dispatch_keeps_inherited_stdin_and_cannot_be_controlled(mon
     )
     assert seen["stdin"] is None
     assert await disp.send_control("r1", "answered") is False
+
+
+def _reply(verdict):
+    return f"{CONTROL_REPLY_PREFIX}cancel {verdict}\n".encode()
+
+
+class ReplyingStdin(FakeStdin):
+    """A ring bot's stdin that answers each cancel line on its stdout."""
+
+    def __init__(self, stdout, verdict):
+        super().__init__()
+        self.stdout = stdout
+        self.verdict = verdict
+
+    def write(self, data):
+        super().write(data)
+        if data == b"cancel\n" and self.verdict is not None:
+            self.stdout.feed_data(_reply(self.verdict))
+
+
+async def _control_dispatcher(monkeypatch, verdict):
+    disp = Dispatcher(SQLiteRegistry(":memory:"))
+    proc = FakeProc()
+    proc.stdout = asyncio.StreamReader()
+    proc.stdin = ReplyingStdin(proc.stdout, verdict)
+    seen = {}
+
+    async def fake_exec(*args, **kwargs):
+        seen.update(kwargs)
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    await disp.dispatch(
+        room_key="r1", agent_id="live", transport="daily",
+        bot_argv=["--token", "t", "--ring-deadline", "75"], control=True,
+    )
+    return disp, proc, seen
+
+
+async def test_control_dispatch_pipes_stdout_for_the_bots_replies(monkeypatch):
+    _, _, seen = await _control_dispatcher(monkeypatch, CANCEL_ENDED)
+    assert seen["stdout"] is asyncio.subprocess.PIPE
+
+
+async def test_plain_dispatch_keeps_inherited_stdout(monkeypatch):
+    disp = Dispatcher(SQLiteRegistry(":memory:"))
+    seen = {}
+
+    async def fake_exec(*args, **kwargs):
+        seen.update(kwargs)
+        return FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    await disp.dispatch(room_key="r1", agent_id="live", transport="daily", bot_argv=["--token", "t"])
+    assert seen.get("stdout") is None
+
+
+async def test_cancel_ring_bot_returns_the_bots_verdict(monkeypatch):
+    for verdict in (CANCEL_ENDED, CANCEL_REFUSED):
+        disp, proc, _ = await _control_dispatcher(monkeypatch, verdict)
+        assert await disp.cancel_ring_bot("r1") == verdict
+        assert proc.stdin.written == b"cancel\n"
+        assert not proc.terminated  # the bot decides; the dispatcher never signals it
+
+
+async def test_cancel_ring_bot_is_none_when_the_bot_cannot_answer(monkeypatch):
+    disp, proc, _ = await _control_dispatcher(monkeypatch, None)
+    assert await disp.cancel_ring_bot("r1", timeout=0.05) is None  # no reply in time
+    assert await disp.cancel_ring_bot("nope") is None  # no such bot
+    proc.stdin.broken = True
+    assert await disp.cancel_ring_bot("r1") is None  # the pipe is gone
+
+
+async def test_cancel_ring_bot_is_none_when_the_bot_exits_without_replying(monkeypatch):
+    disp, proc, _ = await _control_dispatcher(monkeypatch, None)
+    task = asyncio.create_task(disp.cancel_ring_bot("r1", timeout=5))
+    await asyncio.sleep(0)
+    proc.stdout.feed_eof()
+    assert await asyncio.wait_for(task, 1) is None
+
+
+async def test_bot_stdout_noise_is_forwarded_not_mistaken_for_a_reply(monkeypatch, capsys):
+    disp, proc, _ = await _control_dispatcher(monkeypatch, None)
+    task = asyncio.create_task(disp.cancel_ring_bot("r1", timeout=5))
+    await asyncio.sleep(0)
+    proc.stdout.feed_data(b"some library banner\n")
+    proc.stdout.feed_data(_reply(CANCEL_ENDED))
+    assert await asyncio.wait_for(task, 1) == CANCEL_ENDED
+    assert "some library banner" in capsys.readouterr().out

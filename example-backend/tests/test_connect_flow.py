@@ -42,6 +42,10 @@ class FakeDispatcher:
         self.controls = []
         self.sent = []  # (room_key, control line)
         self.disconnected = []
+        self.cancels = []  # rooms asked to cancel their ring bot
+        # What a ring bot answers a cancel with: "ended", "refused" (the call was
+        # answered) or None (it can't be reached; the caller then force-ends it).
+        self.cancel_outcome = "ended"
 
     async def send_control(self, room_key, message):
         self.sent.append((room_key, message))
@@ -50,6 +54,12 @@ class FakeDispatcher:
     async def disconnect(self, room_key):
         self.disconnected.append(room_key)
         return True
+
+    async def cancel_ring_bot(self, room_key):
+        self.cancels.append(room_key)
+        if self.cancel_outcome == "ended":
+            self.disconnected.append(room_key)
+        return self.cancel_outcome
 
     async def dispatch(
         self, *, room_key, agent_id, transport, bot_argv, cleanup=None, control=False

@@ -154,6 +154,22 @@ class CallControl:
                 self._open_gates()
             await self._maybe_greet()
 
+    async def cancel(self, announce: Callable[[bool], None] | None = None) -> bool:
+        """The dispatcher withdrew the ring. End the bot unless it has itself seen
+        the call answered, and say which through ``announce`` before the (slow)
+        teardown. An answer the bot has not seen yet loses the race; that window
+        is the receipt's flight time."""
+        ended = not self._answered
+        if announce is not None:
+            announce(ended)
+        if not ended:
+            event(self._log, "bot.cancel_refused")
+            return False
+        self.stop()
+        event(self._log, "bot.ring_canceled")
+        await self._teardown.end_now("ring-canceled")
+        return True
+
     async def hold(self) -> None:
         if self._held:
             return

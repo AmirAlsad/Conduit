@@ -6,7 +6,8 @@
 - POST /admin/ring/{agent_id} — agent-initiated inbound call: send a VoIP push
   to the device that registered via /inbound/register (docs/INBOUND_CALLS.md §2).
 - POST /admin/ring/{agent_id}/cancel — withdraw a ring that is still ringing:
-  in-band (the agent leaves the pre-connected room) or with a cancel push.
+  in-band (the agent leaves the pre-connected room) or with a cancel push. Never
+  ends the bot of an answered call (see _end_ring_bot).
 
 Optional push keys go only to devices whose registration lists the matching
 push feature ("ring_timeout", "preconnect", "cancel"): an older app would ignore
@@ -33,7 +34,13 @@ from app.models import (
 )
 from app.obs import event, get_logger
 from app.provisioning import TransportUnavailable, provision_pairing
-from app.rings import CANCEL_UNSUPPORTED, TrackedRing, ring_bot_flags
+from app.rings import (
+    CANCEL_ANSWERED,
+    CANCEL_REFUSED,
+    CANCEL_UNSUPPORTED,
+    TrackedRing,
+    ring_bot_flags,
+)
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_engine_key)])
 _log = get_logger("admin")
@@ -182,7 +189,7 @@ async def cancel_ring(
     if ring.preconnect == "media" and ring.room_key and await _human_in_room(state, ring):
         # In-band cancel: the phone is in the room with the agent, so the agent
         # leaving IS the cancel. No push, so no flash on the lock screen.
-        ended = await state.dispatcher.disconnect(ring.room_key)
+        ended = await _end_ring_bot(state, ring)
         ring.canceled = True
         event(_log, "ring.canceled", call_id=ring.call_id, method="in_band", bot_ended=ended)
         return RingCancelResponse(call_id=ring.call_id, method="in_band", bot_ended=ended)
@@ -211,9 +218,10 @@ async def cancel_ring(
     if reg.display_name is not None:
         payload["display_name"] = reg.display_name
     result = await _push(state, agent_id, reg, payload)
+    # The ring's bot (if any) has no one to wait for now, unless the call was
+    # answered after all: the push then changes nothing on the phone either.
+    ended = await _end_ring_bot(state, ring)
     ring.canceled = True
-    # The ring's bot (if any) has no one to wait for now.
-    ended = bool(ring.room_key) and await state.dispatcher.disconnect(ring.room_key)
     event(_log, "ring.canceled", call_id=ring.call_id, method="push", bot_ended=ended)
     return RingCancelResponse(
         call_id=ring.call_id,
@@ -222,6 +230,30 @@ async def cancel_ring(
         apns_status=result.status,
         apns_id=result.apns_id,
     )
+
+
+async def _end_ring_bot(state, ring: TrackedRing) -> bool:
+    """End the bot dispatched for a ring being withdrawn; True if one was ended.
+
+    A ring bot is asked, not signalled: it ends unless it has itself seen the call
+    answered (call-answered, or the human joining a ring that waits for no answer),
+    which can happen before the answered receipt reaches the engine, and the room
+    is full of humans both before and after an answer on a pre-connected ring. A
+    refusal raises 409. A bot that can't be asked (no control pipe: a plain inline
+    bot; or gone, or silent) is force-ended as before."""
+    if not ring.room_key:
+        return False
+    if ring.ring_bot:
+        verdict = await state.dispatcher.cancel_ring_bot(ring.room_key)
+        if verdict == CANCEL_REFUSED:
+            event(_log, "ring.cancel_refused", call_id=ring.call_id, by="bot")
+            raise HTTPException(
+                status_code=409,
+                detail={"call_id": ring.call_id, "status": "answered", "reason": CANCEL_ANSWERED},
+            )
+        if verdict is not None:
+            return True
+    return await state.dispatcher.disconnect(ring.room_key)
 
 
 async def _push(state, agent_id: str, reg, payload: dict):

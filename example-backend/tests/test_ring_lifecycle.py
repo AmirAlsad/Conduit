@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from app.apns import ApnsResult
 from app.config import settings
 from app.main import app
-from app.rings import CANCEL_UNSUPPORTED, RingTracker, TrackedRing, ring_deadline_secs
+from app.rings import CANCEL_ANSWERED, CANCEL_UNSUPPORTED, RingTracker, TrackedRing, ring_deadline_secs
 
 from test_connect_flow import FakeDaily, FakeDispatcher, FakeLiveKit
 from test_inbound import AUTH, FEATURES, NAMED_BODY, REGISTER_BODY, FakeApns
@@ -463,6 +463,87 @@ def test_cancel_in_band_on_livekit_too():
         _setup(c, livekit=PresenceLiveKit(present=True))
         call_id, _ = _ring(c, inline=True, preconnect="media", transport="livekit")
         assert _cancel(c, call_id).json()["method"] == "in_band"
+
+
+def test_cancel_after_the_answered_receipt_is_refused_on_both_branches():
+    # The live call's bot must survive a late cancel: in band (the human is in the
+    # room) and by push alike.
+    for preconnect, daily in (("media", PresenceDaily(present=True)), ("credentials", None)):
+        with TestClient(app) as c:
+            _setup(c, daily=daily)
+            call_id, _ = _ring(c, inline=True, preconnect=preconnect)
+            _receipt(c, call_id, "answered")
+            r = _cancel(c, call_id)
+            assert r.status_code == 409, r.text
+            assert r.json()["detail"]["status"] == "answered"
+            assert app.state.dispatcher.disconnected == []
+            assert app.state.dispatcher.cancels == []
+            assert len(app.state.apns.sends) == 1  # no cancel push either
+
+
+def test_cancel_is_refused_by_a_bot_that_saw_the_answer_before_its_receipt_in_band():
+    with TestClient(app) as c:
+        _setup(c, daily=PresenceDaily(present=True))
+        app.state.dispatcher.cancel_outcome = "refused"
+        call_id, _ = _ring(c, inline=True, preconnect="media")
+        r = _cancel(c, call_id)
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"] == {
+            "call_id": call_id, "status": "answered", "reason": CANCEL_ANSWERED,
+        }
+        assert app.state.dispatcher.cancels == ["room-abc"]
+        assert app.state.dispatcher.disconnected == []
+        assert len(app.state.apns.sends) == 1
+        assert app.state.rings.get(call_id).canceled is False
+
+
+def test_cancel_is_refused_by_a_bot_that_saw_the_answer_before_its_receipt_by_push():
+    with TestClient(app) as c:
+        _setup(c)
+        app.state.dispatcher.cancel_outcome = "refused"
+        call_id, _ = _ring(c, inline=True, preconnect="credentials")
+        r = _cancel(c, call_id)
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["reason"] == CANCEL_ANSWERED
+        assert app.state.dispatcher.disconnected == []
+        assert app.state.rings.get(call_id).canceled is False
+
+
+def test_cancel_of_a_pairing_ring_bot_asks_the_bot_too():
+    with TestClient(app) as c:
+        _setup(c, daily=PresenceDaily(present=True))
+        call_id, _ = _ring(c, preconnect="media")
+        r = c.post(
+            "/connect/loopback",
+            json={"transport": "daily", "ring": {"call_id": call_id, "await_answer": True}},
+            headers=AUTH,
+        )
+        assert r.status_code == 200, r.text
+        app.state.dispatcher.cancel_outcome = "refused"
+        assert _cancel(c, call_id).status_code == 409
+        assert app.state.dispatcher.cancels == ["room-abc"]
+        assert app.state.dispatcher.disconnected == []
+
+
+def test_cancel_force_ends_a_ring_bot_that_cannot_be_asked():
+    # No control pipe left (gone, or too slow): the old behaviour.
+    with TestClient(app) as c:
+        _setup(c, daily=PresenceDaily(present=True))
+        app.state.dispatcher.cancel_outcome = None
+        call_id, _ = _ring(c, inline=True, preconnect="media")
+        r = _cancel(c, call_id)
+        assert r.status_code == 200, r.text
+        assert r.json()["bot_ended"] is True
+        assert app.state.dispatcher.disconnected == ["room-abc"]
+
+
+def test_cancel_of_a_plain_inline_bot_is_a_plain_disconnect():
+    with TestClient(app) as c:
+        _setup(c)
+        call_id, _ = _ring(c, inline=True)
+        assert _cancel(c, call_id).json()["bot_ended"] is True
+        assert app.state.dispatcher.cancels == []
+        assert app.state.dispatcher.disconnected == ["room-abc"]
 
 
 def test_cancel_pre_connected_ring_without_the_human_pushes_and_ends_the_bot():

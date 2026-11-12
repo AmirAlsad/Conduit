@@ -202,8 +202,9 @@ uv run python scripts/ring.py --agent live --cancel-after 8        # ring, wait 
 ```
 
 - `404` if the engine doesn't know that `call_id` for this agent; `409` once
-  the ring's receipt arrived (it was answered, declined, …), after a cancel, or
-  when the device can't take a cancel push (below).
+  the ring's receipt arrived (it was answered, declined, …), after a cancel,
+  when the ring bot has itself seen the call answered (below), or when the device
+  can't take a cancel push (below).
 - A `media` ring whose phone is in the room (Daily presence API / LiveKit
   `ListParticipants`) is canceled **in band**: the engine ends the bot, the app
   takes the agent leaving as the cancel and reports `canceled`. No push.
@@ -211,6 +212,19 @@ uv run python scripts/ring.py --agent live --cancel-after 8        # ring, wait 
   sends a cancel push, `{"action": "cancel", "call_id": …}` without `agent_id`,
   and ends the ring's bot if it has one. Cancel only rings you expect to be
   ringing.
+- A cancel never ends the bot of an answered call. After the `answered` receipt
+  the engine refuses with `409` (`status` `answered`, `reason` `ring ended`)
+  without touching the bot or sending a push. Before the receipt, the engine does
+  not signal a ring bot: it asks it (a `cancel` line on the bot's stdin; the
+  verdict returns on its stdout, so the bot is the one place that knows) and the
+  bot ends itself unless it has seen `call-answered`, or, for a ring that waits
+  for no answer, the human join. A refusal is `409` with
+  `{"call_id": …, "status": "answered", "reason": "ring answered"}`, the bot and
+  ring are left alone, and on the push branch the cancel push has already gone out
+  (the answered phone ignores it). A bot that cannot be asked (a plain inline bot
+  has no control pipe; or it is gone, or silent for 3 s) is force-ended as before.
+  The residual race is the answered receipt's flight time: the user answered, but
+  neither the receipt nor `call-answered` has reached the engine or bot yet.
 - If it doesn't (an app build that sent no `push_features`, or one without
   `cancel`), the engine sends nothing, since that app would show the push as a
   brief incoming-call flash. It returns `409` with

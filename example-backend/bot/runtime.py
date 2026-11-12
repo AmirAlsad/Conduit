@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from pipecat.frames.frames import ClientConnectedFrame
 from pipecat.workers.runner import WorkerRunner
 
 from app.config import settings
 from app.obs import event, get_logger
+from app.rings import CANCEL_ENDED, CANCEL_REFUSED, CONTROL_REPLY_PREFIX
 from bot.call_control import CallControl
 from bot.pipelines import live, loopback, tone
 from bot.teardown import TeardownController
@@ -161,6 +162,13 @@ def _wire_presence(
             await controller.end_now("client-left")
 
 
+def reply_on_stdout(ended: bool) -> None:
+    """The ring bot's verdict on a cancel, read by the dispatcher (stdout is the
+    reply channel of a control bot; logs go to stderr)."""
+    verdict = CANCEL_ENDED if ended else CANCEL_REFUSED
+    print(f"{CONTROL_REPLY_PREFIX}cancel {verdict}", flush=True)
+
+
 async def run_bot(
     transport,
     agent_id: str,
@@ -171,10 +179,12 @@ async def run_bot(
     await_answer: bool = False,
     ring_deadline_secs: float | None = None,
     control: AsyncIterator[str] | None = None,
+    control_reply: Callable[[bool], None] | None = reply_on_stdout,
 ) -> None:
     """``await_answer`` / ``ring_deadline_secs``: see bot/call_control.py.
     ``control``: lines from the dispatcher (a ring bot's stdin); "answered" is the
-    ring's answered receipt."""
+    ring's answered receipt, "cancel" a withdrawn ring (answered with
+    ``reply_on_stdout`` unless ``control_reply`` says otherwise)."""
     log = get_logger("bot")
 
     build_fn = _BUILDERS.get(agent_id)
@@ -219,7 +229,9 @@ async def run_bot(
         ring_deadline=ring_deadline_secs,
     )
     call.start()
-    control_task = asyncio.create_task(_read_control(control, call, log)) if control else None
+    control_task = (
+        asyncio.create_task(_read_control(control, call, log, control_reply)) if control else None
+    )
     # Subprocess bots take handle_sigterm so the dispatcher's /admin/disconnect
     # (SIGTERM) tears down gracefully. In-process bots (smallwebrtc) must pass
     # False for both — installing handlers there would clobber uvicorn's own.
@@ -234,9 +246,16 @@ async def run_bot(
     event(log, "bot.finished", agent=agent_id, transport=transport_type)
 
 
-async def _read_control(lines: AsyncIterator[str], call: CallControl, log) -> None:
+async def _read_control(
+    lines: AsyncIterator[str],
+    call: CallControl,
+    log,
+    reply: Callable[[bool], None] | None = None,
+) -> None:
     async for line in lines:
         if line == "answered":
             await call.answer("receipt")
+        elif line == "cancel":
+            await call.cancel(reply)
         else:
             event(log, "bot.control_ignored", line=line)

@@ -12,8 +12,9 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 
 from app.obs import get_logger
+from app.rings import CONTROL_REPLY_PREFIX
 from bot.call_control import AudioGate, CallControl
-from bot.runtime import _read_control, _wire_presence, _wire_rtvi
+from bot.runtime import _read_control, _wire_presence, _wire_rtvi, reply_on_stdout
 from bot.teardown import TeardownController
 
 _log = get_logger("test")
@@ -392,3 +393,59 @@ async def test_client_ready_answers_a_ring_bot_that_does_not_await():
     await call.client_ready()
     assert call.answered
     assert greet.count == 1
+
+
+# --- cancel: the bot is the authority on whether the call was answered ---
+
+
+async def _cancel_line(call):
+    replies = []
+
+    async def lines():
+        yield "cancel"
+
+    await _read_control(lines(), call, _log, replies.append)
+    return replies
+
+
+async def test_cancel_ends_a_bot_that_has_not_seen_the_answer():
+    call, _, worker, _, _ = _make(await_answer=True, deadline=60)
+    assert await _cancel_line(call) == [True]
+    assert worker.cancelled == 1
+    call.stop()
+
+
+async def test_cancel_is_refused_once_the_bot_saw_call_answered():
+    call, _, worker, _, _ = _make(await_answer=True, deadline=60)
+    await call.handle("call-answered")
+    assert await _cancel_line(call) == [False]
+    assert worker.cancelled == 0
+
+
+async def test_cancel_is_refused_for_a_ring_bot_the_human_already_joined():
+    # preconnect: credentials -- the join IS the answer.
+    call, teardown, worker, _, _ = _make(deadline=60)
+    t = FakeEvents()
+    _wire_presence(t, "daily", teardown, call, _log)
+    await t.handlers["on_participant_joined"](t, {"id": "p1"})
+    assert await _cancel_line(call) == [False]
+    assert worker.cancelled == 0
+
+
+async def test_cancel_line_without_a_reply_channel_still_decides():
+    call, _, worker, _, _ = _make(await_answer=True, deadline=60)
+
+    async def lines():
+        yield "cancel"
+
+    await _read_control(lines(), call, _log)
+    assert worker.cancelled == 1
+    call.stop()
+
+
+def test_the_verdict_goes_to_stdout_behind_the_control_prefix(capsys):
+    reply_on_stdout(True)
+    reply_on_stdout(False)
+    assert capsys.readouterr().out == (
+        f"{CONTROL_REPLY_PREFIX}cancel ended\n{CONTROL_REPLY_PREFIX}cancel refused\n"
+    )

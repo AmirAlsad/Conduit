@@ -197,7 +197,7 @@ to join and hear the agent. `uv run pytest` runs the suite.
 | DELETE | `/inbound/register/{agent_id}` | bearer | The app deleted the agent — drop its registration |
 | POST | `/inbound/status/{agent_id}` | bearer | The app reports how a ring ended (answered / declined / busy / suppressed_by_focus / unanswered / canceled; unknown statuses are accepted). The first one releases or ends the ring's bot |
 | POST | `/admin/ring/{agent_id}` | bearer | Ring the registered device — agent-initiated inbound call (push echoes the registered `display_name`/`handle`, when present; optional `ring_timeout` and `preconnect`, each sent only if the device lists that push feature) |
-| POST | `/admin/ring/{agent_id}/cancel` | bearer | Withdraw a ring still ringing: in band (the bot leaves a pre-connected room) or a cancel push (only if the device lists `cancel`). 404 unknown ring, 409 once it ended or when the device can't take a cancel push |
+| POST | `/admin/ring/{agent_id}/cancel` | bearer | Withdraw a ring still ringing: in band (the bot leaves a pre-connected room) or a cancel push (only if the device lists `cancel`). A ring bot is asked and refuses once it has seen the call answered. 404 unknown ring, 409 once it ended, once its bot saw the answer, or when the device can't take a cancel push |
 | POST | `/admin/disconnect` | bearer | Force-end an agent in a room (drop test) |
 | GET  | `/health` | none | Liveness / keep-warm |
 

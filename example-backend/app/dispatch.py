@@ -23,6 +23,12 @@ from pathlib import Path
 
 from app.obs import event, get_logger
 from app.registry import Registry
+from app.rings import CONTROL_REPLY_PREFIX
+
+# How long a cancel waits for the ring bot's verdict before the caller falls back
+# to force-ending it (the bot may still be importing, with the line waiting in its
+# stdin pipe).
+CANCEL_REPLY_SECS = 3.0
 
 # Sentinel pid stored inside the dispatch lock before the subprocess exists, so a
 # racing trigger sees the room as already-active and skips. Never terminated.
@@ -47,6 +53,8 @@ class Dispatcher:
         # (not a bare pid → no PID-reuse hazard) and to keep watcher tasks alive.
         self._procs: dict[str, asyncio.subprocess.Process] = {}
         self._watchers: set[asyncio.Task] = set()
+        # A pending cancel's verdict, per room, filled in by the bot's stdout reader.
+        self._cancel_waiters: dict[str, asyncio.Future] = {}
         self._log = get_logger("dispatch")
 
     def _lock(self, room_key: str) -> asyncio.Lock:
@@ -70,9 +78,11 @@ class Dispatcher:
         """Spawn a bot into ``room_key`` unless one is already active there.
 
         ``control`` gives the bot a stdin pipe that ``send_control`` writes to (ring
-        bots read it for the receipt-driven "answered"). A pipe, not a signal: a
-        line written while the bot is still importing waits in the pipe, where a
-        signal would hit the default action and kill it.
+        bots read it for the receipt-driven "answered" and for cancels), and a
+        stdout pipe its replies come back on. A pipe, not a signal: a line written
+        while the bot is still importing waits in the pipe, where a signal would
+        hit the default action and kill it. (Logs go to stderr, which stays
+        inherited; any other stdout line is forwarded.)
 
         Returns the new pid, or None if an active bot made this a no-op.
         """
@@ -100,6 +110,7 @@ class Dispatcher:
                     env=os.environ.copy(),
                     cwd=_PROJECT_ROOT,
                     stdin=asyncio.subprocess.PIPE if control else None,
+                    stdout=asyncio.subprocess.PIPE if control else None,
                 )
             except Exception as e:
                 await self._registry.clear_active_bot(room_key)
@@ -111,10 +122,33 @@ class Dispatcher:
             event(self._log, "dispatch.accepted", room=room_key, agent=agent_id, pid=proc.pid)
             # Retain a strong reference so the watcher isn't GC'd mid-flight (which
             # would leave a leaked active-bot entry permanently blocking the room).
-            watcher = asyncio.create_task(self._watch(proc, room_key, cleanup))
-            self._watchers.add(watcher)
-            watcher.add_done_callback(self._watchers.discard)
+            self._spawn_task(self._watch(proc, room_key, cleanup))
+            if control and getattr(proc, "stdout", None) is not None:
+                self._spawn_task(self._read_replies(proc.stdout, room_key))
             return proc.pid
+
+    def _spawn_task(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._watchers.add(task)
+        task.add_done_callback(self._watchers.discard)
+
+    async def _read_replies(self, stdout, room_key: str) -> None:
+        """Drain a control bot's stdout: its verdicts resolve a pending cancel,
+        anything else is passed through as if the bot had inherited stdout."""
+        try:
+            while raw := await stdout.readline():
+                line = raw.decode(errors="replace").rstrip("\n")
+                waiter = self._cancel_waiters.get(room_key)
+                if line.startswith(CONTROL_REPLY_PREFIX + "cancel "):
+                    if waiter is not None and not waiter.done():
+                        waiter.set_result(line.rsplit(" ", 1)[1])
+                else:
+                    print(line, flush=True)
+        finally:
+            # The bot is gone: no verdict will come.
+            waiter = self._cancel_waiters.get(room_key)
+            if waiter is not None and not waiter.done():
+                waiter.set_result(None)
 
     async def _watch(
         self,
@@ -149,6 +183,27 @@ class Dispatcher:
             return False
         event(self._log, "dispatch.control_sent", room=room_key, message=message)
         return True
+
+    async def cancel_ring_bot(
+        self, room_key: str, timeout: float = CANCEL_REPLY_SECS
+    ) -> str | None:
+        """Ask a ring bot to end for a canceled ring, unless it knows the call was
+        answered: the bot decides, so an answer it has already seen can't be
+        overridden. Returns its verdict (CANCEL_ENDED / CANCEL_REFUSED), or None
+        when it can't be asked or doesn't reply in ``timeout``; the caller then
+        falls back to ``disconnect``."""
+        waiter = asyncio.get_running_loop().create_future()
+        self._cancel_waiters[room_key] = waiter
+        try:
+            if not await self.send_control(room_key, "cancel"):
+                return None
+            return await asyncio.wait_for(waiter, timeout)
+        except asyncio.TimeoutError:
+            event(self._log, "dispatch.cancel_no_reply", room=room_key)
+            return None
+        finally:
+            if self._cancel_waiters.get(room_key) is waiter:
+                del self._cancel_waiters[room_key]
 
     async def disconnect(self, room_key: str) -> bool:
         """Force-end the bot in a room (admin drop test). True if one was signalled."""

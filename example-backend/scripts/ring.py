@@ -47,7 +47,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings  # noqa: E402
-from app.rings import CANCEL_UNSUPPORTED  # noqa: E402
+from app.rings import CANCEL_ANSWERED, CANCEL_UNSUPPORTED  # noqa: E402
 
 # Verify TLS against certifi's CA bundle — same rationale as scripts/provision.py.
 try:
@@ -127,6 +127,12 @@ _CANCEL_UNSUPPORTED_HINT = (
 )
 
 
+_CANCEL_ANSWERED_HINT = (
+    "The user already answered (the agent saw it before the app's receipt "
+    "arrived), so nothing was withdrawn and the call is live."
+)
+
+
 def _fail(status: int, body, hints: dict) -> None:
     print(f"HTTP {status}")
     print(json.dumps(body, indent=2) if isinstance(body, dict) else body)
@@ -141,6 +147,8 @@ def _cancel(base_url: str, agent: str, call_id: str, as_json: bool) -> None:
         detail = body.get("detail") if isinstance(body, dict) else None
         if isinstance(detail, dict) and detail.get("reason") == CANCEL_UNSUPPORTED:
             _fail(status, body, {status: _CANCEL_UNSUPPORTED_HINT})
+        if isinstance(detail, dict) and detail.get("reason") == CANCEL_ANSWERED:
+            _fail(status, body, {status: _CANCEL_ANSWERED_HINT})
         _fail(status, body, _CANCEL_HINTS)
     if as_json:
         print(json.dumps(body, indent=2))
