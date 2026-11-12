@@ -3,20 +3,30 @@
 The shared infrastructure under `Conduit/Core/` and the engine package it sits on.
 Built so far: the foundation (M0), the call state machine (M1), the Daily transport
 (M2), the CallKit + audio-session seam (M3), the Keychain real + persistence (WS-4),
-and the native LiveKit transport (M6). Every external boundary has a protocol seam
-and a fake, so everything above them is testable at sim speed.
+the native LiveKit transport (M6), and the adoption of engine 0.2 (call hold,
+pre-connect, ring timeouts and cancels, call-control signals, engine-driven cues, a
+join deadline). Every external boundary has a protocol seam and a fake, so
+everything above them is testable at sim speed.
+
+**Verification status.** Device runs are recorded in
+[DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md). Statements below that something was
+"device-verified" date to the runs they name (June and November 2026, engine 0.1.x
+and the SDK versions of the time). Everything the 0.2 adoption added is **built and
+unit-tested; device verification pending**: a session is planned and has not run.
 
 ## Where the code lives
 
 The call engine is the Swift package **`ConduitCallEngine`**, extracted from this
 app. `project.yml` consumes it by version from
-`github.com/AmirAlsad/ConduitCallEngine` (0.1.x only), pinned in the tracked
-`Package.resolved`. The app
-links four of its products:
+`github.com/AmirAlsad/ConduitCallEngine` (`minorVersion: "0.2.0"`, 0.2.x only),
+pinned in the tracked `Package.resolved`, which also pins the transport SDKs
+(Pipecat iOS client 1.3.0 and its Daily transport, Daily 0.41.0, LiveKit 2.19.0,
+the SmallWebRTC fork by revision; bumped with the 0.2 adoption, regression calls on
+them pending). The app links four of the package's products:
 
 | Product | Holds |
 |---|---|
-| `ConduitCallEngine` | `CallEngine` (the state machine) and its host surface (`CallEngineDelegate`, `CallEngineConfiguration`, `CallTarget`, `ActiveCall`, `IncomingCall`, `CallRecord`); `CallState` and the outcome / failure / direction models; `CallTransport` with `TransportEvent`, `TransportError`, `CallConnection`, `AudioDeviceInfo`, `AudioRouteKind`; the CallKit provider, audio-session and audio-interruption seams; PushKit registration and incoming-push parsing; ring-status receipts; `ReconnectionPolicy`. Imports no transport SDK. |
+| `ConduitCallEngine` | `CallEngine` (the state machine) and its host surface (`CallEngineDelegate`, `CallEngineConfiguration`, `CallTarget`, `ActiveCall`, `IncomingCall`, `CallRecord`); `CallState` and the outcome / failure / direction models; `CallTransport` with `TransportEvent`, `TransportError`, `CallConnection`, `CallSignal` / `CallSignalDelivery`, `AudioDeviceInfo`, `AudioRouteKind`; `ConnectRequest`, `RingPreparation`, `CallCue`; the CallKit provider, audio-session and audio-interruption seams; PushKit registration and incoming-push parsing; ring-status receipts; `ReconnectionPolicy`; `CallEngineLog`. Imports no transport SDK. |
 | `ConduitCallEngineDaily` | `PipecatDailyTransport` |
 | `ConduitCallEngineLiveKit` | `LiveKitTransport`, `LiveKitConnectGate`, `LiveKitAudioRouter` |
 | `ConduitCallEngineTesting` | `FakeTransport`, `SimulatedCallSystem`, `CallEngine.simulated(...)`; the app links it for the simulator and its tests |
@@ -80,10 +90,13 @@ Daily/LiveKit/RTVI types, so a further transport drops in behind the same protoc
 
 Transports never pair: `connect(_:)` takes an already-resolved `CallConnection`
 (room/offer URL + optional token). The engine is handed a `CallTarget` (id,
-display name, handle, `makeTransport`, `connect`); it calls `makeTransport()` and
-subscribes **first**, then awaits `target.connect()` for the credentials, then
-joins — so a CallKit activation that lands mid-fetch still reaches
-`attachAudioSession()`. `target.connect()` re-runs for every reconnect attempt.
+display name, handle, `ringPreparation`, `makeTransport`, `connect`); it calls
+`makeTransport()` and subscribes **first**, then awaits `target.connect(request)`
+for the credentials (the `ConnectRequest` says why it asks), then joins — so a
+CallKit activation that lands mid-fetch still reaches `attachAudioSession()`.
+`target.connect` re-runs for every reconnect attempt, and `makeTransport` can run
+twice for one incoming call (for the ring, and again at the answer if the
+preparation failed).
 For agents the target comes from `Agent+CallTarget`
 (`Core/Services/AgentCalls/`): pairing via `PairingClient` (re-paired per attempt),
 the direct room + Keychain token, or inline push credentials (the same room every
@@ -111,7 +124,15 @@ them from the device's network path instead: once the call has reported
 turns a lost path into one `.reconnecting` and its return into `.connected`
 (none after a transport disconnect or a hangup; a fresh gate per connect attempt).
 It reflects the path, not Daily's media state: a dead-but-associated Wi-Fi is not
-caught, and "Connected" can be announced a moment before audio resumes.
+caught, and "Connected" can be announced a moment before audio resumes. Daily has
+no playout control, so the adapter silences a **held** call by unsubscribing from
+the agent's audio on detach and subscribing again on attach (a held call that
+reconnects joins unsubscribed); it sends client messages once the call is joined,
+releases its Pipecat client on `disconnect()`, and takes over a session whose bot
+never got ready instead of refusing it, while refusing (and leaving alone) a call
+Daily is still healing. It declares `canConnectWhileRinging` false; the package
+carries an experimental ring-join switch for the device test (see DEBUG below).
+The hold silencing and the ring join are unit-tested only.
 
 `LiveKitTransport` (package product `ConduitCallEngineLiveKit`, M6) is the native
 second transport over `livekit/client-sdk-swift`, behind the same protocol. It
@@ -135,11 +156,17 @@ through `AVAudioSession` directly (`LiveKitAudioRouter`) instead of the SDK. Lik
 Daily, it's **device-only** (WebRTC audio aborts in the sim), so `live()` uses
 `FakeTransport` in the simulator; the only sim-tested logic is `LiveKitConnectGate`.
 A reconnect the SDK reports complete goes back through that gate: it is `.connected`
-only with the room connected and a remote present. LiveKit 2.15.1 can report an
-abandoned reconnect as complete during a long outage (room marked connected, remotes
-cleared by the failed full attempt); the adapter then disconnects the room and
-reports `.disconnected(.networkDropped)`, so the engine's retries run and the call
-ends as `failed(.lostConnection)` if the outage lasts.
+only with the room connected and a remote present. The package requires LiveKit
+2.18.0 or later, from which every reconnect the SDK gives up on ends with the room
+disconnected (before it, 2.15.1 could report an abandoned reconnect as complete
+during a long outage, which the November run caught and the adapter then worked
+around); a rejoin into a room with no remote ends the call as the agent's hangup,
+and a `connect` while LiveKit is still reconnecting throws instead of rejoining.
+The adapter owns its joins (a `disconnect()` during a join waits for it, so the
+device is never left in the room with the agent) and declares
+`canConnectWhileRinging` true, because it touches no audio before the attach: a
+`media` pre-connect ring joins the room while the phone rings. A held call stops
+LiveKit's playout and capture on detach.
 
 `PipecatSmallWebRTCTransport` (app, `Core/Services/Transport/`, M9) is the
 zero-cloud third transport: peer-to-peer WebRTC straight to the user's own Pipecat
@@ -227,7 +254,8 @@ answer) chosen in a DEBUG-only Settings section and stored in `UserDefaults`
 (`debug.dailyRingJoinStrategy`), so a VoIP push's cold launch uses it. Release
 builds compile none of it. `live()` also starts the call trace
 (`Debug/CallTrace.swift`, `conduit-call-trace.log` in Documents, timestamped,
-kept across launches and rotated past 2 MB): the launch and its strategy, each
+kept across launches; past 2 MB it moves to `conduit-call-trace.previous.log`): the
+launch and its strategy, each
 transport made, `AgentCallHost`'s view of every ring (call id, requested
 pre-connect, inline or not), state change, cue, record and every
 `ringPreparationPhase` change (from the delegate callback, so fast intermediate
@@ -239,6 +267,20 @@ every package log event (category, level, message), CallKit's raw audio
 activations included, lands in the trace with its timestamp and still reaches
 Console through `CallEngineLog.writeToOSLog`; Release builds leave the package's
 logging at its default.
+
+The **Cue Lab** (`Debug/CueLab/`, DEBUG only) is a panel on the call screen for
+finding out why the spoken cues are inaudible on Daily calls and in the last retry
+phase of a LiveKit outage. During a live call it plays one short cue through each
+candidate path, one button each: `AVSpeechSynthesizer` speaking through the app's
+audio session and through its own, the speech rendered to a file and played with
+`AVAudioPlayer`, rendered to a buffer and played with `AVAudioEngine`; the ringback
+with `AVAudioPlayer`, as a system sound and as an alert sound; and, on LiveKit
+calls, the SDK's `SoundPlayer` for the speech and the ring, with two LiveKit
+ducking switches. It never activates,
+deactivates or reconfigures the audio session (CallKit owns it); every press logs
+session and route snapshots before and after to the call trace. Which paths are
+heard on which transport, from which output, is read off the tester's report and
+the trace. The announcer's own mechanism is unchanged until that is known.
 
 ## Models & persistence (SwiftData)
 
@@ -254,8 +296,9 @@ logging at its default.
   name-derived), so the field is an additive, CloudKit-safe migration.
 - **`CallLogEntry`** — direction, start, duration, outcome (`completed` / `failed`
   / `declined` / `noAnswer` / `canceled`), transport kind, and an optional persisted
-  failure reason. Direction, outcome and failure reason are the engine package's
-  `CallDirection` / `CallOutcome` / `CallFailureReason`, stored as raw strings.
+  failure reason and missed reason. Direction, outcome, failure reason and missed
+  reason are the engine package's `CallDirection` / `CallOutcome` /
+  `CallFailureReason` / `MissedCallReason`, stored as raw strings.
   The labels live in `CallFailureReason+Display`: a call whose agent never became
   ready within the engine's join deadline (`.agentUnreachable`) reads
   "Failed — agent didn't join" in Recents, with a hint on the call screen to check
@@ -329,6 +372,7 @@ It knows calls, not agents. The host side is `CallEngineDelegate`
 fires where a call ends (and for every missed ring), carrying a `missedReason` for
 a ring nobody answered or declined (`busy`, `filteredByFocus`, `ringTimedOut`,
 `canceledByCaller`); `callEngine(_:cue:)` delivers the moments to mark with a sound;
+`didChangeRingPreparationPhaseFrom:to:` reports each phase of a ring's pre-connect;
 `targetForIncomingCall` resolves a push to a
 `CallTarget` (nil = unknown, the ring fails); `ringStatusBearerForTarget` supplies
 the receipt bearer.
@@ -345,8 +389,8 @@ the user's backend can dispatch its agent for that ring and keep it silent until
 policy:** `AgentCallHost` allows each ring whatever its push's `preconnect` asks
 for (`CallTarget.ringPreparation = IncomingCall.requestedPreparation`), since the
 sender is the user's own backend; the engine still lowers `media` to `credentials`
-for a transport that cannot join while ringing (Daily by default, SmallWebRTC).
-Outgoing targets allow none. Conduit's delegate is `AgentCallHost`
+for a transport that cannot join while ringing (SmallWebRTC always, Daily unless the
+DEBUG ring-join switch is on; today only LiveKit joins). Outgoing targets allow none. Conduit's delegate is `AgentCallHost`
 (`Core/Services/AgentCalls/AgentCallHost.swift`): it writes `CallLogEntry` rows
 (looking the agent up by target id — none, no row; the missed reason is stored as
 `missedReasonRaw`, and Recents reads every missed ring as "Missed", in red, with
@@ -360,7 +404,9 @@ said into a live session), and
 `.moment(.connectionLost)` says "Disconnected" (once per outage);
 `.moment(.held)` and `.moment(.resumed)` play nothing. The engine
 guarantees every loop is stopped by the time the call ends, a provider reset
-included, and no cues for a ring that is never answered.
+included, and no cues for a ring that is never answered. The engine runs a ring
+for at most its `ringTimeout` (60 s) and waits at most `joinTimeout` (30 s) for the
+agent after the transport's `connect` returns; the app keeps both defaults.
 
 **Microphone permission.** Neither the engine nor the SDKs prompt reliably
 (LiveKit 2.17+ never prompts, and refuses to unless the app is active), so the app
@@ -389,7 +435,12 @@ Key behaviors:
   after CallKit's `providerDidActivate` — from `activate(_:)`, or when the transport
   is created after activation already landed (e.g. CallKit activated while dialing
   or before `answer()` ran; it is replayed onto the new transport before the
-  credential fetch) — and the mic is never enabled before activation.
+  credential fetch) — and the mic is never enabled before activation. The mic
+  follows one rule over every input (activation, interruption, in-app and system
+  mute, push-to-talk, the transport reporting `.connected`), whatever order they
+  arrive in; route reads and the hands-free default also wait for the activation,
+  and an activation during an unanswered ring is ignored (it belongs to an
+  earlier call).
 - **Hands-free default.** After connect, once the transport's device list is
   populated, the engine selects the speaker through `transport.setAudioDevice` —
   once per call, and only when the list has no Bluetooth or wired route — so it
@@ -409,7 +460,35 @@ Key behaviors:
   phone call the user takes holds the agent call instead of ending it, and the
   call screen's hold control calls `setOnHold(_:)`, which goes through CallKit.
   `isOnHold` does not change `state`; while held the engine closes the mic,
-  detaches the transport's audio and sends the agent `call-held`.
+  detaches the transport's audio (on resume it attaches again once CallKit has
+  re-activated the session), plays no cues, spends no reconnect retries and
+  suspends the first connect's join deadline, and sends the agent `call-held`
+  (`call-resumed` after). Held time counts toward the call's duration. The
+  transport must stop and restart playout there: LiveKit and Daily do (Daily by
+  unsubscribing from the agent's audio), SmallWebRTC cannot, so a held SmallWebRTC
+  call is silent only if the agent honours `call-held`.
+- **Call-control signals.** `send(_:)` on the transport carries `call-held`,
+  `call-resumed` and `call-answered` (as RTVI client messages) and returns a
+  `CallSignalDelivery` (`.sent`, `.failed`, `.unsupported`). The engine retries a
+  `.failed` signal (after 1, 2, 4, 8, 16, 30 s) and repeats the call's state after
+  every reconnect, never retries `.unsupported`, and counts an agent as possibly
+  still held until a `call-resumed` is `.sent`. `call-answered` is sent for every
+  incoming call whose push carried `preconnect`, once the call is answered, CallKit
+  has activated its audio and the transport is connected.
+- **Pre-connect (ringing).** Once CallKit has accepted a ring, the engine prepares
+  it up to the lowest of the push's `preconnect`, the target's `ringPreparation` and
+  what the transport can do. `credentials` runs the target's `connect` during the
+  ring (`ConnectRequest.purpose == .ringing(joinsBeforeAnswer: false)`) and keeps the
+  result; `media` also creates the transport and joins the room, with no attach, no
+  mic and no route changes. `ringPreparationPhase` says how far it got (`state`
+  stays `incomingRinging`). Answering a ring whose agent is there goes straight to
+  `connected`. A failed preparation never ends the ring or makes the answered call
+  worse than none: the answer then connects as without pre-connect. The agent
+  leaving a ready ring before the answer ends it as the caller cancelling
+  (`canceledByCaller`, a `canceled` receipt). A ring that ends unanswered disconnects
+  the transport it prepared, sending `end-call` first if it was up. The app's
+  host-side part is `PairingRing`: a pairing request made during a ring carries
+  `ring: {call_id, await_answer}`.
 - **Audio interruptions.** `AudioInterruptionObserving` (real:
   `SystemAudioInterruptionObserver` over `AVAudioSession.interruptionNotification`)
   drives `isInterrupted`: on `.began` the mic pauses (`setMicEnabled(false)`); on
@@ -441,7 +520,9 @@ Key behaviors:
   mid-call **reports then immediately ends** under the push's own id (iOS kills the app
   for an unreported VoIP push — `bugs.md`); a Focus/DND-filtered ring logs as missed and
   returns to `.idle`; so does a ring nobody answers within the ring timeout (60 s, or
-  the push's shorter `ring_timeout`) and one the server withdraws with a cancel push;
+  the push's shorter `ring_timeout`, never below 10 s) and one the server withdraws
+  with a cancel push (`action: cancel`, remembered for 10 minutes so a late ring is
+  ended at once);
   all four post a quiet local notification (`MissedCallNotifying`, provisional auth).
   If the push carried a `status_url`, the engine reports the ring's terminal status
   back (`RingStatusReporting`: answered / declined / busy / suppressed_by_focus /
@@ -510,7 +591,10 @@ gates the budget; a `.connected` recovers and resets; exhaustion →
 `failed(.lostConnection)`. A transport that self-heals emits `.reconnecting`
 (display-only — `reconnecting(0)`, it does not count against the budget), then
 `.connected` or, if it gives up, `.disconnected`, which starts the engine's own
-attempts from that display state. LiveKit reports its SDK's own reconnects this
+attempts from that display state; if neither comes within 30 s the engine runs its
+own attempt on the same transport instance (which therefore has to handle a
+`connect` while its session is still up), and an attempt whose join never reports
+`.connected` is bounded by the join deadline. LiveKit reports its SDK's own reconnects this
 way, and Daily its network-path interruptions (see the Daily adapter above); the
 app's SmallWebRTC adapter does not. *No jitter:* this is a
 single client calling one agent, so there is no thundering-herd to spread.
@@ -522,11 +606,16 @@ exactly what's unreachable: "Retrying connection" repeats on a ~7 s cadence,
 tone instead of speaking. The real `SpeechSpokenStateAnnouncer` uses
 `AVSpeechSynthesizer` and the system-sound server for the tone; it must mix with
 (never deactivate) the CallKit-owned session — that ducking/session wiring is
-finalized in WS-3. `AgentCallHost` drives it from engine transitions.
+finalized in WS-3. `AgentCallHost` drives it from the engine's cue events (see
+above), not from state transitions, so a loop stops by the time the call ends.
 
-Known limitation (device-observed): the spoken cues are audible on LiveKit calls
-but not during Daily calls, and they go silent during the final retry phase of a
-LiveKit outage; the cause is not yet established.
+Known limitation (device-observed on the 0.1.1 run): the spoken cues were audible on
+LiveKit calls but not during Daily calls, and they went silent during the final retry
+phase of a LiveKit outage; the cause is not established. Moving to the engine's cues
+changes *when* a cue plays, not how its audio is produced, so it is not expected to
+fix this. The DEBUG Cue Lab (above) is how the cause is to be found, and which
+mechanism the announcer should use is an open decision (see
+[ROADMAP](./ROADMAP.md)); nothing about the announcer's audio path has changed.
 
 ## Audio-session / CallKit integration (built, M3)
 
@@ -547,8 +636,8 @@ name rather than the raw synthetic email handle. The **photo** (and Contacts/Sir
 matching) comes from the optional system contact above; the name shows with or
 without it. Device-only (CallKit doesn't run in the sim). Audio-interruption
 handling now has a seam (see the call state machine above), and calls are holdable
-(see Hold above); holding for a real incoming PSTN call, and the host-initiated
-hold, are built but not yet device-verified.
+(see Hold above); holding for a real incoming phone call, and the host-initiated
+hold, are built and unit-tested; device verification pending.
 
 ## Siri dialing (built, M10 layers 1–2)
 

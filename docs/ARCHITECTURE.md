@@ -12,7 +12,12 @@
 > (pairing connect, two-way audio, native route button, reconnection — against the
 > deployed reference engine, June 2026), and so is the **inbound path** (cold ring,
 > answer, decline, inline creds, Focus-filtered → missed + local notification,
-> busy report-and-end, redeploy survival — June 2026, LiveKit agent).
+> busy report-and-end, redeploy survival — June 2026, LiveKit agent). The device
+> verification above dates to June and November 2026, on engine 0.1.x. The app now
+> consumes engine 0.2.x — call hold, pre-connect while ringing, ring timeouts and
+> cancel pushes, call-control signals to the agent, engine-driven sound cues, a join
+> deadline — which is built and unit-tested, with device verification pending
+> ([DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md)).
 > See [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 ## Overview
@@ -79,6 +84,11 @@ Because model APIs ride inside the agent, supporting the orchestration transport
 transitively covers every model and voice. The layer sits behind the
 `CallTransport` protocol so the call state machine, connection parsing, and
 transport selection can unit-test against fakes (voice plan "Layer 1").
+The protocol also lets a transport state what it can do: whether it can join a
+room while the phone still rings (`canConnectWhileRinging` — LiveKit yes; Daily and
+SmallWebRTC no, Daily only behind a DEBUG experiment), and whether a call-control
+signal (`call-held`, `call-resumed`, `call-answered`) reached the agent
+(`send(_:)`'s `CallSignalDelivery`). The engine adapts to what each one reports.
 
 ### (3) The agent — the user's
 
@@ -98,14 +108,17 @@ Related hazards to design for (detailed in [CORE_SYSTEMS](./CORE_SYSTEMS.md)):
 - **Reconnection.** A dropped WebRTC connection leaves CallKit thinking the call
   is still up. Reconnect with backoff; speak state in a built-in synthesis voice
   (distinct from the agent's) since the agent is exactly what's unreachable.
-- **Interruptions.** Duck under transient system audio (nav prompts, alerts);
-  yield entirely to a real incoming phone call.
+- **Interruptions and hold.** Duck under transient system audio (nav prompts,
+  alerts); pause the mic for a full takeover (Siri); and *hold*, not end, the call
+  when the user takes or places a phone call (or presses Hold in the app): the mic
+  closes, the transport detaches from the audio session, and the agent is told
+  with `call-held` / `call-resumed`.
 
 ## Folder Structure
 
 The call engine is the **`ConduitCallEngine`** Swift package, consumed by
-version from `github.com/AmirAlsad/ConduitCallEngine` (set in `project.yml`, 0.1.x
-only). It holds layers (1) and (2)
+version from `github.com/AmirAlsad/ConduitCallEngine` (set in `project.yml`,
+`minorVersion: "0.2.0"`, 0.2.x only). It holds layers (1) and (2)
 and their fakes; the app holds the agents, the UI, and the glue that joins them.
 
 ```
@@ -123,7 +136,7 @@ Conduit/
 ├── Features/       # Self-contained feature modules (Recents, Contacts,
 │                   #   Settings, AgentDetail, AddEditAgent, InCall)
 ├── Shared/         # Reusable UI components, navigation
-├── Debug/          # DEBUG-only device spikes and call trace
+├── Debug/          # DEBUG-only: call trace, Cue Lab, Daily ring-join switch, device spikes
 └── Resources/      # Assets, audio, data files
 
 ConduitCallEngine (package)      # consumed by version

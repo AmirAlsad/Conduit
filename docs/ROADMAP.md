@@ -18,8 +18,12 @@ Both call directions exist in code — and **M8's on-ramp is built** (QR/deep-li
 pairing, staged connection diagnostics, persisted failure reasons, decluttered
 in-app copy). The call engine (state machine, CallKit, PushKit, the Daily and
 LiveKit adapters) lives in the `ConduitCallEngine` Swift package, consumed by version
-from `github.com/AmirAlsad/ConduitCallEngine`. See
-[ARCHITECTURE](./ARCHITECTURE.md) and [CORE_SYSTEMS](./CORE_SYSTEMS.md).
+from `github.com/AmirAlsad/ConduitCallEngine` (0.2.x). The adoption of engine 0.2 —
+call hold, pre-connect while ringing, ring timeouts and cancels, call-control
+signals to the agent, engine-driven cues, a join deadline, the SDK bumps — is built
+and unit-tested; **none of it has been run on a physical phone yet** (see the
+follow-ups below and the 0.2.0 sheet in [DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md)).
+See [ARCHITECTURE](./ARCHITECTURE.md) and [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 **The one fact that shapes this roadmap:** a large share of what's "built" is verified
 only in the **simulator against fakes**. The real CallKit + **Daily** two-way audio was
@@ -27,8 +31,8 @@ device-verified (M3/M5), the **LiveKit** call path (pairing connect, two-way
 audio, the native route button, reconnection — against the deployed reference
 engine) in June 2026, and the **inbound VoIP-push round-trip** (cold ring through
 redeploy survival, LiveKit agent) days later. Not yet proven on hardware:
-**interruption/ducking** audio, `setOnHold` for a real incoming phone call, and
-finalized spoken-state ducking. You cannot responsibly build on a foundation that
+**interruption/ducking** audio, call **hold** (built since, with engine 0.2; still
+unrun on a device), pre-connect, and finalized spoken-state ducking. You cannot responsibly build on a foundation that
 hasn't rung a real phone — so the roadmap leads with closing that debt.
 
 ## Guiding principles (the constraints that pick priorities)
@@ -73,8 +77,9 @@ bug-fix, not new surface.
 - **Interruptions & ducking, real audio** — Siri mid-call (pause + clean resume), an
   incoming PSTN call (yield the route), and **nav/GPS prompts ducking/mixing over the
   call** in the car (AirPods / CarPlay). Verify on both transports.
-- **`setOnHold` for a real incoming phone call** — the flagged follow-up; the
-  interruption observer is its foundation. Build + verify hold/resume.
+- **Hold for a real phone call** — built with engine 0.2 (CallKit hold, an in-call
+  Hold control, `call-held` / `call-resumed` to the agent); **device verification
+  pending**.
 - **Finalize spoken-state ducking** under the CallKit-owned session — the announcer must
   *mix with*, never deactivate, the session.
 
@@ -252,20 +257,60 @@ surface rather than a moving one.
 
 ## Follow-ups from the November 2026 device run
 
-- **Spoken cues on Daily** — "Connected", "Disconnected" and "Retrying connection" are
-  audible on LiveKit calls but not during Daily calls, and they go silent in the last
-  retry phase of a LiveKit outage. Needs an announcer that does not depend on the
-  transport's audio being up, and its own device pass.
-- **Call hold** — placing or taking a cellular call ends the Conduit call instead of
-  holding it. Tracked on the engine package (no `CXSetHeldCallAction` handling).
+Each item below says where it stands after the engine 0.2 adoption. "Addressed in
+code" means built and unit-tested; **nothing here has been run on a device since
+the November run**, so none is closed until the 0.2.0 sheet in
+[DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md) says so.
+
+- **Spoken cues on Daily** — "Connected", "Disconnected" and "Retrying connection" were
+  audible on LiveKit calls but not during Daily calls, and they went silent in the last
+  retry phase of a LiveKit outage. **Still open; cause unknown.** The adoption drives
+  the cues from the engine's cue events (loops stop with the call, one "Disconnected"
+  per outage, "Connected" only after CallKit has activated the audio), which fixes
+  *when* they play, not whether they are heard: the announcer's audio mechanism is
+  unchanged. The DEBUG Cue Lab was built to find out which playback paths are audible
+  on which transport. Needs the device session, then the mechanism decision below.
+- **Call hold** — placing or taking a cellular call ended the Conduit call. **Addressed
+  in code, pending device verification:** the engine holds the call through CallKit,
+  the call screen has a Hold control, and the agent gets `call-held` / `call-resumed`.
 - **Focus-filtered rings** — re-check on device when iOS filters them again; the path is
-  unit-tested but was not exercised on iOS 27.0.
+  unit-tested but was not exercised on iOS 27.0. **Unchanged.**
 - **SiriKit "Call <agent>"** — re-run with an agent that is in Contacts (unlocked and
-  from the lock screen).
-- **Test Connection on LiveKit** leaves the agent waiting out its grace window (no
-  end-call signal is sent that early). Tracked on the engine package.
+  from the lock screen). **Unchanged.**
+- **Test Connection on LiveKit** left the agent waiting out its grace window (no
+  end-call signal was sent that early). **Addressed in the package, pending device
+  verification:** `LiveKitTransport.disconnect()` now sends the end-call signal
+  whenever the room is not already leaving, including while a connect is in flight
+  (package issue #22). Whether that closes this on a device is unverified.
 - **The `live` reference agent's keys** — the Groq key in the local engine config is
-  dead; device runs used the loopback echo agent.
+  dead; device runs used the loopback echo agent. **Unchanged** (environment, not code).
+
+### Open items created by the 0.2 adoption
+
+- **The device session.** The 0.2.0 sheet in
+  [DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md) (hold, pre-connect, cancel and
+  timeout rings, the tone agent, microphone prompt, missed-call rows, Cue Lab, the
+  Daily ring-join switch, and regression calls on all three transports on Pipecat
+  1.3.0, Daily 0.41.0 and LiveKit 2.19.0) is written and unrun.
+- **The spoken-cue mechanism.** Decide, from the Cue Lab results, what plays the
+  cues so that they are heard on every transport and in every phase of a call. Until
+  then the announcer is unchanged.
+- **Daily joining during a ring (experiment).** Daily declares it cannot connect
+  while ringing, so a `media` pre-connect ring is `credentials` on Daily. The package
+  carries three experimental join strategies (D1 default subscriptions, D2 agent audio
+  unsubscribed until the answer, D3 staged until the answer), selected in a DEBUG-only
+  Settings → Debug picker so the device session can test them with the tone agent.
+  Until one of them is shown on a device to leak no audio before the answer, Daily
+  rings stay at `credentials`.
+- **SmallWebRTC on hold and signals.** Its SDK exposes no playout control, so a held
+  SmallWebRTC call is silent only if the agent honours `call-held`, and the SDK reports
+  nothing past the data channel's hand-off, so a signal's delivery cannot be
+  confirmed. It also cannot join while ringing.
+- **Package issue #13, deferred items.**
+  [ConduitCallEngine#13](https://github.com/AmirAlsad/ConduitCallEngine/issues/13):
+  in-app answer and decline, provider icon / ringtone / handle type, configurable
+  reconnect and hands-free policies, a CallKit call-id accessor, and host-owned
+  PushKit registration. The engine does not offer these today.
 
 ## Deferred / explicitly not doing
 

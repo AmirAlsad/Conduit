@@ -173,7 +173,7 @@ generate`**. A fresh clone must run it before the first build, and **CI runs it
 before every build** (see `.github/workflows/tests.yml`).
 
 `project.yml` consumes the `ConduitCallEngine` package by version
-(`minorVersion: "0.1.0"`, 0.1.x only) from GitHub, so a fresh clone needs no
+(`minorVersion: "0.2.0"`, 0.2.x only) from GitHub, so a fresh clone needs no
 sibling checkout. The tracked root `Package.resolved` pins
 every package; `xcodegen generate` copies it into the generated project (the
 `postGenCommand`), because the gitignored `.xcodeproj` would otherwise resolve to
@@ -216,6 +216,12 @@ domain appears. The `ConduitCallEngine` package has its own package-internal `Lo
 with the same call shape, labels and subsystem (the host's bundle id) for the
 categories it uses (`.call`, `.callkit`, `.transport`, `.audio`, `.network`), so
 engine lines appear alongside the app's in Console.
+The package routes its log through `CallEngineLog`: by default straight to unified
+logging, or to a `handler` the host installs. The app installs one in DEBUG builds
+only (`CallTrace.captureEngineLog()`), which writes each event into the call trace
+and still forwards it to Console; Release builds keep the package's default, where
+debug and info lines are not delivered. The package removes credentials from every
+message before the handler sees it.
 
 ### Privacy
 

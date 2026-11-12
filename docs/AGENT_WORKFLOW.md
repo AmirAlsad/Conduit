@@ -18,7 +18,7 @@ generate`, after dependency or `Config/` changes (including edits to the
 `ConduitCallEngine` package checkout), or when symptoms match cached-artifact
 failure (mysterious link errors, "module compiled with different version").
 
-The engine package resolves from GitHub by version (`minorVersion: "0.1.0"` in
+The engine package resolves from GitHub by version (`minorVersion: "0.2.0"` in
 `project.yml`) like any other dependency, so a fresh clone needs no sibling checkout.
 SDK versions come from the tracked root
 `Package.resolved`, which `xcodegen generate` copies into the project; don't let a
