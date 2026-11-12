@@ -63,6 +63,9 @@ class TrackedRing:
     prepared: ConnectionPayload | None = None
     # Whether that bot was dispatched with --await-connected.
     prepared_await_connected: bool = False
+    # Ends the prepared bot if the phone has not taken its room within the claim
+    # grace after an "answered" receipt.
+    unclaimed_task: asyncio.Task | None = field(default=None, repr=False, compare=False)
     # Tracked, but its push has not gone out yet (the engine is waiting for the bot).
     awaiting_push: bool = False
     status: str | None = None  # the ring's receipt, once it arrives

@@ -118,6 +118,12 @@ class Settings(BaseSettings):
     # the same amount. 0 turns agent-first ringing off: every ring is pushed at
     # once, as a ring with "wait_for_bot": false is.
     ring_bot_wait_secs: float = Field(default=8.0, ge=0)
+    # A pre-connected pairing ring answered before the phone took its prepared room:
+    # the phone sends the "answered" receipt at the answer, and its credential
+    # request for the ring may still be on the way (most likely on a cold launch
+    # answered quickly). The prepared bot is kept this long for that request before
+    # it is ended as unclaimed.
+    prepared_claim_grace_secs: float = Field(default=10.0, ge=0)
     # A bot for a client that sends call-connected greets when it arrives. The
     # fallback for a lost one: once the bot knows the user answered (at once for an
     # ordinary call; for a ring, the "answered" receipt, or the device joining a

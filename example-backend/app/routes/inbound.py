@@ -18,15 +18,20 @@ landed. The engine logs every receipt and records it on the ring tracker. Only
 a ring's first receipt steers its bot (an inline ring's, a pairing ring's
 prepared at ring time, or one dispatched when the app paired during the ring):
 any status but "answered" ends the bot, and "answered" tells a ring bot (one with
-the ring flags) through its control pipe, except a prepared bot whose room the
-app never took: the app then connects with a request of its own, so that bot ends.
+the ring flags) through its control pipe. A prepared bot whose room the app has
+not taken yet is kept PREPARED_CLAIM_GRACE_SECS for the app's credential request
+for the ring, which the app may still have in flight (the receipt is sent at the
+answer); a request in that time takes it, and after it the bot is ended.
 """
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.agents import get_agent
+from app.config import settings
 from app.auth import require_engine_key
 from app.models import RING_STATUSES, RingStatusRequest, VoipRegisterRequest
 from app.obs import event, get_logger
@@ -95,23 +100,21 @@ async def ring_status(agent_id: str, req: RingStatusRequest, request: Request):
     ring.ended.set()
     if ring.room_key:
         if req.status == "answered":
-            if ring.prepared is not None:
-                # Answered without taking the room prepared for it: the app connects
-                # with a fresh request, so this bot would wait for nobody. A late
-                # request for the ring then gets a fresh room too.
-                ring.prepared = None
-                ended = await state.dispatcher.disconnect(ring.room_key)
-                event(
-                    _log,
-                    "inbound.prepared_bot_unclaimed",
-                    call_id=req.call_id,
-                    room=ring.room_key,
-                    ended=ended,
-                )
-            elif ring.ring_bot:
+            if ring.ring_bot:
                 # Stops the bot's deadline and starts its fallback wait for
                 # call-connected (the app sends this receipt before its audio is up).
                 await state.dispatcher.send_control(ring.room_key, "answered")
+            if ring.prepared is not None:
+                # Not taken yet: the app's request for the ring may still be on its
+                # way. Ended only if none takes it within the grace.
+                event(
+                    _log,
+                    "inbound.prepared_bot_awaiting_claim",
+                    call_id=req.call_id,
+                    room=ring.room_key,
+                    grace_secs=settings.prepared_claim_grace_secs,
+                )
+                ring.unclaimed_task = asyncio.create_task(_end_if_unclaimed(state, ring, ring.room_key))
         else:
             ended = await state.dispatcher.disconnect(ring.room_key)
             event(
@@ -122,3 +125,16 @@ async def ring_status(agent_id: str, req: RingStatusRequest, request: Request):
                 ended=ended,
             )
     return {"ok": True}
+
+
+async def _end_if_unclaimed(state, ring, room: str) -> None:
+    """End the prepared bot of an answered ring whose room no request took within
+    the claim grace: the app connected with a request of its own, so it would wait
+    for nobody. A late request for the ring then gets a fresh room."""
+    await asyncio.sleep(settings.prepared_claim_grace_secs)
+    ring.unclaimed_task = None
+    if ring.prepared is None:
+        return  # taken (or given up as unfit) in time
+    ring.prepared = None
+    ended = await state.dispatcher.disconnect(room)
+    event(_log, "inbound.prepared_bot_unclaimed", call_id=ring.call_id, room=room, ended=ended)

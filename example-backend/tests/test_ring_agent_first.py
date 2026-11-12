@@ -456,20 +456,53 @@ def test_a_request_the_prepared_bot_does_not_fit_gets_a_fresh_room_and_ends_it()
             assert app.state.rings.get(call_id).prepared is None
 
 
-def test_an_answered_ring_that_never_took_its_prepared_room_ends_that_bot():
+CLAIM_GRACE = 0.2
+
+
+@pytest.fixture
+def short_claim_grace(monkeypatch):
+    monkeypatch.setattr(settings, "prepared_claim_grace_secs", CLAIM_GRACE)
+
+
+def test_an_answered_ring_that_never_took_its_prepared_room_ends_that_bot(short_claim_grace):
     # An app that lists preconnect but did not prepare connects after the answer
-    # with a request of its own: the prepared bot would wait for nobody.
+    # with a request of its own: once the claim grace is over, nothing will take
+    # the prepared bot, which would wait for nobody.
     with TestClient(app) as c:
         _setup(c)
         call_id = _ring(c)["call_id"]
         _receipt(c, call_id, "answered")
+        assert app.state.dispatcher.disconnected == []  # the phone may still be claiming it
+        assert app.state.dispatcher.sent == [(ROOM, "answered")]
+        time.sleep(CLAIM_GRACE * 3)
         assert app.state.dispatcher.disconnected == [ROOM]
-        assert app.state.dispatcher.sent == []
         # A late request for the ring gets a fresh room (and the receipt).
         r = _pair(c, call_id)
         assert r.status_code == 200, r.text
         assert len(app.state.dispatcher.calls) == 2
+        assert app.state.dispatcher.sent == [(ROOM, "answered"), (ROOM, "answered")]
+
+
+def test_a_claim_in_flight_at_the_answered_receipt_still_takes_the_prepared_room(short_claim_grace):
+    # The phone answers while its ring-time request is still on the way (a cold
+    # launch answered quickly) and the receipt lands first: the request must get
+    # the agent already in the room, not a fresh room and a cold agent.
+    with TestClient(app) as c:
+        _setup(c)
+        call_id = _ring(c)["call_id"]
+        _receipt(c, call_id, "answered")
+        r = _pair(c, call_id)
+        assert r.status_code == 200, r.text
+        assert r.json()["connection"] == PREPARED_CONNECTION
+        assert len(app.state.dispatcher.calls) == 1  # no cold agent
+        # The bot heard of the answer from the receipt, once.
         assert app.state.dispatcher.sent == [(ROOM, "answered")]
+        time.sleep(CLAIM_GRACE * 3)
+        assert app.state.dispatcher.disconnected == []  # taken: the grace ends nothing
+
+
+def test_the_claim_grace_is_a_setting_of_ten_seconds_by_default():
+    assert type(settings).model_fields["prepared_claim_grace_secs"].default == 10.0
 
 
 def test_a_taken_prepared_room_gets_the_answered_receipt():

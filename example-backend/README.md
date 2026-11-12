@@ -322,6 +322,11 @@ return them as `BotBuild(gates=…)` — see `bot/pipelines/live.py`.
   ring) is pushed once the agent's bot has joined the room, or after this many
   seconds without it, so a slow or broken bot never blocks a ring. A ring bot's
   deadline grows by the same amount, so the wait never shortens the ring.
+- **`PREPARED_CLAIM_GRACE_SECS`** (default `10`) — a pre-connected pairing ring
+  answered before the phone took its prepared room keeps that room and its agent
+  this long for the phone's credential request, which may still be on the way
+  (the `answered` receipt is sent at the answer). A request in that time takes
+  the room; after it, the agent is ended and a late request gets a fresh room.
 - **`RING_TIMEOUT_SECS`** (default `60`, must be > 0) and
   **`RING_DEADLINE_MARGIN_SECS`** (default `15`) — a ring bot ends when the ring's
   timeout plus the margin passes without an answer. `RING_TIMEOUT_SECS` is only

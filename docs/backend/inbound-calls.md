@@ -270,9 +270,12 @@ uv run python scripts/ring.py --agent live --preconnect none   # a plain ring
   `call_signals` that differ from the registration's), or one after that bot
   exited, gets a fresh room and ring bot as before (an unfit prepared bot is
   ended). A request without `ring` (after the answer, or a reconnect) always gets
-  a fresh room. If the ring is `answered` before its prepared room was taken (an
-  app that did not prepare), the engine ends that bot: the app connects with a
-  request of its own. If preparing fails (say the transport isn't configured),
+  a fresh room. If the ring is `answered` before its prepared room was taken, the
+  engine keeps that bot `PREPARED_CLAIM_GRACE_SECS` (10) for the phone's request
+  for the ring, which may still be on the way (the receipt is sent at the
+  answer; most likely on a cold launch answered quickly): a request in that time
+  takes the room and its agent. After it (an app that did not prepare connects
+  with a request of its own) the bot is ended. If preparing fails (say the transport isn't configured),
   the ring still goes out and that request provisions as before. With
   `--inline` the ring bot is dispatched at ring time.
   If that `/connect` lands after the ring already ended (a declined, busy,
