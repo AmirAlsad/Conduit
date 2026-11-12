@@ -149,7 +149,13 @@ host code conforming to the package's `CallTransport`, mirroring the Daily adapt
 engine's **offer URL** + a short-lived bearer as `room_url`/`token`, and the SDK
 POSTs the SDP offer / PATCHes trickle-ICE to that URL with the bearer attached.
 Audio follows the **Daily pattern** (SDK owns the session config; joins
-mic-disabled; attach/detach no-ops). **Load-bearing:** the stock package's
+mic-disabled). `detachAudioSession()` turns capture off and `attachAudioSession()`
+starts nothing (the engine's `setMicEnabled` reopens capture); the SDK exposes no
+control over the agent's playout (its peer connection and remote track are
+internal), so a **held** SmallWebRTC call is silent only because the agent honours
+`call-held`. For the same reason (the SDK configures the session at connect) it
+declares `canConnectWhileRinging` false, so a `media` pre-connect ring stays at
+`credentials`. **Load-bearing:** the stock package's
 stasel/WebRTC collides with Daily's embedded WebRTC (un-prefixed `RTC*` classes
 duplicated → Daily calls crash), so `project.yml` pins our fork built against
 `LiveKitWebRTC` — and the fork stays an **app-only** dependency, never one of the
@@ -169,10 +175,14 @@ status code, and a rejected API key is caught exactly by pairing
 
 All three adapters send the engine's **`end-call` signal** in `disconnect()` — a
 deliberate hangup ends the bot at once instead of burning its human-absent grace
-window (Daily and SmallWebRTC: `sendClientMessage("end-call")` over the Pipecat
-channel; LiveKit: the RTVI envelope published on the data channel, because
-Pipecat's LiveKit input path doesn't deliver client RTVI messages — see
-`bugs.md`). Reconnects never call `disconnect()`, so a genuine drop still gets
+window — and deliver the engine's **call-control signals** (`call-answered`,
+`call-held`, `call-resumed`) from `send(_:)`, all as the same RTVI client message
+(`{"label": "rtvi-ai", "type": "client-message", "data": {"t": …}}`). Daily and
+SmallWebRTC send it through the Pipecat transport's message path once the call is
+joined (Daily) or the data channel is open (SmallWebRTC), not
+`PipecatClient.sendClientMessage`, which refuses until the bot is ready; LiveKit
+publishes it on the data channel, because Pipecat's LiveKit input path doesn't
+deliver client RTVI messages — see `bugs.md`. Reconnects never call `disconnect()`, so a genuine drop still gets
 the grace window (smallwebrtc's engine side ends immediately on peer drop
 instead — the iOS SDK can't reconnect in place; a retry re-pairs to a fresh bot).
 
@@ -198,6 +208,21 @@ sim. The `AppDelegate` starts the engine's PushKit registration at launch and se
 `inboundRegistrar` to the host. `ConduitApp` injects the environment via
 `.environment(_:)` + `.modelContainer(_:)`.
 
+**DEBUG on a device.** `live()` makes the Daily transport through
+`Debug/RingJoin/DebugDailyRingJoin`, which applies the package's experimental
+ring-join strategy (`@_spi(RingJoinExperiment)` `DailyRingJoinStrategy`: Off, D1
+default subscriptions, D2 agent audio unsubscribed until answer, D3 staged until
+answer) chosen in a DEBUG-only Settings section and stored in `UserDefaults`
+(`debug.dailyRingJoinStrategy`), so a VoIP push's cold launch uses it. Release
+builds compile none of it. `live()` also starts the call trace
+(`Debug/CallTrace.swift`, `conduit-call-trace.log` in Documents, timestamped,
+kept across launches and rotated past 2 MB): the launch and its strategy, each
+transport made, `AgentCallHost`'s view of every ring (call id, requested
+pre-connect, inline or not), state change, cue and record, and, from
+`CallTraceObserver`, the engine's `ringPreparationPhase`, hold, audio activation
+(as the engine counts it), interruption and mute; the call screen adds route
+snapshots while it is up.
+
 ## Models & persistence (SwiftData)
 
 `Core/Models/` holds two `@Model` types:
@@ -214,6 +239,10 @@ sim. The `AppDelegate` starts the engine's PushKit registration at launch and se
   / `declined` / `noAnswer` / `canceled`), transport kind, and an optional persisted
   failure reason. Direction, outcome and failure reason are the engine package's
   `CallDirection` / `CallOutcome` / `CallFailureReason`, stored as raw strings.
+  The labels live in `CallFailureReason+Display`: a call whose agent never became
+  ready within the engine's join deadline (`.agentUnreachable`) reads
+  "Failed — agent didn't join" in Recents, with a hint on the call screen to check
+  that the server starts its agent.
 
 `Agent` 1—* `CallLogEntry` with `@Relationship(.cascade)`: deleting an agent wipes
 its log; deleting a single entry nullifies its `agent` and removes only that row
@@ -285,7 +314,22 @@ a ring nobody answered or declined (`busy`, `filteredByFocus`, `ringTimedOut`,
 `canceledByCaller`); `callEngine(_:cue:)` delivers the moments to mark with a sound;
 `targetForIncomingCall` resolves a push to a
 `CallTarget` (nil = unknown, the ring fails); `ringStatusBearerForTarget` supplies
-the receipt bearer. Conduit's delegate is `AgentCallHost`
+the receipt bearer.
+
+`Agent+CallTarget` builds each target's credential step from the engine's
+`ConnectRequest` (`purpose`: `.outgoing`, `.answered`, `.ringing(joinsBeforeAnswer:)`
+or `.reconnect(attempt:)`, plus the ring's `callID` for an incoming call). Inline
+push credentials are returned for every purpose without a network call; a direct
+agent returns its room; a pairing agent re-pairs every time, and a request made
+while the phone rings adds `ring: {call_id, await_answer}` to the pairing body
+(`PairingRing`; `await_answer` when the transport joins before the answer), so
+the user's backend can dispatch its agent for that ring and keep it silent until
+`call-answered`. A backend that predates the field ignores it. **Pre-connect
+policy:** `AgentCallHost` allows each ring whatever its push's `preconnect` asks
+for (`CallTarget.ringPreparation = IncomingCall.requestedPreparation`), since the
+sender is the user's own backend; the engine still lowers `media` to `credentials`
+for a transport that cannot join while ringing (Daily by default, SmallWebRTC).
+Outgoing targets allow none. Conduit's delegate is `AgentCallHost`
 (`Core/Services/AgentCalls/AgentCallHost.swift`): it writes `CallLogEntry` rows
 (looking the agent up by target id — none, no row; the missed reason is stored as
 `missedReasonRaw`, and Recents reads every missed ring as "Missed", in red, with
@@ -294,7 +338,8 @@ missed-call notification for every missed ring, donates outgoing calls to Siri o
 `dialing → connecting`, and plays the engine's cues: `.start(.connecting)` loops
 the ringback tone, `.start(.retrying)` repeats "Retrying", `.stop` ends the loop,
 `.moment(.connected)` / `.moment(.reconnected)` say "Connected", and
-`.moment(.connectionLost)` says "Disconnected" (once per outage). The engine
+`.moment(.connectionLost)` says "Disconnected" (once per outage);
+`.moment(.held)` and `.moment(.resumed)` play nothing. The engine
 guarantees every loop is stopped by the time the call ends, a provider reset
 included, and no cues for a ring that is never answered.
 
@@ -313,6 +358,7 @@ call answered from the lock screen on an install that never decided has no mic.
 idle → dialing → connecting → connected(since:) → reconnecting(attempt:) ⇄ connected
                                                  ↘ ended(CallOutcome) | failed(CallFailureReason)
 incomingRinging → connecting → …   (agent-initiated inbound, after the user answers)
+incomingRinging → connected → …    (answered while a pre-connected agent was there)
 ```
 
 `incomingRinging` is the one non-idle state with `isActive == false`: while it
@@ -337,7 +383,14 @@ Key behaviors:
   guard on `state.isTerminal`, so the real CallKit "end" round-trip
   (`endCall` → `providerPerformEndCall`) cannot double-record the call.
 - **Failure distinctions.** `authFailed` → `failed(.badToken)` (red in Recents);
-  a never-connected drop → `failed(.transportError)`; a mid-call drop → reconnect.
+  a never-connected drop → `failed(.transportError)`; a first connect whose agent
+  is not ready within `joinTimeout` (30 s, the app keeps the default) →
+  `failed(.agentUnreachable)`; a mid-call drop → reconnect.
+- **Hold.** Calls are reported holdable (`supportsHolding`, the default), so a
+  phone call the user takes holds the agent call instead of ending it, and the
+  call screen's hold control calls `setOnHold(_:)`, which goes through CallKit.
+  `isOnHold` does not change `state`; while held the engine closes the mic,
+  detaches the transport's audio and sends the agent `call-held`.
 - **Audio interruptions.** `AudioInterruptionObserving` (real:
   `SystemAudioInterruptionObserver` over `AVAudioSession.interruptionNotification`)
   drives `isInterrupted`: on `.began` the mic pauses (`setMicEnabled(false)`); on
@@ -405,10 +458,12 @@ presents as a `.fullScreenCover` from `RootTabView`, gated on
   free. The Add/Edit sheet's swatch row pre-selects the name-derived slot.
 - **Status line.** Mirrors `CallState` (and so agrees with the spoken announcer):
   `Connecting…`, `Reconnecting…`, the failure hint, or — once connected — the live
-  timer prefixed with the transport (`LiveKit · 1:23`). `Paused` while interrupted.
+  timer prefixed with the transport (`LiveKit · 1:23`). `On Hold` while the engine
+  holds the call (over `Paused` while interrupted), never once it has ended.
 - **Controls** group into one frosted pill: Mute (or Push-to-Talk when always-on
-  listening is off), the Daily-backed route menu, and the red End; the PTT caption
-  sits below the pill.
+  listening is off), the Daily-backed route menu, Hold (filled while held; enabled
+  while the call is connecting, connected or reconnecting; `InCall_HoldButton`) and
+  the red End; the PTT caption sits below the pill.
 - **Active-speaker ring.** A subtle ring around the avatar while the agent speaks
   (`ActiveSpeakerRingModifier`, binary on `isBotSpeaking`) — the group-FaceTime
   "active tile" cue, replacing the old amplitude glow.
@@ -420,6 +475,8 @@ presents as a `.fullScreenCover` from `RootTabView`, gated on
   CallKit Dynamic Island / status-bar pill) clears the flag and re-presents — the
   same consume-on-`.active` pattern `RootTabView` uses for `pendingSiriCall`. A call
   that ends while minimized is reset in `RootTabView` (no in-view auto-reset to run).
+  While minimized, the root tabs' return-to-call bar shows a pause glyph and
+  "On Hold" for a held call.
 
 ## Reconnection + spoken state
 
@@ -467,8 +524,9 @@ On an outgoing call, `SystemCallProvider` reports a `CXCallUpdate` with
 name rather than the raw synthetic email handle. The **photo** (and Contacts/Siri
 matching) comes from the optional system contact above; the name shows with or
 without it. Device-only (CallKit doesn't run in the sim). Audio-interruption
-handling now has a seam (see the call state machine above); yielding the route to a
-real incoming PSTN call (`setOnHold`) remains the device-flagged follow-up.
+handling now has a seam (see the call state machine above), and calls are holdable
+(see Hold above); holding for a real incoming PSTN call, and the host-initiated
+hold, are built but not yet device-verified.
 
 ## Siri dialing (built, M10 layers 1–2)
 
