@@ -800,6 +800,21 @@ struct AgentCallHostTests {
     }
 
     @Test func registrationBodyCarriesAllSevenKeys() async throws {
+    @Test func aTokenPushKitInvalidatesIsNoLongerRegistered() async throws {
+        let h = try AgentCallHostHarness()
+        let nova = try inboundAgent(named: "Nova", in: h, apiKey: "nova-key")
+        let host = try #require(nova.inboundRegistrationURL?.host())
+        h.system.deliverVoIPPushToken(Data([0xAB, 0x01]))
+        await h.host.awaitPendingRegistration()
+        #expect(RecordingURLProtocol.requests(host: host).count == 1)
+
+        h.system.invalidateVoIPPushToken()
+        await h.host.registerInbound(for: nova)
+
+        #expect(h.engine.voipPushToken == nil)
+        #expect(RecordingURLProtocol.requests(host: host).count == 1)
+    }
+
         let endpoint = RecordingURLProtocol.uniqueEndpoint()
         let agentID = UUID()
         await PushTokenRegistrar.register(

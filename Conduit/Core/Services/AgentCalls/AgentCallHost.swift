@@ -150,7 +150,17 @@ final class AgentCallHost: CallEngineDelegate {
     }
 
     func callEngine(_ engine: CallEngine, didUpdateVoIPPushToken token: Data) {
+        registrationTask?.cancel()
         registrationTask = Task { [weak self] in await self?.registerToken(token) }
+    }
+
+    /// The engine's `voipPushToken` is nil from here until PushKit issues a new one,
+    /// so nothing registers the dead token afterwards; this stops a registration
+    /// pass still sending it. Servers drop it on APNs' 410, and the next token
+    /// registers over it.
+    func callEngineDidInvalidateVoIPPushToken(_ engine: CallEngine) {
+        registrationTask?.cancel()
+        trace("voip token: invalidated")
     }
 
     private func trace(_ line: @autoclosure () -> String) {
@@ -169,6 +179,7 @@ final class AgentCallHost: CallEngineDelegate {
     private func registerToken(_ token: Data) async {
         let agents = ((try? repository.fetchAll()) ?? []).filter { $0.inboundRegistrationURL != nil }
         for agent in agents {
+            guard !Task.isCancelled else { return }
             await register(token: token, agent: agent)
         }
     }
