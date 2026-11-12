@@ -229,10 +229,16 @@ builds compile none of it. `live()` also starts the call trace
 (`Debug/CallTrace.swift`, `conduit-call-trace.log` in Documents, timestamped,
 kept across launches and rotated past 2 MB): the launch and its strategy, each
 transport made, `AgentCallHost`'s view of every ring (call id, requested
-pre-connect, inline or not), state change, cue and record, and, from
-`CallTraceObserver`, the engine's `ringPreparationPhase`, hold, audio activation
-(as the engine counts it), interruption and mute; the call screen adds route
-snapshots while it is up.
+pre-connect, inline or not), state change, cue, record and every
+`ringPreparationPhase` change (from the delegate callback, so fast intermediate
+phases are not lost), and, from `CallTraceObserver`, hold, audio activation (as
+the engine counts it), interruption and mute; the call screen adds route
+snapshots while it is up. `live()` also installs `CallEngineLog.handler`
+(`CallTrace.captureEngineLog()`, DEBUG only, before the engine is created) so
+every package log event (category, level, message), CallKit's raw audio
+activations included, lands in the trace with its timestamp and still reaches
+Console through `CallEngineLog.writeToOSLog`; Release builds leave the package's
+logging at its default.
 
 ## Models & persistence (SwiftData)
 
@@ -447,7 +453,10 @@ Key behaviors:
   shortened name once the target resolves), synthetic email and the engine's
   `supportedPushFeatures` (`push_features`) with the token;
   deleting an agent best-effort **unregisters** (DELETE on the registration
-  endpoint, `PushTokenRegistrar.unregister`).
+  endpoint, `PushTokenRegistrar.unregister`). A token PushKit invalidates
+  (`callEngineDidInvalidateVoIPPushToken`) is no longer current: the engine's
+  `voipPushToken` is nil, so save-time registration sends nothing until a new one
+  is issued, and a registration pass still sending the old token is cancelled.
   Push/CallKit-incoming/entitlement are device-only; the engine's ring paths and
   payload parsing are unit-tested in the package, the host's registration and
   history in `ConduitTests/AgentCalls/`. See [INBOUND_CALLS](./INBOUND_CALLS.md).
