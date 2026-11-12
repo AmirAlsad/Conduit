@@ -78,7 +78,8 @@ async def ring(
         "agent_id": reg.app_agent_id,
         "call_id": str(uuid.uuid4()),
         # Receipt channel: the app POSTs the ring's terminal status back here
-        # (answered / declined / busy / suppressed_by_focus). Correct absolute
+        # (RING_STATUSES: answered / declined / busy / suppressed_by_focus /
+        # unanswered / canceled, and any a newer app adds). Correct absolute
         # URLs behind a TLS-terminating proxy need uvicorn's --proxy-headers.
         "status_url": str(request.url_for("ring_status", agent_id=agent_id)),
     }
