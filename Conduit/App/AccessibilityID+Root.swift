@@ -20,5 +20,9 @@ extension AccessibilityID {
 
         /// The in-app "return to the minimized call" affordance.
         static let returnToCall = "Root_ReturnToCall"
+
+        /// The "no microphone access" alert's way to the app's Settings page.
+        static let microphoneSettingsButton = "Root_MicrophoneSettingsButton"
+        static let microphoneCancelButton = "Root_MicrophoneCancelButton"
     }
 }

@@ -47,6 +47,9 @@ final class AddEditAgentViewModel {
     private(set) var testState: TestState = .idle
     /// The staged "Test connection" checklist (empty until the first run).
     private(set) var diagnosticSteps: [DiagnosticStep] = []
+    /// Whether the app may not record, so an inbound call from this agent would
+    /// carry no voice. Shown next to the inbound toggle; saving is never blocked.
+    private(set) var microphoneDenied = false
 
     private let editingAgent: Agent?
     private let repository: AgentRepository
@@ -54,6 +57,7 @@ final class AddEditAgentViewModel {
     private let contactSync: ContactSyncing
     private let transportFactory: (TransportKind) -> CallTransport
     private let inboundRegistrar: InboundRegistering?
+    private let microphone: MicrophonePermissionProviding
     private let pairingResolver: @Sendable (URL, String, TransportKind) async throws -> PairingCredentials
 
     init(
@@ -63,6 +67,7 @@ final class AddEditAgentViewModel {
         contactSync: ContactSyncing,
         transportFactory: @escaping (TransportKind) -> CallTransport,
         inboundRegistrar: InboundRegistering? = nil,
+        microphone: MicrophonePermissionProviding,
         pairingResolver: @escaping @Sendable (URL, String, TransportKind) async throws -> PairingCredentials = {
             try await PairingClient.resolve(endpoint: $0, apiKey: $1, transport: $2)
         }
@@ -73,6 +78,7 @@ final class AddEditAgentViewModel {
         self.contactSync = contactSync
         self.transportFactory = transportFactory
         self.inboundRegistrar = inboundRegistrar
+        self.microphone = microphone
         self.pairingResolver = pairingResolver
 
         if let agent {
@@ -150,6 +156,18 @@ final class AddEditAgentViewModel {
     func prefillInboundURLIfNeeded() {
         guard inboundRegistrationURLText.trimmed.isEmpty else { return }
         inboundRegistrationURLText = pairingEndpointText
+    }
+
+    /// Ask for the microphone while the app is in front: an inbound call is often
+    /// answered from the lock screen, where no prompt can appear.
+    func requestMicrophoneForInbound() async {
+        guard inboundEnabled else { return }
+        microphoneDenied = !(await microphone.requestAccess())
+    }
+
+    /// Re-read the permission without prompting (on appear, and on return from Settings).
+    func refreshMicrophoneStatus() {
+        microphoneDenied = microphone.status == .denied
     }
 
     var canSave: Bool {

@@ -15,6 +15,7 @@ import SwiftUI
 struct RootTabView: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
 
     private enum RootTab: Hashable {
         case recents, contacts, settings
@@ -40,6 +41,10 @@ struct RootTabView: View {
     /// `syncInCallCover` can flip it with the right transaction — animated for
     /// present/minimize/Close, instant for a user-end (no flash).
     @State private var inCallPresented = false
+    /// The agent a call was not placed to for lack of microphone access, while its
+    /// explanation is up.
+    @State private var microphoneRefusal: String?
+    @State private var showingMicrophoneRefusal = false
 
     var body: some View {
         ZStack {
@@ -78,6 +83,22 @@ struct RootTabView: View {
         // A Siri-requested call dials only once the scene is .active —
         // CXStartCallAction from a not-yet-foregrounded app is rejected.
         .onChange(of: environment.pendingSiriCall) { _, _ in consumePendingSiriCall() }
+        .onChange(of: environment.callRefusedForMicrophone) { _, name in
+            guard let name else { return }
+            environment.callRefusedForMicrophone = nil
+            microphoneRefusal = name
+            showingMicrophoneRefusal = true
+        }
+        .alert("Microphone Access Needed", isPresented: $showingMicrophoneRefusal, presenting: microphoneRefusal) { _ in
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+            }
+            .accessibilityIdentifier(AccessibilityID.Root.microphoneSettingsButton)
+            Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(AccessibilityID.Root.microphoneCancelButton)
+        } message: { name in
+            Text("\(name) can't hear you without the microphone, so the call wasn't placed. Allow microphone access for Conduit in Settings, then call again.")
+        }
         .onChange(of: scenePhase) { old, new in
             consumePendingSiriCall()
             // Returning to the foreground (e.g. tapping the CallKit Dynamic Island /

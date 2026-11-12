@@ -27,6 +27,7 @@ final class AppEnvironment {
     let contactSync: ContactSyncing
     let agentRepository: AgentRepository
     let announcer: SpokenStateAnnouncing
+    let microphone: MicrophonePermissionProviding
     let transportFactory: (TransportKind) -> CallTransport
     let callEngine: CallEngine
     /// The stand-in CallKit/PushKit system behind `callEngine` when it is simulated
@@ -53,6 +54,9 @@ final class AppEnvironment {
     /// only the projection is dismissed). RootTabView gates the in-call cover on
     /// this and clears it to re-present on return. Never touches the engine.
     var isCallScreenMinimized: Bool = false
+    /// The name of the agent a call was not placed to because the app may not use
+    /// the microphone. RootTabView explains it, with a way to Settings, and clears it.
+    var callRefusedForMicrophone: String?
 
     init(
         modelContainer: ModelContainer,
@@ -60,6 +64,7 @@ final class AppEnvironment {
         contactSync: ContactSyncing,
         agentRepository: AgentRepository,
         announcer: SpokenStateAnnouncing,
+        microphone: MicrophonePermissionProviding,
         transportFactory: @escaping (TransportKind) -> CallTransport,
         isPushToTalkEnabled: @escaping @MainActor () -> Bool = { false },
         simulatedCallSystem: SimulatedCallSystem? = nil,
@@ -70,6 +75,7 @@ final class AppEnvironment {
         self.contactSync = contactSync
         self.agentRepository = agentRepository
         self.announcer = announcer
+        self.microphone = microphone
         self.transportFactory = transportFactory
         self.simulatedCallSystem = simulatedCallSystem
         self.callHost = AgentCallHost(
@@ -87,7 +93,14 @@ final class AppEnvironment {
         callHost.engine = callEngine
     }
 
+    /// Asks for the microphone first (prompting on an undecided install), and places
+    /// no call the agent could not hear: a refusal is explained instead.
     func placeCall(_ agent: Agent) async {
+        guard await microphone.requestAccess() else {
+            Log.info(.call, "Call not placed: no microphone access")
+            callRefusedForMicrophone = agent.name
+            return
+        }
         await callEngine.placeCall(callHost.target(for: agent))
     }
 
@@ -158,6 +171,7 @@ final class AppEnvironment {
             contactSync: ContactSyncService(),
             agentRepository: SwiftDataAgentRepository(context: container.mainContext),
             announcer: SpeechSpokenStateAnnouncer(),
+            microphone: SystemMicrophonePermission(),
             transportFactory: transportFactory,
             isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) },
             simulatedCallSystem: simulatedCallSystem,
@@ -171,7 +185,7 @@ final class AppEnvironment {
     static let shared = live()
 
     /// All-fakes environment over an in-memory SwiftData store.
-    static func inMemory() -> AppEnvironment {
+    static func inMemory(microphone: MicrophonePermissionProviding? = nil) -> AppEnvironment {
         let container: ModelContainer
         do {
             container = try ModelContainer(
@@ -188,6 +202,7 @@ final class AppEnvironment {
             contactSync: FakeContactSync(),
             agentRepository: SwiftDataAgentRepository(context: container.mainContext),
             announcer: FakeSpokenStateAnnouncer(),
+            microphone: microphone ?? FakeMicrophonePermission(),
             transportFactory: { _ in FakeTransport() },
             isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) },
             simulatedCallSystem: system,

@@ -33,6 +33,7 @@ struct AddEditAgentViewModelTests {
         contactSync: ContactSyncing = FakeContactSync(),
         transportFactory: @escaping (TransportKind) -> CallTransport = { _ in FakeTransport() },
         inboundRegistrar: InboundRegistering? = nil,
+        microphone: MicrophonePermissionProviding? = nil,
         pairingResolver: @escaping @Sendable (URL, String, TransportKind) async throws -> PairingCredentials = { _, _, _ in
             throw PairingError.invalidResponse
         }
@@ -44,6 +45,7 @@ struct AddEditAgentViewModelTests {
             contactSync: contactSync,
             transportFactory: transportFactory,
             inboundRegistrar: inboundRegistrar,
+            microphone: microphone ?? FakeMicrophonePermission(),
             pairingResolver: pairingResolver
         )
     }
@@ -282,6 +284,66 @@ struct AddEditAgentViewModelTests {
 
         await waitUntil(ticks: 50) { !registrar.registeredAgentIDs.isEmpty }
         #expect(registrar.registeredAgentIDs.isEmpty)
+    }
+
+    // MARK: - Microphone for inbound calls
+
+    @Test func turningInboundOnPromptsForTheMicrophone() async throws {
+        let microphone = FakeMicrophonePermission(status: .undetermined, answersPrompt: true)
+        let vm = makeViewModel(repository: try makeRepository(), microphone: microphone)
+        vm.inboundEnabled = true
+
+        await vm.requestMicrophoneForInbound()
+
+        #expect(microphone.promptCount == 1)
+        #expect(!vm.microphoneDenied)
+    }
+
+    @Test func aRefusedMicrophoneIsShownWithoutBlockingSave() async throws {
+        let repo = try makeRepository()
+        let microphone = FakeMicrophonePermission(status: .undetermined, answersPrompt: false)
+        let registrar = FakeInboundRegistrar()
+        let vm = makeViewModel(repository: repo, inboundRegistrar: registrar, microphone: microphone)
+        vm.name = "Jarvis"
+        vm.pairingEndpointText = "https://engine.example.com/connect"
+        vm.inboundEnabled = true
+        vm.inboundRegistrationURLText = "https://engine.example.com/inbound/register/live"
+
+        await vm.requestMicrophoneForInbound()
+        #expect(vm.microphoneDenied)
+
+        try await vm.save()
+        let agent = try #require(try repo.fetchAll().first)
+        #expect(agent.inboundRegistrationURL != nil)
+        await waitUntil { !registrar.registeredAgentIDs.isEmpty }
+        #expect(registrar.registeredAgentIDs == [agent.id])
+    }
+
+    @Test func inboundOffNeverPrompts() async throws {
+        let microphone = FakeMicrophonePermission(status: .undetermined)
+        let vm = makeViewModel(repository: try makeRepository(), microphone: microphone)
+
+        await vm.requestMicrophoneForInbound()
+
+        #expect(microphone.promptCount == 0)
+        #expect(!vm.microphoneDenied)
+    }
+
+    @Test func refreshingReadsThePermissionWithoutPrompting() throws {
+        let microphone = FakeMicrophonePermission(status: .denied)
+        let vm = makeViewModel(repository: try makeRepository(), microphone: microphone)
+
+        vm.refreshMicrophoneStatus()
+        #expect(vm.microphoneDenied)
+
+        microphone.status = .granted // allowed in Settings
+        vm.refreshMicrophoneStatus()
+        #expect(!vm.microphoneDenied)
+
+        microphone.status = .undetermined
+        vm.refreshMicrophoneStatus()
+        #expect(!vm.microphoneDenied)
+        #expect(microphone.promptCount == 0)
     }
 
     // MARK: - Contact sync on save

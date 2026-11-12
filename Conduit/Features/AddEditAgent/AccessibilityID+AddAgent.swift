@@ -27,6 +27,8 @@ extension AccessibilityID {
         static let inboundDocsLink = "AddAgent_InboundDocsLink"
         static let inboundToggle = "AddAgent_InboundToggle"
         static let inboundURLField = "AddAgent_InboundURLField"
+        static let microphoneNotice = "AddAgent_MicrophoneNotice"
+        static let microphoneSettingsLink = "AddAgent_MicrophoneSettingsLink"
         static let testConnectionButton = "AddAgent_TestConnectionButton"
         static let testResult = "AddAgent_TestResult"
         static func diagnosticRow(_ stage: DiagnosticStage) -> String { "AddAgent_Diag_\(stage.rawValue)" }

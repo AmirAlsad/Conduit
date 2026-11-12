@@ -15,7 +15,10 @@ struct AddEditAgentSheet: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var cropRequest: CropRequest?
     @State private var directExpanded: Bool
+    /// A link that turns inbound on counts as the user turning it on.
+    private let requestsMicrophoneOnAppear: Bool
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     private struct CropRequest: Identifiable {
         let id = UUID()
@@ -29,13 +32,15 @@ struct AddEditAgentSheet: View {
             keychain: environment.keychain,
             contactSync: environment.contactSync,
             transportFactory: environment.transportFactory,
-            inboundRegistrar: environment.inboundRegistrar
+            inboundRegistrar: environment.inboundRegistrar,
+            microphone: environment.microphone
         )
         // Link values layer over the loaded agent (edit) or the blank form (add).
         if let prefill { viewModel.apply(prefill) }
         _viewModel = State(initialValue: viewModel)
         // Reveal direct credentials only when the agent already uses them.
         _directExpanded = State(initialValue: editing?.connectionURL != nil)
+        requestsMicrophoneOnAppear = prefill?.inboundRegistrationURL != nil
     }
 
     var body: some View {
@@ -48,6 +53,16 @@ struct AddEditAgentSheet: View {
                 testSection
             }
             .accessibilityIdentifier(AccessibilityID.AddAgent.screen)
+            .task {
+                if requestsMicrophoneOnAppear {
+                    await viewModel.requestMicrophoneForInbound()
+                } else {
+                    viewModel.refreshMicrophoneStatus()
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { viewModel.refreshMicrophoneStatus() }
+            }
             .navigationTitle(viewModel.isEditing ? "Edit Agent" : "Add Agent")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -211,7 +226,9 @@ struct AddEditAgentSheet: View {
             Toggle("Let this agent call me", isOn: $viewModel.inboundEnabled)
                 .accessibilityIdentifier(AccessibilityID.AddAgent.inboundToggle)
                 .onChange(of: viewModel.inboundEnabled) { _, enabled in
-                    if enabled { viewModel.prefillInboundURLIfNeeded() }
+                    guard enabled else { return }
+                    viewModel.prefillInboundURLIfNeeded()
+                    Task { await viewModel.requestMicrophoneForInbound() }
                 }
 
             if viewModel.inboundEnabled {
@@ -229,6 +246,15 @@ struct AddEditAgentSheet: View {
                 Link("Learn more.", destination: ExternalLinks.inboundCalls)
                     .font(.footnote)
                     .accessibilityIdentifier(AccessibilityID.AddAgent.inboundDocsLink)
+                if viewModel.inboundEnabled && viewModel.microphoneDenied {
+                    Label("Microphone access is off, so this agent won't hear you when it calls.", systemImage: "mic.slash")
+                        .accessibilityIdentifier(AccessibilityID.AddAgent.microphoneNotice)
+                    if let settings = URL(string: UIApplication.openSettingsURLString) {
+                        Link("Open Settings", destination: settings)
+                            .font(.footnote)
+                            .accessibilityIdentifier(AccessibilityID.AddAgent.microphoneSettingsLink)
+                    }
+                }
             }
         }
     }
