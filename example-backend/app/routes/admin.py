@@ -15,7 +15,8 @@ a ring_timeout or a preconnect, and would show a cancel push as a brief incoming
 call. A "media" preconnect also needs the registration to list the
 "call-connected" call signal: the device then joins before the answer, and only
 call-connected tells the bot the user is on the line. Without it the ring asks
-for "credentials" instead.
+for "credentials" instead. A ring that names no preconnect asks for the best
+tier the registration takes; "none" asks for none.
 """
 
 from __future__ import annotations
@@ -99,15 +100,8 @@ async def ring(
         event(_log, "ring.ring_timeout_unsupported", agent=agent_id)
     if ring_timeout is not None:
         payload["ring_timeout"] = str(ring_timeout)
-    # Without the feature the ring is exactly one that never asked: no push key,
-    # no ring bot.
-    preconnect = req.preconnect if "preconnect" in reg.push_features else None
-    if req.preconnect is not None and preconnect is None:
-        event(_log, "ring.preconnect_unsupported", agent=agent_id)
     sends_call_connected = CALL_CONNECTED in reg.call_signals
-    if preconnect == "media" and not sends_call_connected:
-        event(_log, "ring.preconnect_media_needs_call_connected", agent=agent_id)
-        preconnect = "credentials"
+    preconnect = _preconnect_tier(agent_id, req.preconnect, reg, sends_call_connected)
     if preconnect is not None:
         payload["preconnect"] = preconnect
     ring = TrackedRing(
@@ -177,6 +171,24 @@ async def ring(
         apns_status=result.status,
         apns_id=result.apns_id,
     )
+
+
+def _preconnect_tier(agent_id: str, requested: str | None, reg, sends_call_connected: bool):
+    """The preconnect the push carries. Without the push feature the ring is
+    exactly one that never asked: no push key, no ring bot. Unrequested, the best
+    the registration takes; "media" needs call-connected."""
+    if requested == "none":
+        return None
+    if "preconnect" not in reg.push_features:
+        if requested is not None:
+            event(_log, "ring.preconnect_unsupported", agent=agent_id)
+        return None
+    if requested is None:
+        return "media" if sends_call_connected else "credentials"
+    if requested == "media" and not sends_call_connected:
+        event(_log, "ring.preconnect_media_needs_call_connected", agent=agent_id)
+        return "credentials"
+    return requested
 
 
 @router.post("/ring/{agent_id}/cancel", response_model=RingCancelResponse)

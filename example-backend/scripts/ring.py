@@ -13,10 +13,14 @@ the script prints the name it rang as.
 
 ``--ring-timeout N`` shortens the ring (the app clamps it to at least 10 s); the
 engine sends it only to a device that registered the ``ring_timeout`` push
-feature. ``--preconnect credentials|media`` asks the app to prepare during the
-ring (likewise sent only to a device that registered the ``preconnect`` push
-feature; otherwise the ring is a plain one; ``media`` also needs the device to
-list the ``call-connected`` call signal, and is sent as ``credentials`` without it). ``--cancel CALL_ID`` withdraws a ring that is still ringing (no new ring);
+feature. Every ring asks the app to prepare during the ring (pre-connect): by
+default the best tier the device's registration takes (``media`` when it lists
+the ``preconnect`` push feature and the ``call-connected`` call signal,
+``credentials`` with only the feature, none without it). ``--preconnect
+credentials|media`` asks for one tier (``media`` is sent as ``credentials`` to a
+device without ``call-connected``); ``--preconnect none`` sends a plain ring.
+
+``--cancel CALL_ID`` withdraws a ring that is still ringing (no new ring);
 ``--cancel-after SECONDS`` rings, waits, then cancels that ring. A cancel push
 goes only to a device that registered the ``cancel`` push feature; otherwise the
 engine refuses it (409) unless the agent can leave a pre-connected room instead.
@@ -25,6 +29,7 @@ Usage:
   uv run python scripts/ring.py --agent live
   uv run python scripts/ring.py --agent loopback --inline --base-url https://<host>
   uv run python scripts/ring.py --agent tone --inline --preconnect media --ring-timeout 30
+  uv run python scripts/ring.py --agent live --preconnect none
   uv run python scripts/ring.py --agent live --cancel-after 8
   uv run python scripts/ring.py --agent live --cancel <call_id>
 
@@ -66,7 +71,7 @@ def ring_body(
     ring_timeout: int | None = None,
     preconnect: str | None = None,
 ) -> dict:
-    """The /admin/ring body; options left unset are omitted (today's ring)."""
+    """The /admin/ring body; options left unset are omitted (the engine's defaults)."""
     body: dict = {"inline": inline}
     if transport:
         body["transport"] = transport
@@ -183,9 +188,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--preconnect",
-        choices=["credentials", "media"],
+        choices=["credentials", "media", "none"],
         help="Ask the app to prepare while ringing: fetch credentials, or also join "
-        "the room (the bot then waits for the answer).",
+        "the room (the bot then waits for the answer); none for a plain ring "
+        "(default: the best the device's registration takes).",
     )
     cancel = parser.add_mutually_exclusive_group()
     cancel.add_argument(
@@ -234,20 +240,25 @@ def main() -> None:
     else:
         print("No caller name: this registration predates names, so the app will show its own.")
     print("APNs accepted the push — the device should be ringing now.")
-    if args.preconnect and body.get("preconnect") is None:
+    sent = body.get("preconnect")
+    if args.preconnect == "none":
+        print("Pre-connect: none (opted out), a plain ring.")
+    elif args.preconnect is None and sent is not None:
+        print(f"Pre-connect: {sent} (the best the device's registration takes).")
+    elif sent is None:
         print("Pre-connect not sent: the device's app doesn't list the preconnect")
         print("push feature, so it rings as a plain ring (no ring bot).")
-    elif args.preconnect and body.get("preconnect") != args.preconnect:
-        print(f"Pre-connect sent as {body['preconnect']}: the device's app doesn't list")
+    elif sent != args.preconnect:
+        print(f"Pre-connect sent as {sent}: the device's app doesn't list")
         print("the call-connected call signal, which a media ring needs.")
-    elif args.preconnect:
+    else:
         print(f"Pre-connect requested: {args.preconnect}.")
     if args.ring_timeout is not None and "ring_timeout" in body and body["ring_timeout"] is None:
         print("Ring timeout not sent: the device's app doesn't list the ring_timeout")
         print("push feature, so it rings for its own default.")
     if body["mode"] == "inline":
         print("NOTE: inline mode already dispatched the bot; it ends on a decline")
-        if args.preconnect:
+        if sent:
             print("(or any receipt but answered) and when the ring deadline passes.")
         else:
             print("(or any receipt but answered).")

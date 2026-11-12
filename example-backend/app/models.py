@@ -13,6 +13,8 @@ from pydantic import AfterValidator, BaseModel, Field
 
 Transport = Literal["daily", "livekit", "smallwebrtc"]
 Preconnect = Literal["credentials", "media"]
+# What a ring may ask for: a tier, or "none" for a plain ring (no preconnect key).
+PreconnectRequest = Literal["credentials", "media", "none"]
 PushFeature = Annotated[str, Field(min_length=1, max_length=64)]
 # A call-control signal the client says its calls carry ("call-connected", ...).
 CallSignalName = Annotated[str, Field(min_length=1, max_length=64)]
@@ -116,8 +118,9 @@ class RingRequest(BaseModel):
     ring_timeout: int | None = Field(default=None, gt=0)
     # Ask the app to prepare during the ring: "credentials" fetches /connect while
     # ringing, "media" also joins the room (the bot then waits for call-connected;
-    # a device that does not list it gets "credentials").
-    preconnect: Preconnect | None = None
+    # a device that does not list it gets "credentials"). Omitted: the best tier
+    # the registration takes. "none": a plain ring, with no preconnect key.
+    preconnect: PreconnectRequest | None = None
 
 
 class RingCancelRequest(BaseModel):
@@ -145,7 +148,7 @@ class RingResponse(BaseModel):
     # device doesn't list the "ring_timeout" push feature (it then rings for its
     # own default).
     ring_timeout: int | None = None
-    # Likewise the preconnect the push carried: None when none was requested or the
+    # Likewise the preconnect the push carried: None for "none", or when the
     # device doesn't list the "preconnect" push feature (the ring then behaves as
     # one that never asked, and no ring bot is dispatched for it).
     preconnect: Preconnect | None = None

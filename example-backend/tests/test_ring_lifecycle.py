@@ -75,9 +75,9 @@ def _deadline(argv):
 def test_ring_without_new_keys_sends_todays_payload():
     with TestClient(app) as c:
         _setup(c)
-        _, payload = _ring(c)
+        _, payload = _ring(c, preconnect="none")
         assert set(payload) == _BASE_KEYS
-        _, payload = _ring(c, inline=True)
+        _, payload = _ring(c, inline=True, preconnect="none")
         assert set(payload) == _BASE_KEYS | {"room_url", "token"}
         # A plain inline bot is not a ring bot: no ring flags, no control pipe. It
         # waits for call-connected, which this registration says the app sends.
@@ -238,7 +238,7 @@ def test_ring_response_reports_the_preconnect_sent():
         _setup(c)
         r = c.post("/admin/ring/loopback", json={"preconnect": "credentials"}, headers=AUTH)
         assert r.json()["preconnect"] == "credentials"
-        r = c.post("/admin/ring/loopback", json={}, headers=AUTH)
+        r = c.post("/admin/ring/loopback", json={"preconnect": "none"}, headers=AUTH)
         assert r.json()["preconnect"] is None
 
 
@@ -464,7 +464,7 @@ def test_non_answered_receipts_end_a_plain_inline_bot():
     for status in ("declined", "busy", "suppressed_by_focus", "unanswered", "canceled", "exploded"):
         with TestClient(app) as c:
             _setup(c)
-            call_id, _ = _ring(c, inline=True)
+            call_id, _ = _ring(c, inline=True, preconnect="none")
             _receipt(c, call_id, status)
             assert app.state.dispatcher.disconnected == ["room-abc"], status
             # It has no control pipe to write to.
@@ -475,7 +475,7 @@ def test_non_answered_receipts_end_a_plain_inline_bot():
 def test_answered_receipt_leaves_a_plain_inline_bot_running():
     with TestClient(app) as c:
         _setup(c)
-        call_id, _ = _ring(c, inline=True)
+        call_id, _ = _ring(c, inline=True, preconnect="none")
         _receipt(c, call_id, "answered")
         assert app.state.dispatcher.disconnected == []
         assert app.state.dispatcher.sent == []
@@ -488,7 +488,7 @@ def test_answered_receipt_leaves_a_plain_inline_bot_running():
 def test_only_the_first_receipt_ends_a_plain_inline_bot():
     with TestClient(app) as c:
         _setup(c)
-        call_id, _ = _ring(c, inline=True)
+        call_id, _ = _ring(c, inline=True, preconnect="none")
         _receipt(c, call_id, "declined")
         _receipt(c, call_id, "answered")
         _receipt(c, call_id, "busy")
@@ -669,7 +669,7 @@ def test_cancel_force_ends_a_ring_bot_that_cannot_be_asked():
 def test_cancel_of_a_plain_inline_bot_is_a_plain_disconnect():
     with TestClient(app) as c:
         _setup(c)
-        call_id, _ = _ring(c, inline=True)
+        call_id, _ = _ring(c, inline=True, preconnect="none")
         assert _cancel(c, call_id).json()["bot_ended"] is True
         assert app.state.dispatcher.cancels == []
         assert app.state.dispatcher.disconnected == ["room-abc"]

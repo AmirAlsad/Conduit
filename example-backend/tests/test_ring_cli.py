@@ -112,3 +112,31 @@ def test_cancel_refused_because_the_bot_saw_the_answer_says_the_call_is_live(mon
     assert exc.value.code == 1
     out = capsys.readouterr().out
     assert "already answered" in out and "already over" not in out
+
+
+def test_ring_body_carries_the_opt_out_only_when_asked():
+    assert ring.ring_body(inline=False, preconnect="none") == {"inline": False, "preconnect": "none"}
+
+
+def test_a_default_ring_leaves_the_tier_to_the_engine_and_says_what_was_sent(monkeypatch, capsys):
+    rang = (200, {**_RANG[1], "preconnect": "media"})
+    calls = _run(monkeypatch, ["--agent", "live"], [rang])
+    assert calls == [("/admin/ring/live", {"inline": False})]
+    assert "Pre-connect: media (the best the device's registration takes)" in capsys.readouterr().out
+
+
+def test_a_default_ring_to_a_device_without_preconnect_says_it_is_plain(monkeypatch, capsys):
+    _run(monkeypatch, ["--agent", "live"], [(200, {**_RANG[1], "preconnect": None})])
+    assert "Pre-connect not sent" in capsys.readouterr().out
+
+
+def test_preconnect_none_reaches_the_body(monkeypatch, capsys):
+    calls = _run(monkeypatch, ["--agent", "live", "--preconnect", "none"],
+                 [(200, {**_RANG[1], "preconnect": None})])
+    assert calls == [("/admin/ring/live", {"inline": False, "preconnect": "none"})]
+    assert "Pre-connect: none (opted out)" in capsys.readouterr().out
+
+
+def test_preconnect_rejects_unknown_tiers(monkeypatch):
+    with pytest.raises(SystemExit):
+        _run(monkeypatch, ["--preconnect", "everything"], [])
