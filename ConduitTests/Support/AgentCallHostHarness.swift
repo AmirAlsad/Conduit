@@ -53,6 +53,28 @@ final class FakePairingResolver {
     }
 }
 
+/// Stands in for the host's delayed actions: records each wait and runs the
+/// actions only when a test fires them, synchronously.
+@MainActor
+final class FakeDelays {
+    private(set) var waits: [Duration] = []
+    private var pending: [@MainActor () -> Void] = []
+
+    var pendingCount: Int { pending.count }
+
+    func schedule(_ wait: Duration, _ action: @escaping @MainActor () -> Void) {
+        waits.append(wait)
+        pending.append(action)
+    }
+
+    /// Every wait scheduled so far has passed: run their actions, oldest first.
+    func fireAll() {
+        let due = pending
+        pending = []
+        due.forEach { $0() }
+    }
+}
+
 /// The transport kinds a factory was asked for, in order.
 @MainActor
 final class TransportRequestLog {
@@ -69,6 +91,7 @@ final class AgentCallHostHarness {
     let transports = FakeTransportPool()
     let pairing = FakePairingResolver()
     let transportRequests = TransportRequestLog()
+    let delays = FakeDelays()
     let container: ModelContainer
     let repository: SwiftDataAgentRepository
     let host: AgentCallHost
@@ -121,6 +144,7 @@ final class AgentCallHostHarness {
 
         let transports = self.transports
         let transportRequests = self.transportRequests
+        let delays = self.delays
         host = AgentCallHost(
             repository: repository,
             keychain: keychain,
@@ -132,7 +156,8 @@ final class AgentCallHostHarness {
                 return transports.make()
             },
             pairingResolver: pairing.resolver,
-            registrationSession: RecordingURLProtocol.session()
+            registrationSession: RecordingURLProtocol.session(),
+            delay: { delays.schedule($0, $1) }
         )
         engine = CallEngine.simulated(
             configuration: CallEngineConfiguration(

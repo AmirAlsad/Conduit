@@ -4,14 +4,20 @@
 //
 //  Conduit's side of the call engine: turns agents into call targets (allowing
 //  the ring preparation each push asks for) and reacts to what the engine
-//  reports — writing the call log, speaking the engine's cues (with the mic
-//  withheld while "Connected" plays, after which the engine tells the agent the
-//  user is on the line), donating outgoing
+//  reports — writing the call log, speaking the engine's cues, donating outgoing
 //  calls to Siri, posting missed-call notifications, supplying the API key that
 //  authenticates ring-status receipts, and registering the device's VoIP token
 //  with every agent that lets itself call the user. The
 //  engine identifies calls only by target id; this looks the agent up, and a
 //  target with no agent (unknown or deleted) records nothing.
+//
+//  The cues: a call the user placed gets the ringback while it connects, then
+//  "Connected" with the mic withheld while it plays (after which the engine tells
+//  the agent the user is on the line). A call the user answered never gets a
+//  ringback: answered with its agent already there, it says nothing, so the agent
+//  hears the user as soon as CallKit activates the audio; still connecting a second
+//  after the answer, it says "Connecting" once, then "Connected" as a placed call
+//  does. Reconnect cues are the same for both.
 //
 
 import ConduitCallEngine
@@ -27,6 +33,7 @@ final class AgentCallHost: CallEngineDelegate {
     private let transportFactory: (TransportKind) -> CallTransport
     private let pairingResolver: PairingResolving
     private let registrationSession: URLSession
+    private let delay: DelayedAction
     /// The engine whose VoIP token `registerInbound(for:)` sends.
     weak var engine: CallEngine?
     private var registrationTask: Task<Void, Never>?
@@ -34,6 +41,11 @@ final class AgentCallHost: CallEngineDelegate {
     /// the completion of that phrase releases it, so one from an earlier connection
     /// or call changes nothing.
     private var connectSoundsID: UUID?
+    /// The pending "Connecting" of an answered call; only that prompt's delay may
+    /// speak it. Cleared when the connecting loop stops (connected, held, ended).
+    private var connectingPromptID: UUID?
+    /// Whether this call has said "Connecting": an answered call says it at most once.
+    private var didPromptConnecting = false
     #if DEBUG
     /// DEBUG: where the delegate's view of each ring and call goes (the call trace,
     /// for the live environment's engine only).
@@ -48,7 +60,8 @@ final class AgentCallHost: CallEngineDelegate {
         interactionDonor: CallInteractionDonating = CallInteractionDonor(),
         transportFactory: @escaping (TransportKind) -> CallTransport,
         pairingResolver: @escaping PairingResolving = Agent.livePairingResolver,
-        registrationSession: URLSession = .shared
+        registrationSession: URLSession = .shared,
+        delay: DelayedAction? = nil
     ) {
         self.repository = repository
         self.keychain = keychain
@@ -58,7 +71,20 @@ final class AgentCallHost: CallEngineDelegate {
         self.transportFactory = transportFactory
         self.pairingResolver = pairingResolver
         self.registrationSession = registrationSession
+        self.delay = delay ?? { wait, action in
+            Task { @MainActor in
+                try? await Task.sleep(for: wait)
+                action()
+            }
+        }
     }
+
+    /// Runs an action on the main actor after a wait (real time unless injected;
+    /// tests run it by hand).
+    typealias DelayedAction = @MainActor (Duration, @escaping @MainActor () -> Void) -> Void
+
+    /// How long an answered call may stay connecting before "Connecting" is said.
+    static let connectingPromptDelay: Duration = .seconds(1)
 
     func target(
         for agent: Agent,
@@ -99,9 +125,12 @@ final class AgentCallHost: CallEngineDelegate {
         trace("state: \(old) -> \(new)")
         switch new {
         case .ended, .failed, .idle:
+            connectingPromptID = nil
             announcer.stopNow()
             releaseMicAfterConnectSounds(engine)
-        case .dialing, .incomingRinging, .connecting, .connected, .reconnecting: break
+        case .dialing, .incomingRinging:
+            didPromptConnecting = false
+        case .connecting, .connected, .reconnecting: break
         }
         guard old == .dialing, case .connecting = new,
               let id = engine.activeCall?.targetID, let agent = agent(id: id) else { return }
@@ -122,24 +151,59 @@ final class AgentCallHost: CallEngineDelegate {
     func callEngine(_ engine: CallEngine, cue: CallCue) {
         trace("cue: \(cue)")
         switch cue {
-        // The engine keeps the mic closed while connecting, so the ringback needs
-        // no withhold, and holds the call connecting until its first tone is done.
-        case .start(.connecting): announcer.startRepeating(.connecting)
-        case .start(.retrying): announcer.startRepeating(.retrying)
-        case .stop: announcer.stopRepeating()
-        case .moment(.connected), .moment(.reconnected):
-            // Synchronous, so it precedes the engine's mic command for this moment;
-            // the release opens the mic and tells the agent to start speaking.
-            let id = withholdMicForConnectSounds(engine)
-            announcer.announce(.connected) { [weak self, weak engine] in
-                guard let self, let engine, self.connectSoundsID == id else { return }
-                self.releaseMicAfterConnectSounds(engine)
+        case .start(.connecting):
+            if engine.activeCall?.direction == .incoming {
+                // The user picked up: a ringback now would sound as if they were calling.
+                promptConnectingIfStillConnecting()
+            } else {
+                // The engine keeps the mic closed while connecting, so the ringback
+                // needs no withhold, and holds a placed call connecting until its
+                // first tone is done.
+                announcer.startRepeating(.connecting)
             }
+        case .start(.retrying): announcer.startRepeating(.retrying)
+        case .stop:
+            connectingPromptID = nil
+            announcer.stopRepeating()
+        case .moment(.connected):
+            // Answered with the agent there: the user is already on with it, so
+            // nothing is said and nothing withheld; the engine sends call-connected
+            // once CallKit has activated the audio.
+            guard engine.activeCall?.wasReadyAtAnswer != true else { break }
+            speakConnected(engine)
+        case .moment(.reconnected): speakConnected(engine)
         case .moment(.connectionLost): announcer.announce(.disconnected)
         // "Connected" will not follow until the resume, which withholds again.
         case .moment(.held): releaseMicAfterConnectSounds(engine)
         case .moment(.resumed): break
         @unknown default: break
+        }
+    }
+
+    /// "Connected", with the mic withheld until it has played. Synchronous, so the
+    /// withhold precedes the engine's mic command for this moment; the release opens
+    /// the mic and tells the agent to start speaking.
+    private func speakConnected(_ engine: CallEngine) {
+        let id = withholdMicForConnectSounds(engine)
+        announcer.announce(.connected) { [weak self, weak engine] in
+            guard let self, let engine, self.connectSoundsID == id else { return }
+            self.releaseMicAfterConnectSounds(engine)
+        }
+    }
+
+    /// Say "Connecting" once if the answered call is still connecting after
+    /// `connectingPromptDelay`. The engine keeps the mic closed until the call is
+    /// connected, so the agent cannot hear it.
+    private func promptConnectingIfStillConnecting() {
+        guard !didPromptConnecting else { return }
+        let id = UUID()
+        connectingPromptID = id
+        delay(Self.connectingPromptDelay) { [weak self] in
+            guard let self, self.connectingPromptID == id else { return }
+            self.connectingPromptID = nil
+            self.didPromptConnecting = true
+            self.trace("spoken: connecting (answered, still connecting)")
+            self.announcer.announce(.connecting)
         }
     }
 
