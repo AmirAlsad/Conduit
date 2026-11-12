@@ -666,6 +666,219 @@ struct AgentCallHostTests {
         #expect(h.transport.isMicEnabled)
     }
 
+    // MARK: - The mic during the connect sounds
+
+    /// A harness whose engine timers wait in real time, so the withhold's bound
+    /// runs out only when a test fires it.
+    private func soundsHarness(transportKind: TransportKind = .daily, token: String? = "valid-token") throws -> AgentCallHostHarness {
+        try AgentCallHostHarness(token: token, transportKind: transportKind, sleep: AgentCallHostHarness.realTimeSleep)
+    }
+
+    @Test func anOutgoingCallKeepsTheMicClosedUntilTheConnectSoundsAreDone() async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        #expect(h.engine.isMicWithheld) // from the connecting cue
+
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        await h.system.awaitPendingWork()
+        #expect(h.announcer.announced == [.connected])
+        #expect(h.engine.isMicWithheld)
+        #expect(!h.transport.micEnabledHistory.contains(true))
+        #expect(!h.engine.isMuted) // not mute: CallKit and the call screen show it unmuted
+
+        h.announcer.finishAnnouncements() // the ringback has stopped and "Connected" has played
+        await h.system.awaitPendingWork()
+
+        #expect(!h.engine.isMicWithheld)
+        #expect(h.transport.isMicEnabled)
+    }
+
+    @Test func aCallThatConnectsBeforeTheActivationKeepsTheMicClosedUntilTheSoundsAreDone() async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        h.system.deliverTransportEvent(.connected)
+        await h.system.activateAudioSession() // "Connected" is announced here
+        await h.system.awaitPendingWork()
+        #expect(h.announcer.announced == [.connected])
+        #expect(!h.transport.micEnabledHistory.contains(true))
+
+        h.announcer.finishAnnouncements()
+        await h.system.awaitPendingWork()
+
+        #expect(h.transport.isMicEnabled)
+    }
+
+    @Test func anAnsweredRingKeepsTheMicClosedUntilTheConnectSoundsAreDone() async throws {
+        let h = try soundsHarness()
+        h.ring()
+        #expect(!h.engine.isMicWithheld) // a ring plays nothing of ours
+        await h.system.answerIncomingCall()
+        #expect(h.engine.isMicWithheld)
+
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        await h.system.awaitPendingWork()
+        #expect(!h.transport.micEnabledHistory.contains(true))
+
+        h.announcer.finishAnnouncements()
+        await h.system.awaitPendingWork()
+
+        #expect(h.transport.isMicEnabled)
+    }
+
+    @Test func aPreconnectedAnswerKeepsTheMicClosedUntilConnectedHasPlayed() async throws {
+        let h = try AgentCallHostHarness(
+            pairingEndpoint: endpoint, transportKind: .livekit, sleep: AgentCallHostHarness.realTimeSleep
+        )
+        h.transport.canConnectWhileRinging = true
+        h.ring(preconnect: "media")
+        #expect(await h.system.awaitRingPreparation() == .connecting)
+        h.system.deliverTransportEvent(.connected)
+        await h.system.answerIncomingCall()
+        #expect(h.announcer.startedRepeating.isEmpty) // no ringback, so nothing withheld yet
+
+        await h.system.activateAudioSession() // "Connected" is announced here
+        await h.system.awaitPendingWork()
+        #expect(h.announcer.announced == [.connected])
+        #expect(h.engine.isMicWithheld)
+        #expect(h.transport.isAudioAttached)
+        #expect(!h.transport.micEnabledHistory.contains(true))
+
+        h.announcer.finishAnnouncements()
+        await h.system.awaitPendingWork()
+
+        #expect(h.transport.isMicEnabled)
+    }
+
+    enum EndWhileConnecting: String, CaseIterable, Sendable {
+        case byTheUser, fromTheSystem, byAProviderReset
+    }
+
+    @Test(arguments: EndWhileConnecting.allCases)
+    func aCallThatEndsWhileConnectingReleasesTheMic(_ ending: EndWhileConnecting) async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        #expect(h.engine.isMicWithheld)
+
+        switch ending {
+        case .byTheUser: await h.engine.endCall()
+        case .fromTheSystem: h.system.endCallFromSystem(try #require(h.system.startedCallIDs.first))
+        case .byAProviderReset: h.system.resetProvider()
+        }
+
+        #expect(h.engine.state.isTerminal)
+        #expect(!h.engine.isMicWithheld)
+    }
+
+    @Test func aCallThatFailsWhileConnectingReleasesTheMic() async throws {
+        let h = try soundsHarness(token: nil)
+        await h.placeCall()
+
+        #expect(h.engine.state.failureReason == .badToken)
+        #expect(h.announcer.startedRepeating == [.connecting])
+        #expect(!h.engine.isMicWithheld)
+    }
+
+    @Test func aHoldWhileConnectingReleasesTheMicAndTheResumeWithholdsItAgain() async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+
+        await h.engine.setOnHold(true)
+        await h.system.awaitPendingWork()
+        #expect(!h.engine.isMicWithheld)
+        #expect(!h.transport.isMicEnabled) // held
+
+        await h.engine.setOnHold(false)
+        await h.system.awaitPendingWork()
+        #expect(h.engine.isMicWithheld) // the ringback plays again
+        #expect(!h.transport.isMicEnabled)
+
+        h.system.deliverTransportEvent(.connected)
+        h.announcer.finishAnnouncements()
+        await h.system.awaitPendingWork()
+        #expect(h.transport.isMicEnabled)
+    }
+
+    @Test func aHoldBeforeConnectedHasPlayedReleasesTheMic() async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        #expect(h.engine.isMicWithheld)
+
+        await h.engine.setOnHold(true)
+        await h.system.awaitPendingWork()
+        #expect(!h.engine.isMicWithheld)
+        await h.engine.setOnHold(false)
+        await h.system.awaitPendingWork()
+
+        #expect(!h.engine.isMicWithheld)
+        #expect(h.transport.isMicEnabled)
+        h.announcer.finishAnnouncements() // the interrupted "Connected" ends, and changes nothing
+        await h.system.awaitPendingWork()
+        #expect(h.transport.isMicEnabled)
+    }
+
+    @Test func connectedFromAnEarlierCallDoesNotReleaseTheNextCallsMic() async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        await h.engine.endCall() // before "Connected" finished
+        h.engine.reset()
+
+        await h.placeCall()
+        #expect(h.engine.isMicWithheld)
+        h.announcer.finishAnnouncements() // the first call's "Connected" ends now
+
+        #expect(h.engine.isMicWithheld)
+    }
+
+    @Test func aReconnectWithholdsTheMicOnlyForConnected() async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        h.announcer.finishAnnouncements()
+        await h.system.awaitPendingWork()
+        #expect(!h.engine.isMicWithheld)
+
+        h.system.deliverTransportEvent(.reconnecting) // "Disconnected", then the retrying loop
+        #expect(h.announcer.repeatingPhrase == .retrying)
+        #expect(!h.engine.isMicWithheld)
+
+        h.system.deliverTransportEvent(.connected) // back: "Connected"
+        await h.system.awaitPendingWork()
+        #expect(h.announcer.announced == [.connected, .disconnected, .connected])
+        #expect(h.engine.isMicWithheld)
+        #expect(!h.transport.isMicEnabled)
+
+        h.announcer.finishAnnouncements()
+        await h.system.awaitPendingWork()
+        #expect(!h.engine.isMicWithheld)
+        #expect(h.transport.isMicEnabled)
+    }
+
+    @Test func soundsThatNeverFinishLeaveTheMicToTheEnginesBound() async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        await h.system.awaitPendingWork()
+        #expect(!h.transport.isMicEnabled)
+
+        #expect(h.system.fireTimer(.micWithholdTimeout))
+        await h.system.awaitPendingWork()
+        #expect(!h.engine.isMicWithheld)
+        #expect(h.transport.isMicEnabled)
+
+        h.announcer.finishAnnouncements() // a late completion releases nothing more
+        await h.system.awaitPendingWork()
+        #expect(h.transport.isMicEnabled)
+    }
+
     // MARK: - Pre-connect
 
     @Test(arguments: RingPreparation.allCases)

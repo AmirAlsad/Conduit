@@ -4,7 +4,8 @@
 //
 //  Conduit's side of the call engine: turns agents into call targets (allowing
 //  the ring preparation each push asks for) and reacts to what the engine
-//  reports — writing the call log, speaking the engine's cues, donating outgoing
+//  reports — writing the call log, speaking the engine's cues (with the mic
+//  withheld until a connect's ringback and "Connected" are done), donating outgoing
 //  calls to Siri, posting missed-call notifications, supplying the API key that
 //  authenticates ring-status receipts, and registering the device's VoIP token
 //  with every agent that lets itself call the user. The
@@ -28,6 +29,10 @@ final class AgentCallHost: CallEngineDelegate {
     /// The engine whose VoIP token `registerInbound(for:)` sends.
     weak var engine: CallEngine?
     private var registrationTask: Task<Void, Never>?
+    /// The connect whose sounds the mic is withheld for, while it is. Only the
+    /// completion of that connect's "Connected" releases it, so one from an
+    /// earlier connect or call changes nothing.
+    private var connectSoundsID: UUID?
     #if DEBUG
     /// DEBUG: where the delegate's view of each ring and call goes (the call trace,
     /// for the live environment's engine only).
@@ -92,7 +97,9 @@ final class AgentCallHost: CallEngineDelegate {
     func callEngine(_ engine: CallEngine, didChangeStateFrom old: CallState, to new: CallState) {
         trace("state: \(old) -> \(new)")
         switch new {
-        case .ended, .failed, .idle: announcer.stopNow()
+        case .ended, .failed, .idle:
+            announcer.stopNow()
+            releaseMicAfterConnectSounds(engine)
         case .dialing, .incomingRinging, .connecting, .connected, .reconnecting: break
         }
         guard old == .dialing, case .connecting = new,
@@ -114,14 +121,40 @@ final class AgentCallHost: CallEngineDelegate {
     func callEngine(_ engine: CallEngine, cue: CallCue) {
         trace("cue: \(cue)")
         switch cue {
-        case .start(.connecting): announcer.startRepeating(.connecting)
+        case .start(.connecting):
+            withholdMicForConnectSounds(engine)
+            announcer.startRepeating(.connecting)
         case .start(.retrying): announcer.startRepeating(.retrying)
         case .stop: announcer.stopRepeating()
-        case .moment(.connected), .moment(.reconnected): announcer.announce(.connected)
+        case .moment(.connected), .moment(.reconnected):
+            // Also the first withhold for a pre-connected answer, which has no
+            // connecting cue; synchronous, so it precedes the engine's mic command.
+            let id = withholdMicForConnectSounds(engine)
+            announcer.announce(.connected) { [weak self, weak engine] in
+                guard let self, let engine, self.connectSoundsID == id else { return }
+                self.releaseMicAfterConnectSounds(engine)
+            }
         case .moment(.connectionLost): announcer.announce(.disconnected)
-        case .moment(.held), .moment(.resumed): break
+        // "Connected" will not follow until the resume, which withholds again.
+        case .moment(.held): releaseMicAfterConnectSounds(engine)
+        case .moment(.resumed): break
         @unknown default: break
         }
+    }
+
+    /// Keep the agent from hearing the ringback and "Connected" through the mic.
+    @discardableResult
+    private func withholdMicForConnectSounds(_ engine: CallEngine) -> UUID {
+        let id = UUID()
+        connectSoundsID = id
+        engine.setMicWithheld(true)
+        return id
+    }
+
+    private func releaseMicAfterConnectSounds(_ engine: CallEngine) {
+        guard connectSoundsID != nil else { return }
+        connectSoundsID = nil
+        engine.setMicWithheld(false)
     }
 
     func callEngine(_ engine: CallEngine, didFinish record: CallRecord) {

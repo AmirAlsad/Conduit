@@ -6,10 +6,10 @@
 //  callback reports into the call trace — hold, CallKit audio activation (as the
 //  engine counts it: an activation it ignores, such as one during an unanswered
 //  ring, does not show; the raw activations are in the engine log lines),
-//  interruption and mute. Changes made in one main-actor turn are seen together,
-//  as their final values. The ring's pre-connect phase is not here: Observation
-//  loses its fast intermediate phases, so the call host traces each change from
-//  the delegate callback.
+//  interruption, mute and the host's mic withhold. Changes made in one main-actor
+//  turn are seen together, as their final values. The ring's pre-connect phase is
+//  not here: Observation loses its fast intermediate phases, so the call host
+//  traces each change from the delegate callback.
 //
 
 #if DEBUG
@@ -23,6 +23,7 @@ final class CallTraceObserver {
         var isAudioActivated: Bool
         var isInterrupted: Bool
         var isMuted: Bool
+        var isMicWithheld: Bool
     }
 
     private static var observers: [CallTraceObserver] = []
@@ -46,7 +47,8 @@ final class CallTraceObserver {
                 isOnHold: engine.isOnHold,
                 isAudioActivated: engine.isAudioActivated,
                 isInterrupted: engine.isInterrupted,
-                isMuted: engine.isMuted
+                isMuted: engine.isMuted,
+                isMicWithheld: engine.isMicWithheld
             )
         } onChange: { [weak self] in
             Task { @MainActor in self?.observe() }
@@ -59,7 +61,8 @@ final class CallTraceObserver {
         guard let last else {
             CallTrace.record("""
             engine: onHold=\(new.isOnHold) \
-            audioActivated=\(new.isAudioActivated) interrupted=\(new.isInterrupted) muted=\(new.isMuted)
+            audioActivated=\(new.isAudioActivated) interrupted=\(new.isInterrupted) muted=\(new.isMuted) \
+            micWithheld=\(new.isMicWithheld)
             """)
             return
         }
@@ -75,6 +78,9 @@ final class CallTraceObserver {
         }
         if new.isMuted != last.isMuted {
             CallTrace.record("muted: \(new.isMuted)")
+        }
+        if new.isMicWithheld != last.isMicWithheld {
+            CallTrace.record("mic withheld: \(new.isMicWithheld)")
         }
     }
 }

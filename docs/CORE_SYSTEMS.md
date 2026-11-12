@@ -404,7 +404,20 @@ said into a live session), and
 `.moment(.connectionLost)` says "Disconnected" (once per outage);
 `.moment(.held)` and `.moment(.resumed)` play nothing. The engine
 guarantees every loop is stopped by the time the call ends, a provider reset
-included, and no cues for a ring that is never answered. The engine runs a ring
+included, and no cues for a ring that is never answered. So the agent does not
+hear Conduit's own sounds through the mic (on the speaker it would, and could take
+them for the user), the host keeps the mic closed with the engine's
+`setMicWithheld(_:)` (not mute: the call screen and CallKit still show it unmuted)
+from `.start(.connecting)` until the announcer reports that the ringback has
+stopped and "Connected" has finished (`announce(_:completion:)`, from the
+synthesizer's didFinish/didCancel); a pre-connected answer, which has no connecting
+cue, withholds at `.moment(.connected)`, and so does a reconnect for its short
+"Connected". It releases at once when "Connected" will not come: the call ends or
+fails, or a hold (`.moment(.held)`; a resume while still connecting withholds again
+for the replayed ringback). "Disconnected" and "Retrying" are not withheld for: the
+transport is down while they play. The engine ends a withhold with the call, and
+releases one still in place 5 seconds after the call connected with its audio
+activated (`micWithholdTimeout`), logging a warning. The engine runs a ring
 for at most its `ringTimeout` (60 s) and waits at most `joinTimeout` (30 s) for the
 agent after the transport's `connect` returns; the app keeps both defaults.
 

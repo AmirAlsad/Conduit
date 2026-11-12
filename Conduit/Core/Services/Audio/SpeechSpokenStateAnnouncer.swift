@@ -17,13 +17,17 @@
 //  same class of path that lets the spoken cues through during a call. No
 //  `AVAudioSession` is touched (CallKit owns it).
 //
+//  An announcement's completion runs when the synthesizer reports its utterance
+//  finished or cancelled, so the host knows when the call's mic can open without
+//  the agent hearing the cue.
+//
 
 import AudioToolbox
 import AVFoundation
 import Foundation
 
 @MainActor
-final class SpeechSpokenStateAnnouncer: SpokenStateAnnouncing {
+final class SpeechSpokenStateAnnouncer: NSObject, SpokenStateAnnouncing, AVSpeechSynthesizerDelegate {
     private let synthesizer = AVSpeechSynthesizer()
     private let repeatInterval: Duration
     /// The audible part of one `phone-ring.caf` cycle, so a ringback is never cut
@@ -35,20 +39,27 @@ final class SpeechSpokenStateAnnouncer: SpokenStateAnnouncing {
     private var isRinging = false
     private var ringStartedAt: ContinuousClock.Instant?
     private var ringFinishTask: Task<Void, Never>?
-    private var phraseAfterRingback: SpokenPhrase?
+    private var phraseAfterRingback: (phrase: SpokenPhrase, completion: (@MainActor () -> Void)?)?
+    /// The utterances whose end someone is waiting for. Each entry keeps its
+    /// utterance alive, so its identifier is not reused before the entry goes.
+    private var utteranceCompletions: [ObjectIdentifier: (utterance: AVSpeechUtterance, completion: @MainActor () -> Void)] = [:]
 
     init(repeatInterval: Duration = .seconds(7), minimumRingback: Duration = .milliseconds(2100)) {
         self.repeatInterval = repeatInterval
         self.minimumRingback = minimumRingback
+        super.init()
         synthesizer.usesApplicationAudioSession = false
+        synthesizer.delegate = self
     }
 
-    func announce(_ phrase: SpokenPhrase) {
+    func announce(_ phrase: SpokenPhrase, completion: (@MainActor () -> Void)?) {
         guard ringFinishTask == nil else {
-            phraseAfterRingback = phrase
+            let replaced = phraseAfterRingback?.completion
+            phraseAfterRingback = (phrase, completion)
+            replaced?()
             return
         }
-        speak(phrase)
+        speak(phrase, completion: completion)
     }
 
     func startRepeating(_ phrase: SpokenPhrase) {
@@ -83,9 +94,9 @@ final class SpeechSpokenStateAnnouncer: SpokenStateAnnouncing {
             guard !Task.isCancelled, let self else { return }
             self.ringFinishTask = nil
             self.stopRingback()
-            if let phrase = self.phraseAfterRingback {
+            if let pending = self.phraseAfterRingback {
                 self.phraseAfterRingback = nil
-                self.speak(phrase)
+                self.speak(pending.phrase, completion: pending.completion)
             }
         }
     }
@@ -93,17 +104,39 @@ final class SpeechSpokenStateAnnouncer: SpokenStateAnnouncing {
     func stopNow() {
         ringFinishTask?.cancel()
         ringFinishTask = nil
+        let dropped = phraseAfterRingback?.completion
         phraseAfterRingback = nil
         repeatTask?.cancel()
         repeatTask = nil
         stopRingback()
+        dropped?()
     }
 
-    private func speak(_ phrase: SpokenPhrase) {
+    private func speak(_ phrase: SpokenPhrase, completion: (@MainActor () -> Void)? = nil) {
         let utterance = AVSpeechUtterance(string: phrase.utterance)
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        if let completion {
+            utteranceCompletions[ObjectIdentifier(utterance)] = (utterance, completion)
+        }
         synthesizer.speak(utterance)
         Log.info(.audio, "Spoke call state: \(phrase.rawValue)")
+    }
+
+    // MARK: - AVSpeechSynthesizerDelegate
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        utteranceEnded(ObjectIdentifier(utterance))
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        utteranceEnded(ObjectIdentifier(utterance))
+    }
+
+    private nonisolated func utteranceEnded(_ id: ObjectIdentifier) {
+        Task { @MainActor [weak self] in
+            guard let entry = self?.utteranceCompletions.removeValue(forKey: id) else { return }
+            entry.completion()
+        }
     }
 
     // MARK: - Ringback (system sound)

@@ -400,6 +400,7 @@ exists to find out which playback paths are audible.
 | C5 | Cue Lab, Daily call | The same on a Daily call (7a and 7b are disabled there). | *Record* into the grid. | |
 | C6 | Cue Lab in the last retry phase | On a LiveKit call, airplane mode on until "Retrying connection" goes silent (about a minute), then press the candidates. | *Record* which numbers are heard in the phase where the normal cues were not. | |
 | C7 | Cue Lab, SmallWebRTC call | The same on a SmallWebRTC call. | *Record* into the grid. | |
+| C8 | The agent does not hear the connect sounds | On the phone speaker, call an echo agent (one that plays the caller's own voice back), on LiveKit and on Daily; then answer a ring from it, and a pre-connected (`--preconnect media`) ring on LiveKit. Stay silent until "Connected" has finished, then speak. Repeat with airplane mode on for 10 seconds mid-call. | No ringback and no "Connected" comes back from the agent, and your own voice does, from the first word after "Connected". The call screen never shows muted. The trace shows `mic withheld: true` at the ringback and `mic withheld: false` just after "Connected", with no "mic was still withheld" warning. After the outage, "Disconnected"/"Retrying" are not echoed either (the connection is down) and the second "Connected" is not echoed. *Record* any echoed cue and how long after "Connected" your first words were echoed. | |
 
 ### G. The join deadline
 
