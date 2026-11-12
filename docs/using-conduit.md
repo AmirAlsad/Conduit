@@ -12,6 +12,14 @@ stays closed the rest of the time. Use it in noisy places, or when you want
 positive control over exactly what the agent hears. The mute button still works
 in both modes; push-to-talk simply adds a second gate.
 
+## Where the sound comes from
+
+A call starts like a phone call: on the earpiece, unless AirPods, headphones or
+your car are connected, in which case it plays there. Hold the phone to your ear,
+or switch to the speaker from Conduit's in-call controls (or, on LiveKit calls,
+the system call screen's audio button). Your choice stays for
+the rest of the call, through a reconnect or a hold.
+
 ## Daily audio routing
 
 On **Daily** calls, switch the speaker / Bluetooth / earpiece output from

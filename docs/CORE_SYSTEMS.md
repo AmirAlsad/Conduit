@@ -476,14 +476,21 @@ Key behaviors:
   credential fetch) — and the mic is never enabled before activation. The mic
   follows one rule over every input (activation, interruption, in-app and system
   mute, push-to-talk, the transport reporting `.connected`), whatever order they
-  arrive in; route reads and the hands-free default also wait for the activation,
+  arrive in; route reads (and the speaker default, when a host turns it on) also wait for the activation,
   and an activation during an unanswered ring is ignored (it belongs to an
   earlier call).
-- **Hands-free default.** After connect, once the transport's device list is
-  populated, the engine selects the speaker through `transport.setAudioDevice` —
-  once per call, and only when the list has no Bluetooth or wired route — so it
-  never yanks audio off a connected car. It goes through the transport because the
-  WebRTC SDK manages the session and reverts an `AVAudioSession` override.
+- **The starting route: the earpiece, like a phone call.** Conduit leaves the
+  engine's `defaultsToSpeaker` off (the package default), so the engine makes no
+  route change of its own: a call with nothing connected starts on the earpiece and
+  stays there through connecting, so nobody is caught out by a ring and a voice on
+  the loudspeaker; with AirPods or a car connected it plays there. The speaker is
+  the user's choice: the in-app route picker (on every transport), the native call
+  screen's audio button (LiveKit; not Daily), Bluetooth and CarPlay,
+  and a route the user picked stays through reconnects and holds. With the setting
+  on, the engine would select the speaker once per call after connect, through
+  `transport.setAudioDevice`, only when the list has no Bluetooth or wired route (it
+  goes through the transport because the WebRTC SDK manages the session and reverts
+  an `AVAudioSession` override).
 - **`.connected` requires both** transport-ready and bot-ready (the transport
   emits `.connected` only when both hold), so the native timer / "Connected"
   announcement never fires before the agent can actually hear the user.
@@ -688,8 +695,7 @@ and bridges the `CXProviderDelegate` callbacks onto `CallProviderDelegate`. The
 `SystemAudioSession` (`AudioSessionActivating`) pre-configures the session
 (`.playAndRecord` / `.voiceChat`, Bluetooth + A2DP + duck) **without activating
 it** — CallKit activates, the engine attaches media in `providerDidActivate`. The
-speaker default is applied later, through the transport's device list (see the
-hands-free default above). The seam was device-verified end-to-end in M3: connect + two-way audio +
+engine changes no route of its own (see the starting route above). The seam was device-verified end-to-end in M3: connect + two-way audio +
 Dynamic Island pill + lock-screen call screen + clean teardown.
 
 On an outgoing call, `SystemCallProvider` reports a `CXCallUpdate` with

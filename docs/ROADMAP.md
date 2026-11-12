@@ -315,9 +315,10 @@ the November run**, so none is closed until the 0.2.0 sheet in
   confirmed. It also cannot join while ringing.
 - **Package issue #13, deferred items.**
   [ConduitCallEngine#13](https://github.com/AmirAlsad/ConduitCallEngine/issues/13):
-  in-app answer and decline, provider icon / ringtone / handle type, configurable
-  reconnect and hands-free policies, a CallKit call-id accessor, and host-owned
-  PushKit registration. The engine does not offer these today.
+  in-app answer and decline, provider icon / ringtone / handle type, a configurable
+  reconnect policy, a CallKit call-id accessor, and host-owned PushKit registration.
+  The engine does not offer these today. (The hands-free policy is now configurable:
+  `CallEngineConfiguration.defaultsToSpeaker`, off in the package and in Conduit.)
 
 ## Deferred / explicitly not doing
 

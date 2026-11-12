@@ -26,9 +26,8 @@ struct AppWiringTests {
         #expect(environment.callHost.engine === environment.callEngine)
     }
 
-    /// The engine holds a call connecting for the ringback's start delay and first
-    /// tone, so the tone is never cut and "Connected" follows it.
-    @Test func theEngineConnectsNoSoonerThanTheRingbacksFirstTone() throws {
+    /// The configuration the app builds its engine with.
+    private func appConfiguration() throws -> CallEngineConfiguration? {
         let system = SimulatedCallSystem()
         var configuration: CallEngineConfiguration?
         let container = try ModelContainer(
@@ -49,10 +48,23 @@ struct AppWiringTests {
                 return CallEngine.simulated(configuration: $0, system: system)
             }
         )
+        return configuration
+    }
 
+    /// The engine holds a call connecting for the ringback's start delay and first
+    /// tone, so the tone is never cut and "Connected" follows it.
+    @Test func theEngineConnectsNoSoonerThanTheRingbacksFirstTone() throws {
+        let configuration = try appConfiguration()
         #expect(Ringback.startDelay == .milliseconds(500))
         #expect(Ringback.toneLength == .milliseconds(2100))
         #expect(configuration?.minimumOutgoingConnectingDuration == Ringback.startDelay + Ringback.toneLength)
+    }
+
+    /// A call starts like a phone call, on the earpiece with nothing connected: the
+    /// app leaves the engine's speaker default off, and the user picks the speaker.
+    @Test func callsStartOnTheEarpiece() throws {
+        let configuration = try #require(try appConfiguration())
+        #expect(configuration.defaultsToSpeaker == false)
     }
 
     @Test func launchWiresSaveTimeRegistrationToTheHost() {
