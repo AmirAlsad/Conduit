@@ -37,13 +37,13 @@ extension Agent {
             id: id,
             displayName: name,
             handle: syntheticEmail,
+            ringPreparation: ringPreparation,
             makeTransport: { transportFactory(kind) },
             connect: connectionResolver(
                 keychain: keychain,
                 pairingResolver: pairingResolver,
                 inlineConnection: inlineConnection
-            ),
-            ringPreparation: ringPreparation
+            )
         )
     }
 

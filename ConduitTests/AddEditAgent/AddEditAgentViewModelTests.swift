@@ -419,7 +419,7 @@ struct AddEditAgentViewModelTests {
 
     @Test func connectThrowingFailsTheTransportStage() async throws {
         let fake = FakeTransport()
-        fake.connectError = .timedOut
+        fake.connectError = .connectionFailed("timed out")
         let vm = makeViewModel(repository: try makeRepository(), transportFactory: { _ in fake })
         vm.connectionURLText = "https://x.daily.co/room"
         vm.directToken = "t"
