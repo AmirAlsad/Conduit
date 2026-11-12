@@ -16,10 +16,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The ConduitCallEngine package's manifest needs swift-tools 6.1, i.e. Xcode
-  # 16.3 or later. Xcode 16.4 is installed on the macos-15 image and ships Swift
-  # 6.1 and the iOS 18.6 simulator runtime.
-  DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+  # The app and its ConduitCallEngine package use iOS 26 SDK names
+  # (AVAudioSession.CategoryOptions.allowBluetoothHFP) and a layered .icon app
+  # icon, so they only build with Xcode 26. The tests still run on the iOS 18.6
+  # simulator runtime (see the destination below).
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
 
 jobs:
   unit-tests:
@@ -54,6 +55,9 @@ jobs:
         # can't capture the mic there), so real two-way calls are NOT run on
         # GitHub's simulator runners and must be validated on a tethered device.
         run: |
+          # The default run shell has no pipefail, so without it the pipe into
+          # tee reports tee's exit status and a failed build passes the step.
+          set -o pipefail
           xcodebuild \
             -scheme Conduit \
             -disableAutomaticPackageResolution \
@@ -77,9 +81,9 @@ jobs:
           # Authoritative counts straight from the result bundle. Do NOT grep the
           # log: xcodebuild's non-TTY CI output omits the ✔/✘ glyphs, so a
           # log-based count always reported 0. `xcresulttool get test-results
-          # summary` (Xcode 16+) is the source of truth.
+          # summary` is the source of truth (JSON is its default output).
           xcrun xcresulttool get test-results summary \
-            --path TestResults.xcresult --format json > test-summary.json 2>/dev/null \
+            --path TestResults.xcresult > test-summary.json 2>/dev/null \
             || echo '{}' > test-summary.json
 
           TOTAL=$(jq -r '.totalTestCount // 0' test-summary.json)

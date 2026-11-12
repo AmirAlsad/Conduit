@@ -108,7 +108,8 @@ xcodebuild -scheme ConduitCallEngine-Package \
 
 On a Mac whose Xcode can't install an iOS 18 simulator runtime (Xcode 27.2 can't),
 swap the destination for an installed one — `platform=iOS Simulator,name=iPhone 17,OS=27.2`
-— where XCUITest queries were confirmed to work. CI keeps iPhone 16 / iOS 18.6.
+— where XCUITest queries were confirmed to work. CI builds with Xcode 26.3 on
+`macos-15` and keeps iPhone 16 / iOS 18.6; a failing `xcodebuild` fails the job.
 
 A clean build shows **zero** Swift warnings (the strict baseline + CI gate hold
 the count at 0):

@@ -7,6 +7,25 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### CI step piped `xcodebuild` into `tee` without `pipefail`, so a failed build reported success
+First seen: 2026-11-11 (the Tests workflow was green on `main` while building nothing)
+
+**Pattern:** `tests.yml` ran `xcodebuild ... test 2>&1 | tee xcodebuild.log` in a
+default `run:` shell, which has no `pipefail`, so the step's exit status was
+`tee`'s. The build failed before any test ran (the workflow selected Xcode 16.4,
+but the app and engine package need the iOS 26 SDK: layered `.icon` app icon,
+`allowBluetoothHFP`), the log ended `** TEST FAILED **`, and the job still showed
+success. A UI test that fails against the seed data was hiding behind the green
+check too.
+
+**Rule:** Every step that pipes a build or test command sets `set -o pipefail`
+(or `shell: bash`). After changing a workflow, open the run's log and read the
+test summary (counts, `** TEST SUCCEEDED **`) rather than trusting the green
+check.
+
+**Why it's missed:** Green is the expected state, so nobody opens the log; `tee`
+succeeds, so the failure only shows up as text in a step that reports success.
+
 ### Unpinned SPM ranges let the SDKs drift between a device-verified build and the next one
 First seen: 2026-11-11 (a fresh resolve had drifted to unverified SDKs)
 
