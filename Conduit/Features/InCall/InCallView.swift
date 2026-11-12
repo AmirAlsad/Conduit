@@ -17,6 +17,10 @@ struct InCallView: View {
     @AppStorage(SettingsStore.pushToTalkKey) private var pushToTalk = false
     @State private var isHolding = false
     @State private var activeRouteKind: AudioRouteKind = .other
+    #if DEBUG
+    @State private var cueLab = CueLab()
+    @State private var showingCueLab = false
+    #endif
 
     private var coordinator: CallEngine { environment.callEngine }
 
@@ -60,6 +64,17 @@ struct InCallView: View {
         }
         #if DEBUG
         .task { await traceCall() }
+        .onAppear {
+            cueLab.contextProvider = {
+                CueLab.CallContext(
+                    transport: environment.activeCallAgent?.transportKind,
+                    engineState: String(String(describing: coordinator.state).prefix { $0 != "(" })
+                )
+            }
+            cueLab.startObserving()
+        }
+        .onDisappear { cueLab.stopObserving() }
+        .sheet(isPresented: $showingCueLab) { CueLabView(lab: cueLab) }
         #endif
     }
 
@@ -150,6 +165,20 @@ struct InCallView: View {
                 .accessibilityIdentifier(AccessibilityID.InCall.closeButton)
             }
             Spacer()
+            #if DEBUG
+            Button {
+                showingCueLab = true
+            } label: {
+                Image(systemName: "waveform.badge.magnifyingglass")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(onSurface)
+                    .frame(width: 44, height: 44)
+                    .background(controlFill, in: .circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cue Lab")
+            .accessibilityIdentifier(AccessibilityID.CueLab.openButton)
+            #endif
         }
     }
 
