@@ -425,12 +425,17 @@ its agent there skips `.connecting` altogether. The engine keeps the mic closed 
 the call is connected, so neither the ringback nor "Connecting" needs anything. A
 call answered with its agent there withholds nothing, so the engine sends
 `call-connected` as soon as CallKit activates the audio. At every other
-`.moment(.connected)` (and `.moment(.reconnected)`) the host keeps the mic closed with the engine's
+`.moment(.connected)` the host keeps the mic closed with the engine's
 `setMicWithheld(_:)` (not mute: the call screen and CallKit still show it unmuted)
 until the announcer reports that "Connected" has finished
-(`announce(_:completion:)`, from the synthesizer's didFinish/didCancel, or
-`stopNow()` cutting it off), so the agent does not hear it through the mic (on the
-speaker it would, and could take it for the user). The release opens the mic, and
+(`announce(_:completion:)`, from the synthesizer's didFinish/didCancel, or a cut-off),
+so the agent does not hear it through the mic (on the speaker it would, and could
+take it for the user). `.moment(.reconnected)` withholds nothing: the user can talk
+the moment the call is back, and the agent may overhear "Connected" (on a device a
+LiveKit reconnect's "Connected" did not finish within 5 s, which the withhold turned
+into a 5 s dead mic). Every "Connected" first cuts off what is still queued or
+speaking (`cutOffPending()`: a "Retrying connection" repeat, "Disconnected"), which
+is stale by then. The release opens the mic, and
 the engine then tells the agent `call-connected`: the moment to start speaking.
 The host releases at once when "Connected" will not come: the call ends or fails,
 or a hold (`.moment(.held)`). "Disconnected" and "Retrying" are not withheld for: the
@@ -660,7 +665,7 @@ exactly what's unreachable: "Retrying connection" repeats on a ~7 s cadence,
 tone (`Ringback`, `SystemRingback`) instead of speaking, starting 0.5 s after the cue,
 for calls the user placed only; announced once, `.connecting` is spoken ("Connecting",
 an answered call still connecting after a second). A stop silences the tone at once
-(the engine's outgoing minimum connecting time covers the first tone), and `stopNow()` also cuts off speech in progress. The real `SpeechSpokenStateAnnouncer` uses
+(the engine's outgoing minimum connecting time covers the first tone), and `stopNow()` also cuts off speech in progress. A phrase the synthesizer has not started (its `didStart`) within 1.5 s of the request is stale: everything queued or speaking is cut off and its completions run, so a late phrase is never heard after its moment and the first "Connected"'s withhold cannot outlast that bound by much. The retrying loop never queues a repeat while its previous one has not finished; that repeat is skipped and the next tick speaks. In DEBUG builds each phrase's request, `didStart`, `didFinish`, `didCancel` and cut-off go to the call trace (`speech: ...` lines). The real `SpeechSpokenStateAnnouncer` uses
 `AVSpeechSynthesizer` and the system-sound server for the tone; it must mix with
 (never deactivate) the CallKit-owned session — that ducking/session wiring is
 finalized in WS-3. `AgentCallHost` drives it from the engine's cue events (see

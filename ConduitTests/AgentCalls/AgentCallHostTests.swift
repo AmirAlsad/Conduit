@@ -829,7 +829,7 @@ struct AgentCallHostTests {
         #expect(h.transport.sentSignals == [.connected])
     }
 
-    /// Its reconnects are cued as any call's are.
+    /// Its reconnects are cued as any call's are, with nothing withheld.
     @Test func aCallReadyAtTheAnswerStillMarksItsReconnects() async throws {
         let h = try AgentCallHostHarness(
             pairingEndpoint: endpoint, transportKind: .livekit, sleep: AgentCallHostHarness.realTimeSleep
@@ -848,10 +848,7 @@ struct AgentCallHostTests {
         await h.system.awaitPendingWork()
 
         #expect(h.announcer.announced == [.disconnected, .connected])
-        #expect(h.engine.isMicWithheld)
-        #expect(!h.transport.isMicEnabled)
-        h.announcer.finishAnnouncements()
-        await h.system.awaitPendingWork()
+        #expect(!h.engine.isMicWithheld)
         #expect(h.transport.isMicEnabled)
     }
 
@@ -1045,26 +1042,27 @@ struct AgentCallHostTests {
         #expect(h.transport.isMicEnabled)
     }
 
-    /// A call that ends cuts its "Connected" off, so its completion cannot reach the
-    /// next call; within a call, a connection's "Connected" that finishes after the
-    /// next connection's started must not release that one's withhold.
-    @Test func connectedFromAnEarlierConnectionDoesNotReleaseTheNextOnesMic() async throws {
+    /// A drop while the first "Connected" still plays: the reconnect cuts it off,
+    /// which releases its withhold, and its late completion changes nothing.
+    @Test func aReconnectCutsOffTheFirstConnectedAndReleasesItsWithhold() async throws {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
         h.system.deliverTransportEvent(.connected) // "Connected", still playing
+        #expect(h.engine.isMicWithheld)
         h.system.deliverTransportEvent(.disconnected(reason: .networkDropped))
         await h.system.awaitPendingReconnect()
-        h.system.deliverTransportEvent(.connected) // back: "Connected" again
-        #expect(h.engine.isMicWithheld)
-
-        h.announcer.finishOldestAnnouncement() // the first connection's phrase ends now
+        h.system.deliverTransportEvent(.connected) // back
         await h.system.awaitPendingWork()
-        #expect(h.engine.isMicWithheld)
 
-        h.announcer.finishAnnouncements()
+        #expect(h.announcer.cutOffCount == 2) // before each "Connected"
+        #expect(!h.engine.isMicWithheld)
+        #expect(h.transport.isMicEnabled)
+
+        h.announcer.finishOldestAnnouncement() // a late completion
         await h.system.awaitPendingWork()
         #expect(!h.engine.isMicWithheld)
+        #expect(h.transport.isMicEnabled)
     }
 
     @Test func endingTheCallCutsItsConnectedOff() async throws {
@@ -1081,7 +1079,10 @@ struct AgentCallHostTests {
         #expect(!h.engine.isMicWithheld)
     }
 
-    @Test func aReconnectWithholdsTheMicOnlyForConnected() async throws {
+    /// After a reconnect the user can talk at once: "Connected" is said with the
+    /// mic open. On a device a LiveKit reconnect's "Connected" did not finish
+    /// within 5 s, which the withhold turned into 5 s of dead mic.
+    @Test func aReconnectSaysConnectedWithTheMicOpen() async throws {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
@@ -1097,8 +1098,63 @@ struct AgentCallHostTests {
         h.system.deliverTransportEvent(.connected) // back: "Connected"
         await h.system.awaitPendingWork()
         #expect(h.announcer.announced == [.connected, .disconnected, .connected])
+        #expect(!h.engine.isMicWithheld)
+        #expect(h.transport.isMicEnabled) // before "Connected" has played
+        #expect(h.transport.sentSignals == [.connected, .connected])
+        #expect(!h.system.fireTimer(.micWithholdTimeout)) // nothing to bound
+    }
+
+    /// Whatever is still queued or speaking from the outage is stale once the call
+    /// is back: "Connected" cuts it off first, after the retrying loop stops.
+    @Test func everyConnectedCutsOffWhatIsQueuedFirst() async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        #expect(Array(h.announcer.events.suffix(3)) == [.stopRepeating, .cutOff, .announce(.connected)])
+        h.announcer.finishAnnouncements()
+        await h.system.awaitPendingWork()
+
+        h.system.deliverTransportEvent(.reconnecting)
+        h.system.deliverTransportEvent(.connected)
+        await h.system.awaitPendingWork()
+
+        #expect(Array(h.announcer.events.suffix(5)) == [
+            .announce(.disconnected), .startRepeating(.retrying),
+            .stopRepeating, .cutOff, .announce(.connected),
+        ])
+    }
+
+    /// The first "Connected" of a call still withholds the mic, but one the
+    /// synthesizer never starts is cut off at the announcer's start bound, whose
+    /// completion releases the mic: the withhold never waits for the engine's 5 s.
+    @Test func aFirstConnectedThatNeverStartsReleasesTheMicAtTheStartBound() async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        await h.system.awaitPendingWork()
         #expect(h.engine.isMicWithheld)
-        #expect(!h.transport.isMicEnabled)
+
+        h.announcer.expireUnstartedAnnouncements()
+        await h.system.awaitPendingWork()
+
+        #expect(!h.engine.isMicWithheld)
+        #expect(h.transport.isMicEnabled)
+        #expect(h.transport.sentSignals == [.connected])
+        #expect(h.system.fireTimer(.micWithholdTimeout) == false)
+    }
+
+    /// One that started is not cut off by the bound: it plays out, withheld.
+    @Test func aFirstConnectedThatStartedKeepsItsWithholdUntilItFinishes() async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        h.announcer.startAnnouncements()
+        h.announcer.expireUnstartedAnnouncements()
+        await h.system.awaitPendingWork()
+        #expect(h.engine.isMicWithheld)
 
         h.announcer.finishAnnouncements()
         await h.system.awaitPendingWork()

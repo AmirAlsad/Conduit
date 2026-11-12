@@ -178,12 +178,13 @@ final class AppEnvironment {
         }
         #endif
 
+        let announcer = SpeechSpokenStateAnnouncer()
         let environment = AppEnvironment(
             modelContainer: container,
             keychain: KeychainService(),
             contactSync: ContactSyncService(),
             agentRepository: SwiftDataAgentRepository(context: container.mainContext),
-            announcer: SpeechSpokenStateAnnouncer(),
+            announcer: announcer,
             microphone: SystemMicrophonePermission(),
             transportFactory: transportFactory,
             isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) },
@@ -192,6 +193,7 @@ final class AppEnvironment {
         )
         #if DEBUG
         environment.callHost.trace = { CallTrace.record($0) }
+        announcer.trace = { CallTrace.record($0) }
         CallTraceObserver.start(engine: environment.callEngine)
         #endif
         return environment

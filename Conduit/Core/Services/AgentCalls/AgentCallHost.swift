@@ -17,7 +17,10 @@
 //  ringback: answered with its agent already there, it says nothing, so the agent
 //  hears the user as soon as CallKit activates the audio; still connecting a second
 //  after the answer, it says "Connecting" once, then "Connected" as a placed call
-//  does. Reconnect cues are the same for both.
+//  does. Reconnect cues are the same for both, except that "Connected" after a
+//  reconnect withholds nothing: the user can talk the moment the call is back.
+//  Every "Connected" first cuts off what is still queued or speaking from before
+//  (a "Retrying connection" repeat, "Disconnected"), which is stale by then.
 //
 
 import ConduitCallEngine
@@ -171,7 +174,12 @@ final class AgentCallHost: CallEngineDelegate {
             // once CallKit has activated the audio.
             guard engine.activeCall?.wasReadyAtAnswer != true else { break }
             speakConnected(engine)
-        case .moment(.reconnected): speakConnected(engine)
+        case .moment(.reconnected):
+            // No withhold: a reconnect's "Connected" that stalls (seen after a
+            // LiveKit reconnect) must not leave the user with a dead mic, and the
+            // agent overhearing one short phrase is the lesser problem.
+            announcer.cutOffPending()
+            announcer.announce(.connected)
         case .moment(.connectionLost): announcer.announce(.disconnected)
         // "Connected" will not follow until the resume, which withholds again.
         case .moment(.held): releaseMicAfterConnectSounds(engine)
@@ -185,6 +193,7 @@ final class AgentCallHost: CallEngineDelegate {
     /// the mic and tells the agent to start speaking.
     private func speakConnected(_ engine: CallEngine) {
         let id = withholdMicForConnectSounds(engine)
+        announcer.cutOffPending()
         announcer.announce(.connected) { [weak self, weak engine] in
             guard let self, let engine, self.connectSoundsID == id else { return }
             self.releaseMicAfterConnectSounds(engine)
