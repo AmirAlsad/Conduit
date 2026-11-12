@@ -3,9 +3,10 @@
 //  ConduitTests
 //
 //  Conduit's side of the call engine, driven by the real engine against
-//  fakes: the call-log rows it writes from each record, the spoken cues it derives
-//  from transitions, Siri donation, missed-call notifications, the receipt bearer,
-//  and the agent targets it hands the engine (direct, pairing, inline push).
+//  fakes: the call-log rows it writes from each record, the engine's cues it
+//  speaks, Siri donation, missed-call notifications, the receipt bearer, the
+//  agent targets it hands the engine (direct, pairing, inline push), and VoIP
+//  token registration.
 //
 
 import Foundation
@@ -111,7 +112,7 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness()
         h.ring(agentID: UUID())
 
-        #expect(h.engine.state.failureReason == .unknown)
+        #expect(h.engine.state == .idle) // the ring ends without a failure screen
         #expect(try h.loggedEntries().isEmpty) // no agent to attribute the row to
         #expect(h.missedNotifier.missedAgentNames.isEmpty)
 
@@ -134,7 +135,9 @@ struct AgentCallHostTests {
         #expect(entries.first?.outcome == .noAnswer)
         #expect(entries.first?.duration == 0)
         #expect(entries.first?.transportKind == .daily)
+        #expect(entries.first?.missedReason == .busy)
         #expect(h.missedNotifier.missedAgentNames == [h.agent.name])
+        #expect(h.missedNotifier.missedReasons == [.busy])
         // Rang under the push's fallbacks, corrected to the agent before it ended.
         #expect(h.system.updatedCalls.first?.handle == h.agent.syntheticEmail)
         #expect(h.system.updatedCalls.first?.displayName == h.agent.name)
@@ -150,7 +153,60 @@ struct AgentCallHostTests {
         #expect(entries.count == 1)
         #expect(entries.first?.direction == .incoming)
         #expect(entries.first?.outcome == .noAnswer)
+        #expect(entries.first?.missedReason == .filteredByFocus)
         #expect(h.missedNotifier.missedAgentNames == [h.agent.name])
+        #expect(h.missedNotifier.missedReasons == [.filteredByFocus])
+    }
+
+    @Test func ringThatRingsOutWritesMissedRowAndNotifies() async throws {
+        let sleeper = ManualSleeper()
+        let h = try AgentCallHostHarness(ringTimeout: .seconds(60), sleep: { try await sleeper.sleep($0) })
+        h.ring()
+        #expect(h.engine.state == .incomingRinging)
+
+        await waitUntil { sleeper.pendingCount == 1 }
+        sleeper.fireAll()
+        await waitUntil { h.engine.state == .idle }
+
+        #expect(h.engine.state == .idle)
+        let entry = try #require(try h.loggedEntries().first)
+        #expect(entry.direction == .incoming)
+        #expect(entry.outcome == .noAnswer)
+        #expect(entry.missedReason == .ringTimedOut)
+        #expect(h.missedNotifier.missedAgentNames == [h.agent.name])
+        #expect(h.missedNotifier.missedReasons == [.ringTimedOut])
+        #expect(h.announcer.startedRepeating.isEmpty) // CallKit's ringtone is the only sound
+    }
+
+    @Test func ringTheCallerCancelsWritesMissedRowAndNotifies() async throws {
+        let h = try AgentCallHostHarness()
+        let callID = UUID()
+        h.ring(callID: callID)
+        h.system.deliverPush(["action": "cancel", "call_id": callID.uuidString]) {}
+
+        #expect(h.engine.state == .idle)
+        let entry = try #require(try h.loggedEntries().first)
+        #expect(entry.direction == .incoming)
+        #expect(entry.outcome == .noAnswer)
+        #expect(entry.missedReason == .canceledByCaller)
+        #expect(h.missedNotifier.missedReasons == [.canceledByCaller])
+        #expect(h.announcer.startedRepeating.isEmpty)
+    }
+
+    @Test func answeredAndDeclinedRowsCarryNoMissedReason() async throws {
+        let h = try AgentCallHostHarness()
+        let declined = UUID()
+        h.ring(callID: declined)
+        h.system.endCallFromSystem(declined)
+        h.engine.reset()
+        h.ring()
+        await h.system.answerIncomingCall()
+        h.system.deliverTransportEvent(.connected)
+        await h.engine.endCall()
+
+        let entries = try h.loggedEntries()
+        #expect(entries.count == 2)
+        #expect(entries.allSatisfy { $0.missedReason == nil })
     }
 
     @Test func remoteEndBeforeConnectWritesNoAnswerWithoutNotification() async throws {
@@ -158,9 +214,9 @@ struct AgentCallHostTests {
         await h.placeCall()
         h.system.deliverTransportEvent(.disconnected(reason: .botLeft))
 
-        // Preserved as-is: the state says completed while the row says no answer.
-        #expect(h.engine.state.endedOutcome == .completed)
+        #expect(h.engine.state.endedOutcome == .noAnswer) // state and row now agree
         #expect(try h.loggedEntries().map(\.outcome) == [.noAnswer])
+        #expect(try h.loggedEntries().first?.missedReason == nil)
         #expect(h.missedNotifier.missedAgentNames.isEmpty) // not a missed ring
     }
 
@@ -205,18 +261,24 @@ struct AgentCallHostTests {
         #expect(h.announcer.startedRepeating == [.connecting, .retrying])
     }
 
-    @Test func selfHealThenDropAnnouncesDisconnectedTwice() async throws {
+    @Test func selfHealThatEscalatesAnnouncesDisconnectedOnce() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
         h.system.deliverTransportEvent(.connected)
 
         h.system.deliverTransportEvent(.reconnecting) // the transport self-heals (display only)
-        #expect(h.announcer.announced.contains(.disconnected))
-        #expect(h.announcer.startedRepeating.contains(.retrying))
+        #expect(h.announcer.announced == [.connected, .disconnected])
+        #expect(h.announcer.repeatingPhrase == .retrying)
 
         h.system.deliverTransportEvent(.disconnected(reason: .networkDropped)) // then drops for real
-        #expect(h.announcer.announced == [.connected, .disconnected, .disconnected])
-        #expect(h.announcer.startedRepeating == [.connecting, .retrying, .retrying])
+        await h.system.awaitPendingReconnect()
+        #expect(h.engine.state == .reconnecting(attempt: 1))
+        #expect(h.announcer.announced == [.connected, .disconnected]) // one outage, one cue
+        #expect(h.announcer.repeatingPhrase == .retrying)
+
+        h.system.deliverTransportEvent(.connected)
+        #expect(h.announcer.announced == [.connected, .disconnected, .connected])
+        #expect(h.announcer.repeatingPhrase == nil)
     }
 
     @Test func duplicateConnectedAnnouncesOnce() async throws {
@@ -238,17 +300,49 @@ struct AgentCallHostTests {
         #expect(h.announcer.stopRepeatingCount == 1)
     }
 
-    @Test func providerResetLeavesTheAnnouncerRunning() async throws {
+    @Test func providerResetStopsTheRingbackAndWritesAFailedRow() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
+        #expect(h.announcer.repeatingPhrase == .connecting)
 
         h.system.resetProvider()
 
-        // Preserved as-is: a provider reset neither stops the cue nor writes history.
+        #expect(h.engine.state.failureReason == .unknown)
+        #expect(h.announcer.repeatingPhrase == nil)
+        #expect(h.announcer.stopRepeatingCount == 1)
+        let entry = try #require(try h.loggedEntries().first)
+        #expect(entry.outcome == .failed)
+        #expect(entry.failureReason == .unknown)
+    }
+
+    @Test func providerResetStopsTheRetryingLoop() async throws {
+        let h = try AgentCallHostHarness()
+        await h.placeCall()
+        h.system.deliverTransportEvent(.connected)
+        h.system.deliverTransportEvent(.reconnecting)
+        #expect(h.announcer.repeatingPhrase == .retrying)
+
+        h.system.resetProvider()
+
+        #expect(h.engine.state.failureReason == .unknown)
+        #expect(h.announcer.repeatingPhrase == nil)
+        #expect(try h.loggedEntries().map(\.outcome) == [.failed])
+    }
+
+    @Test func providerResetWhileRingingIsSilentAndRecordedAsFailed() async throws {
+        let h = try AgentCallHostHarness()
+        h.ring()
+
+        h.system.resetProvider()
+
         #expect(h.engine.state == .idle)
-        #expect(h.announcer.repeatingPhrase == .connecting)
+        #expect(h.announcer.startedRepeating.isEmpty)
         #expect(h.announcer.stopRepeatingCount == 0)
-        #expect(try h.loggedEntries().isEmpty)
+        let entry = try #require(try h.loggedEntries().first)
+        #expect(entry.direction == .incoming)
+        #expect(entry.outcome == .failed)
+        #expect(entry.missedReason == nil)
+        #expect(h.missedNotifier.missedAgentNames.isEmpty)
     }
 
     // MARK: - Siri donation
@@ -472,8 +566,8 @@ struct AgentCallHostTests {
         return agent
     }
 
-    private func body(_ request: RecordingURLProtocol.Captured) throws -> [String: String] {
-        try #require(try JSONSerialization.jsonObject(with: request.body) as? [String: String])
+    private func body(_ request: RecordingURLProtocol.Captured) throws -> [String: Any] {
+        try #require(try JSONSerialization.jsonObject(with: request.body) as? [String: Any])
     }
 
     @Test func tokenUpdateRegistersWithEveryInboundAgent() async throws {
@@ -493,10 +587,11 @@ struct AgentCallHostTests {
             #expect(request.method == "POST")
             #expect(request.headers["Authorization"] == "Bearer \(key)")
             let fields = try body(request)
-            #expect(fields["voip_token"] == "ab01")
-            #expect(fields["agent_id"] == agent.id.uuidString)
-            #expect(fields["display_name"] == agent.name)
-            #expect(fields["handle"] == agent.syntheticEmail)
+            #expect(fields["voip_token"] as? String == "ab01")
+            #expect(fields["agent_id"] as? String == agent.id.uuidString)
+            #expect(fields["display_name"] as? String == agent.name)
+            #expect(fields["handle"] as? String == agent.syntheticEmail)
+            #expect(fields["push_features"] as? [String] == CallEngine.supportedPushFeatures.sorted())
         }
     }
 
@@ -513,10 +608,10 @@ struct AgentCallHostTests {
 
         let requests = RecordingURLProtocol.requests(host: host)
         #expect(requests.count == 1)
-        #expect(try requests.first.map(body)?["voip_token"] == "0fa0")
+        #expect(try requests.first.map(body)?["voip_token"] as? String == "0fa0")
     }
 
-    @Test func registrationBodyCarriesAllSixKeys() async throws {
+    @Test func registrationBodyCarriesAllSevenKeys() async throws {
         let endpoint = RecordingURLProtocol.uniqueEndpoint()
         let agentID = UUID()
         await PushTokenRegistrar.register(
@@ -527,19 +622,21 @@ struct AgentCallHostTests {
             endpoint: endpoint,
             apiKey: "nova-key",
             bundleID: "com.example.conduit",
+            pushFeatures: ["cancel", "ring_timeout"],
             session: RecordingURLProtocol.session()
         )
 
         let host = try #require(endpoint.host())
         let request = try #require(RecordingURLProtocol.requests(host: host).first)
-        #expect(try body(request) == [
-            "voip_token": "ab01",
-            "platform": "ios",
-            "bundle_id": "com.example.conduit",
-            "agent_id": agentID.uuidString,
-            "display_name": "Nova",
-            "handle": "nova@conduit.invalid",
-        ])
+        let fields = try body(request)
+        #expect(fields.count == 7)
+        #expect(fields["voip_token"] as? String == "ab01")
+        #expect(fields["platform"] as? String == "ios")
+        #expect(fields["bundle_id"] as? String == "com.example.conduit")
+        #expect(fields["agent_id"] as? String == agentID.uuidString)
+        #expect(fields["display_name"] as? String == "Nova")
+        #expect(fields["handle"] as? String == "nova@conduit.invalid")
+        #expect(fields["push_features"] as? [String] == ["cancel", "ring_timeout"])
         #expect(request.headers["Authorization"] == "Bearer nova-key")
         #expect(request.headers["Content-Type"] == "application/json")
     }
@@ -559,7 +656,7 @@ struct AgentCallHostTests {
 
         let host = try #require(endpoint.host())
         let request = try #require(RecordingURLProtocol.requests(host: host).first)
-        let name = try #require(try body(request)["display_name"])
+        let name = try #require(try body(request)["display_name"] as? String)
         #expect(name.unicodeScalars.count == 120) // the backend rejects over 128
         #expect(longName.hasPrefix(name))
     }

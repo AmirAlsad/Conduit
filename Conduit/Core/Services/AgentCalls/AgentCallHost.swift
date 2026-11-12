@@ -3,7 +3,7 @@
 //  Conduit
 //
 //  Conduit's side of the call engine: turns agents into call targets and reacts
-//  to what the engine reports — writing the call log, speaking connection state,
+//  to what the engine reports — writing the call log, speaking the engine's cues,
 //  donating outgoing calls to Siri, posting missed-call notifications, supplying
 //  the API key that authenticates ring-status receipts, and registering the
 //  device's VoIP token with every agent that lets itself call the user. The
@@ -68,31 +68,22 @@ final class AgentCallHost: CallEngineDelegate {
     }
 
     func callEngine(_ engine: CallEngine, didChangeStateFrom old: CallState, to new: CallState) {
-        switch new {
-        case .connecting:
-            announcer.startRepeating(.connecting)
-            if old == .dialing, let id = engine.activeCall?.targetID, let agent = agent(id: id) {
-                // Teach Siri's calling domain that this contact is called via Conduit —
-                // enables the bare "call <agent>" phrase (the mirror contact has no
-                // phone number, so without donations Siri considers it uncallable).
-                interactionDonor.donateOutgoingCall(to: agent)
-            }
-        case .connected:
-            announcer.stopRepeating()
-            announcer.announce(.connected)
-        case .reconnecting(let attempt):
-            // Cue the drop once: on leaving `.connected` (a self-heal or the first
-            // app retry), or on the first app retry after a self-heal display.
-            var fromConnected = false
-            if case .connected = old { fromConnected = true }
-            if fromConnected || attempt == 1 {
-                announcer.announce(.disconnected)
-                announcer.startRepeating(.retrying)
-            }
-        case .ended, .failed:
-            announcer.stopRepeating()
-        case .idle, .incomingRinging, .dialing:
-            break
+        guard old == .dialing, case .connecting = new,
+              let id = engine.activeCall?.targetID, let agent = agent(id: id) else { return }
+        // Teach Siri's calling domain that this contact is called via Conduit —
+        // enables the bare "call <agent>" phrase (the mirror contact has no
+        // phone number, so without donations Siri considers it uncallable).
+        interactionDonor.donateOutgoingCall(to: agent)
+    }
+
+    func callEngine(_ engine: CallEngine, cue: CallCue) {
+        switch cue {
+        case .start(.connecting): announcer.startRepeating(.connecting)
+        case .start(.retrying): announcer.startRepeating(.retrying)
+        case .stop: announcer.stopRepeating()
+        case .moment(.connected), .moment(.reconnected): announcer.announce(.connected)
+        case .moment(.connectionLost): announcer.announce(.disconnected)
+        case .moment(.held), .moment(.resumed): break
         }
     }
 
@@ -105,12 +96,13 @@ final class AgentCallHost: CallEngineDelegate {
             duration: record.duration,
             outcome: record.outcome,
             transportKind: agent.transportKind,
-            failureReason: record.failureReason
+            failureReason: record.failureReason,
+            missedReason: record.missedReason
         ))
         do { try repository.save() }
         catch { Log.error(.call, "Failed to save call log: \(error)") }
-        if record.missedReason != nil {
-            missedCallNotifier.notifyMissedCall(agentName: agent.name)
+        if let reason = record.missedReason {
+            missedCallNotifier.notifyMissedCall(agentName: agent.name, reason: reason)
         }
     }
 

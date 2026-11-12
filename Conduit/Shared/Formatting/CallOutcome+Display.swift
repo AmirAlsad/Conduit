@@ -42,9 +42,25 @@ extension CallOutcome {
 }
 
 extension CallLogEntry {
+    /// A ring nobody answered or declined, shown like a missed call in the
+    /// Phone app: red, whatever the reason.
+    var isMissed: Bool { missedReason != nil }
+
+    var iconName: String {
+        isMissed ? "phone.arrow.down.left" : outcome.iconName
+    }
+
+    var tint: Color {
+        isMissed ? .red : outcome.tint
+    }
+
     /// The outcome label, qualified with WHY when a failed call recorded a
-    /// reason ("Failed — authentication"). Shared by Recents and Agent Detail.
+    /// reason ("Failed — authentication") or a missed ring never rang
+    /// ("Missed — Focus"). Shared by Recents and Agent Detail.
     var outcomeDisplayLabel: String {
+        if let missedReason {
+            return missedReason.shortLabel.map { "Missed — \($0)" } ?? "Missed"
+        }
         if outcome == .failed, let short = failureReason?.shortLabel {
             return "Failed — \(short)"
         }

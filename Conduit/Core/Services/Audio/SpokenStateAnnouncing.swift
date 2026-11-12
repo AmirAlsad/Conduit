@@ -3,7 +3,7 @@
 //  Conduit
 //
 //  The seam over spoken connection-state announcements. AgentCallHost drives it
-//  from the engine's state transitions; the real implementation uses `AVSpeechSynthesizer`,
+//  from the engine's call cues; the real implementation uses `AVSpeechSynthesizer`,
 //  the fake records phrases for tests. Decoupled from the agent's audio — it never
 //  touches the transport.
 //

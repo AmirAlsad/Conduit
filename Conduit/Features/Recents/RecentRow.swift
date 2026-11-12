@@ -3,7 +3,7 @@
 //  Conduit
 //
 //  One entry in the Recents call log: avatar, agent name (red when the agent is
-//  gone or the call failed), an outcome line, and a trailing duration for
+//  gone, the call failed, or the ring was missed), an outcome line, and a trailing duration for
 //  completed calls. Mirrors a Phone recents row.
 //
 
@@ -23,8 +23,8 @@ struct RecentRow: View {
                     .lineLimit(1)
 
                 HStack(spacing: 4) {
-                    Image(systemName: entry.outcome.iconName)
-                        .foregroundStyle(entry.outcome.tint)
+                    Image(systemName: entry.iconName)
+                        .foregroundStyle(entry.tint)
                     Text("\(entry.outcomeDisplayLabel) · \(CallFormatting.relativeDate(entry.startedAt))")
                         .lineLimit(1)
                 }
@@ -50,7 +50,7 @@ struct RecentRow: View {
     }
 
     private var nameTint: Color {
-        entry.agent == nil || entry.outcome == .failed ? .red : .primary
+        entry.agent == nil || entry.outcome == .failed || entry.isMissed ? .red : .primary
     }
 
     private var showsDuration: Bool {
@@ -84,6 +84,20 @@ struct RecentRow: View {
                 startedAt: .now.addingTimeInterval(-86_400),
                 outcome: .failed,
                 transportKind: .livekit
+            )
+        )
+        RecentRow(
+            entry: CallLogEntry(
+                agent: Agent(
+                    name: "Orion",
+                    transportKind: .livekit,
+                    connectionURL: URL(string: "wss://example.livekit.cloud")!
+                ),
+                direction: .incoming,
+                startedAt: .now.addingTimeInterval(-120_000),
+                outcome: .noAnswer,
+                transportKind: .livekit,
+                missedReason: .ringTimedOut
             )
         )
         RecentRow(

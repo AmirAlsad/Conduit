@@ -24,6 +24,9 @@ final class CallLogEntry {
     /// Why a `.failed` call failed; nil for non-failed outcomes and rows that
     /// predate this field (optional ⇒ lightweight migration).
     var failureReasonRaw: String?
+    /// Why an incoming ring was missed; nil for every other call and for rows
+    /// that predate this field.
+    var missedReasonRaw: String?
 
     init(
         id: UUID = UUID(),
@@ -33,7 +36,8 @@ final class CallLogEntry {
         duration: TimeInterval = 0,
         outcome: CallOutcome,
         transportKind: TransportKind,
-        failureReason: CallFailureReason? = nil
+        failureReason: CallFailureReason? = nil,
+        missedReason: MissedCallReason? = nil
     ) {
         self.id = id
         self.agent = agent
@@ -43,6 +47,7 @@ final class CallLogEntry {
         self.outcomeRaw = outcome.rawValue
         self.transportKindRaw = transportKind.rawValue
         self.failureReasonRaw = failureReason?.rawValue
+        self.missedReasonRaw = missedReason?.rawValue
     }
 
     var direction: CallDirection {
@@ -59,5 +64,9 @@ final class CallLogEntry {
 
     var failureReason: CallFailureReason? {
         failureReasonRaw.flatMap(CallFailureReason.init(rawValue:))
+    }
+
+    var missedReason: MissedCallReason? {
+        missedReasonRaw.flatMap(MissedCallReason.init(rawValue:))
     }
 }

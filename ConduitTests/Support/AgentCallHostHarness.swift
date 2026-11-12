@@ -76,12 +76,16 @@ final class AgentCallHostHarness {
     private(set) var pushCompletions = 0
 
     /// `pairingEndpoint` makes the agent pairing-mode: `token` is then its API key
-    /// and every connect attempt goes through `pairing`.
+    /// and every connect attempt goes through `pairing`. The default `sleep` returns
+    /// at once (instant reconnect backoff), so the ring timeout is off unless a test
+    /// sets one, with a sleep it ends by hand.
     init(
         token: String? = "valid-token",
         pairingEndpoint: URL? = nil,
         transportKind: TransportKind = .daily,
-        now: @escaping () -> Date = { Date() }
+        now: @escaping () -> Date = { Date() },
+        ringTimeout: Duration? = nil,
+        sleep: @escaping (Duration) async throws -> Void = { _ in }
     ) throws {
         container = try ModelContainer(
             for: Agent.self, CallLogEntry.self,
@@ -125,10 +129,10 @@ final class AgentCallHostHarness {
             registrationSession: RecordingURLProtocol.session()
         )
         engine = CallEngine.simulated(
-            configuration: CallEngineConfiguration(unknownCallerName: "Agent"),
+            configuration: CallEngineConfiguration(unknownCallerName: "Agent", ringTimeout: ringTimeout),
             system: system,
             now: now,
-            sleep: { _ in }
+            sleep: sleep
         )
         engine.delegate = host
         host.engine = engine

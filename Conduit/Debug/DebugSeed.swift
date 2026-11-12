@@ -51,7 +51,8 @@ enum DebugSeed {
                     duration: call.duration,
                     outcome: call.outcome,
                     transportKind: agent.transportKind,
-                    failureReason: call.failureReason
+                    failureReason: call.failureReason,
+                    missedReason: call.missedReason
                 )
             )
         }
@@ -100,6 +101,7 @@ enum DebugSeed {
         let duration: TimeInterval
         let secondsAgo: TimeInterval
         var failureReason: CallFailureReason?
+        var missedReason: MissedCallReason?
     }
 
     private static let callLog: [CallSpec] = [
@@ -109,7 +111,8 @@ enum DebugSeed {
         CallSpec(agent: "Nova", direction: .incoming, outcome: .completed, duration: 125, secondsAgo: -90_000),
         CallSpec(agent: "Cleo", direction: .outgoing, outcome: .failed, duration: 0, secondsAgo: -97_000,
                  failureReason: .badToken),
-        CallSpec(agent: "Orion", direction: .incoming, outcome: .noAnswer, duration: 0, secondsAgo: -180_000),
+        CallSpec(agent: "Orion", direction: .incoming, outcome: .noAnswer, duration: 0, secondsAgo: -180_000,
+                 missedReason: .ringTimedOut),
         CallSpec(agent: "Atlas", direction: .outgoing, outcome: .completed, duration: 42, secondsAgo: -260_000),
         CallSpec(agent: "Sage", direction: .incoming, outcome: .completed, duration: 339, secondsAgo: -350_000),
     ]

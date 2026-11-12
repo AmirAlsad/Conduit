@@ -3,8 +3,8 @@
 //  ConduitTests
 //
 //  Small helpers the host-side call tests share: a hand-advanced clock, a
-//  tick-bounded wait, a source of fresh fake transports, and date-free
-//  `CallState` matchers.
+//  tick-bounded wait, a hand-fired sleep, a source of fresh fake transports, and
+//  date-free `CallState` matchers.
 //
 
 import ConduitCallEngine
@@ -45,6 +45,25 @@ final class FakeTransportPool {
         made.append(transport)
         next = FakeTransport()
         return transport
+    }
+}
+
+/// A `sleep` for the engine that returns only when the test says so, so a ring
+/// timeout fires at a moment the test picks. Every sleeper is resumed by `fireAll()`.
+@MainActor
+final class ManualSleeper {
+    private var pending: [CheckedContinuation<Void, Never>] = []
+
+    var pendingCount: Int { pending.count }
+
+    func sleep(_ duration: Duration) async throws {
+        await withCheckedContinuation { pending.append($0) }
+    }
+
+    func fireAll() {
+        let waiting = pending
+        pending = []
+        waiting.forEach { $0.resume() }
     }
 }
 

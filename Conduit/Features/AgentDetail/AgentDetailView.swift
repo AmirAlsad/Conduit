@@ -164,8 +164,8 @@ struct AgentDetailView: View {
 
     private func logRow(_ entry: CallLogEntry, index: Int) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: entry.outcome.iconName)
-                .foregroundStyle(entry.outcome.tint)
+            Image(systemName: entry.iconName)
+                .foregroundStyle(entry.tint)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.outcomeDisplayLabel)

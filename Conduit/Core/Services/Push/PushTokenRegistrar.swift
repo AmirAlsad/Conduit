@@ -5,9 +5,12 @@
 //  POSTs this device's VoIP push token to an agent's own inbound-registration
 //  endpoint (bearer = the agent's API key), so that server can later ring the user.
 //  The token only ever travels to the user's own servers — there is no backend of
-//  ours. See `docs/INBOUND_CALLS.md` for the contract.
+//  ours. It travels with the push features this build's engine understands, so the
+//  server sends a cancel push or a `ring_timeout` only to an app that handles them.
+//  See `docs/INBOUND_CALLS.md` for the contract.
 //
 
+import ConduitCallEngine
 import Foundation
 
 enum PushTokenRegistrar {
@@ -24,6 +27,7 @@ enum PushTokenRegistrar {
         endpoint: URL,
         apiKey: String,
         bundleID: String = Bundle.main.bundleIdentifier ?? "",
+        pushFeatures: [String] = CallEngine.supportedPushFeatures.sorted(),
         session: URLSession = .shared
     ) async {
         var request = URLRequest(url: endpoint)
@@ -32,13 +36,14 @@ enum PushTokenRegistrar {
         if !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
-        let body: [String: String] = [
+        let body: [String: Any] = [
             "voip_token": token,
             "platform": "ios",
             "bundle_id": bundleID,
             "agent_id": agentID.uuidString,
             "display_name": String(String.UnicodeScalarView(displayName.unicodeScalars.prefix(maxDisplayNameLength))),
             "handle": handle,
+            "push_features": pushFeatures,
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
