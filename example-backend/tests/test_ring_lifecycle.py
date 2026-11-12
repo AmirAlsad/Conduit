@@ -20,9 +20,14 @@ _BASE_KEYS = {"agent_id", "call_id", "status_url"}
 # its calls carry; REGISTER_BODY is an older app, which lists none.
 ALL_FEATURES = [*FEATURES, "preconnect"]
 CALL_SIGNALS = ["call-connected", "call-held", "call-resumed"]
-FEATURED_BODY = {**REGISTER_BODY, "push_features": ALL_FEATURES, "call_signals": CALL_SIGNALS}
+# What the app registers today: its agent's transport too.
+FEATURED_BODY = {
+    **REGISTER_BODY, "push_features": ALL_FEATURES, "call_signals": CALL_SIGNALS, "transport": "daily"
+}
 # Takes a pre-connected ring but no cancel push.
-NO_CANCEL_BODY = {**REGISTER_BODY, "push_features": ["preconnect"], "call_signals": CALL_SIGNALS}
+NO_CANCEL_BODY = {
+    **REGISTER_BODY, "push_features": ["preconnect"], "call_signals": CALL_SIGNALS, "transport": "daily"
+}
 
 
 class PresenceDaily(FakeDaily):

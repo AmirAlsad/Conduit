@@ -1227,9 +1227,11 @@ struct AgentCallHostTests {
 
     // MARK: - VoIP token registration
 
-    private func inboundAgent(named name: String, in h: AgentCallHostHarness, apiKey: String) throws -> Agent {
+    private func inboundAgent(
+        named name: String, in h: AgentCallHostHarness, apiKey: String, transportKind: TransportKind = .daily
+    ) throws -> Agent {
         let agent = Agent(
-            name: name, transportKind: .daily,
+            name: name, transportKind: transportKind,
             pairingEndpoint: URL(string: "https://engine.example.com/connect/\(name)")!,
             inboundRegistrationURL: RecordingURLProtocol.uniqueEndpoint()
         )
@@ -1245,8 +1247,8 @@ struct AgentCallHostTests {
 
     @Test func tokenUpdateRegistersWithEveryInboundAgent() async throws {
         let h = try AgentCallHostHarness() // the harness agent has no inbound URL
-        let nova = try inboundAgent(named: "Nova", in: h, apiKey: "nova-key")
-        let atlas = try inboundAgent(named: "Atlas", in: h, apiKey: "atlas-key")
+        let nova = try inboundAgent(named: "Nova", in: h, apiKey: "nova-key", transportKind: .livekit)
+        let atlas = try inboundAgent(named: "Atlas", in: h, apiKey: "atlas-key", transportKind: .smallwebrtc)
         h.engine.startPushRegistration()
 
         h.system.deliverVoIPPushToken(Data([0xAB, 0x01]))
@@ -1265,7 +1267,12 @@ struct AgentCallHostTests {
             #expect(fields["display_name"] as? String == agent.name)
             #expect(fields["handle"] as? String == agent.syntheticEmail)
             #expect(fields["push_features"] as? [String] == CallEngine.supportedPushFeatures.sorted())
+            // The server prepares a ring's room on it: the same value as the pairing body's.
+            #expect(fields["transport"] as? String == agent.transportKind.rawValue)
+            #expect(fields["transport"] as? String == PairingClient.body(transport: agent.transportKind, ring: nil)["transport"] as? String)
         }
+        #expect(nova.transportKind.rawValue == "livekit")
+        #expect(atlas.transportKind.rawValue == "smallwebrtc")
     }
 
     @Test func registerInboundUsesTheEnginesCurrentToken() async throws {
@@ -1299,7 +1306,7 @@ struct AgentCallHostTests {
         #expect(RecordingURLProtocol.requests(host: host).count == 1)
     }
 
-    @Test func registrationBodyCarriesAllEightKeys() async throws {
+    @Test func registrationBodyCarriesAllNineKeys() async throws {
         let endpoint = RecordingURLProtocol.uniqueEndpoint()
         let agentID = UUID()
         await PushTokenRegistrar.register(
@@ -1309,6 +1316,7 @@ struct AgentCallHostTests {
             handle: "nova@conduit.invalid",
             endpoint: endpoint,
             apiKey: "nova-key",
+            transport: .livekit,
             bundleID: "com.example.conduit",
             pushFeatures: ["cancel", "ring_timeout"],
             session: RecordingURLProtocol.session()
@@ -1317,7 +1325,8 @@ struct AgentCallHostTests {
         let host = try #require(endpoint.host())
         let request = try #require(RecordingURLProtocol.requests(host: host).first)
         let fields = try body(request)
-        #expect(fields.count == 8)
+        #expect(fields.count == 9)
+        #expect(fields["transport"] as? String == "livekit")
         // An agent the server starts for a ring waits for call-connected only from a
         // registration that lists it.
         #expect(fields["call_signals"] as? [String] == ["call-connected", "call-held", "call-resumed"])
@@ -1342,6 +1351,7 @@ struct AgentCallHostTests {
             handle: "nova@conduit.invalid",
             endpoint: endpoint,
             apiKey: "",
+            transport: .daily,
             session: RecordingURLProtocol.session()
         )
 

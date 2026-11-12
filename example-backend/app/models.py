@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, Field
 
 Transport = Literal["daily", "livekit", "smallwebrtc"]
+TRANSPORTS = ("daily", "livekit", "smallwebrtc")
 Preconnect = Literal["credentials", "media"]
 # What a ring may ask for: a tier, or "none" for a plain ring (no preconnect key).
 PreconnectRequest = Literal["credentials", "media", "none"]
@@ -87,7 +88,10 @@ class VoipRegisterRequest(BaseModel):
     engine uses none of them with this device. ``call_signals`` lists the
     call-control signals the app's calls carry; a bot started for a ring before
     the app asks for credentials waits for "call-connected" only when it is listed,
-    and a "media" ring needs it."""
+    and a "media" ring needs it. ``transport`` is the transport the app's agent
+    calls over ("daily", "livekit", "smallwebrtc"), the same value it sends with
+    each pairing request: a ring prepares its room on it. Older builds omit it,
+    and a name this engine does not know is kept as unknown, never refused."""
 
     voip_token: str = Field(..., min_length=1)
     platform: str = "ios"
@@ -97,6 +101,11 @@ class VoipRegisterRequest(BaseModel):
     handle: str | None = Field(default=None, max_length=256)
     push_features: list[PushFeature] = Field(default_factory=list, max_length=32)
     call_signals: list[CallSignalName] = Field(default_factory=list, max_length=32)
+    transport: str | None = Field(default=None, max_length=32)
+
+    @property
+    def known_transport(self) -> str | None:
+        return self.transport if self.transport in TRANSPORTS else None
 
 
 class RingRequest(BaseModel):
@@ -120,7 +129,9 @@ class RingRequest(BaseModel):
 
     inline: bool = False
     # The transport of the room made at ring time (inline, or a prepared pairing
-    # ring): match the app's for the agent.
+    # ring). Omitted: the one the device registered for its agent; a registration
+    # that names none prepares nothing for a pairing ring (an inline ring then
+    # uses the agent's default, as before).
     transport: Transport | None = None
     # Shortens this ring (whole seconds; the app clamps it to [10, its own timeout]).
     ring_timeout: int | None = Field(default=None, gt=0)
@@ -169,6 +180,8 @@ class RingResponse(BaseModel):
     bot_in_room: bool | None = None
     # How long the push waited for that bot, in seconds; None when it did not wait.
     bot_wait_secs: float | None = None
+    # The transport of the room made at ring time; None when none was made.
+    transport: Transport | None = None
     apns_status: int
     apns_id: str | None = None
 

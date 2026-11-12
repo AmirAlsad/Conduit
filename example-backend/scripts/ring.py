@@ -195,7 +195,9 @@ def main() -> None:
         "--transport",
         choices=["daily", "livekit"],
         help="Transport of the room made at ring time (--inline, or a pre-connected "
-        "pairing ring); match the app's for the agent (default: the agent's own).",
+        "pairing ring). Default: the one the app registered for its agent; with none "
+        "registered (an older app) a pairing ring prepares nothing and --inline uses "
+        "the agent's default.",
     )
     parser.add_argument(
         "--ring-timeout",

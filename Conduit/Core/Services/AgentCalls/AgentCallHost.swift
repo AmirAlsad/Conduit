@@ -295,6 +295,7 @@ final class AgentCallHost: CallEngineDelegate {
             handle: agent.syntheticEmail,
             endpoint: endpoint,
             apiKey: apiKey ?? "",
+            transport: agent.transportKind,
             session: registrationSession
         )
     }

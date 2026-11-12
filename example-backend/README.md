@@ -229,9 +229,14 @@ Body for `/admin/ring/{agent_id}` (all optional): `{"inline": bool, "transport":
 device's registration takes (`media` with the `preconnect` push feature and the
 `call-connected` call signal, `credentials` with the feature only, none without
 it); `"none"` sends a plain ring. `"wait_for_bot": false` pushes at once (and a
-pairing ring then prepares nothing). The response adds `bot_in_room` (whether the
-ring's bot had joined its room when the push went out) and `bot_wait_secs` (how
-long the push waited); both are `null` when the ring did not wait. For its
+pairing ring then prepares nothing). `transport` omitted uses the one the device
+registered for its agent (`/inbound/register` body `"transport"`, sent by current
+app builds); with none registered a pairing ring prepares nothing (the app's
+request during the ring makes the room) and an inline ring uses the agent's
+default. The response adds `bot_in_room` (whether the
+ring's bot had joined its room when the push went out), `bot_wait_secs` (how
+long the push waited); both are `null` when the ring did not wait; and
+`transport`, that of the room made at ring time (`null` when none was made). For its
 `/cancel`: `{"call_id": "<from the ring response>"}`. A `/connect` whose body
 lists `"call-connected"` in `call_signals` dispatches a bot that waits for it
 (`--await-connected`); one made during a pre-connected ring also carries

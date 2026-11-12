@@ -58,7 +58,8 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
   "display_name": "<optional>",          // the caller name the user gave the agent in the app
   "handle": "<optional>",                // the CallKit handle the app uses for it
   "push_features": ["cancel", "ring_timeout", "preconnect"],  // optional — see below
-  "call_signals": ["call-connected", "call-held", "call-resumed"]   // optional — see below
+  "call_signals": ["call-connected", "call-held", "call-resumed"],  // optional — see below
+  "transport": "livekit"                 // optional — see below
 }
 ```
 
@@ -79,6 +80,13 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
   before the app asks for credentials (inline credentials, §2) waits for
   `call-connected` before it greets only if the registration lists it. Send
   `preconnect: "media"` only to a registration that lists `call-connected` (§5).
+- `transport` is the transport the agent calls over in the app (`"daily"`,
+  `"livekit"` or `"smallwebrtc"`), the same value the app sends as `transport` with
+  every pairing request. A room you make before the push (inline credentials, or
+  one you prepare for the app's request during the ring, §5) must be on it, or the
+  app cannot use it. Older builds omit it; keep a name you do not know as unknown
+  rather than refusing the registration. Without it, don't prepare a room for a
+  pairing ring: let the app's request during the ring make it.
 
 - The **VoIP token is per-install, app-wide** (not per-agent, not per-transport). The
   same token is registered with every agent the user opted in — each of your servers
@@ -331,8 +339,9 @@ answered call sat connecting for 4.6 s. So:
 
 The reference engine does all three by default (see the backend guide,
 `docs/backend/inbound-calls.md`); the room it prepares at ring time for a pairing
-ring uses the ring's transport (`--transport`, or the agent's default), and a
-request for another transport gets a fresh room. What the user experiences:
+ring uses the ring's transport (`--transport`, else the transport the device
+registered; with none registered it prepares nothing), and a request for another
+transport gets a fresh room. What the user experiences:
 
 | Case | What the user experiences |
 |---|---|

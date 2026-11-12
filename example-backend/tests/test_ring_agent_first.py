@@ -23,7 +23,7 @@ from test_inbound import APP_UUID, AUTH, REGISTER_BODY, FakeApns
 from test_ring_lifecycle import ALL_FEATURES, CALL_SIGNALS, FEATURED_BODY
 
 # preconnect + call-connected: "media". preconnect only: "credentials". Neither: none.
-CREDS_BODY = {**REGISTER_BODY, "push_features": ALL_FEATURES}
+CREDS_BODY = {**REGISTER_BODY, "push_features": ALL_FEATURES, "transport": "daily"}
 PLAIN_BODY = {**REGISTER_BODY, "push_features": ["cancel", "ring_timeout"], "call_signals": CALL_SIGNALS}
 STATUS_URL = "http://testserver/inbound/status/loopback"
 ROOM = "room-abc"
@@ -514,6 +514,79 @@ def test_smallwebrtc_rings_prepare_nothing():
         assert r["preconnect"] == "media"
         assert app.state.dispatcher.calls == [] and app.state.dispatcher.waits == []
         assert (r["bot_in_room"], r["bot_wait_secs"]) == (None, None)
+
+
+# --- the transport of the room prepared at ring time: the phone's ---
+
+
+def test_a_ring_prepares_its_room_on_the_transport_the_phone_registered(events):
+    # The app registers "livekit" for a LiveKit agent (the value of its pairing
+    # body's "transport"): the ring's room is LiveKit, whatever the server's default,
+    # and the phone's LiveKit request during the ring takes it.
+    with TestClient(app) as c:
+        _setup(c, {**FEATURED_BODY, "transport": "livekit"})
+        r = _ring(c)
+        assert r["transport"] == "livekit" and r["bot_in_room"] is True
+        ((_, _, transport, _),) = app.state.dispatcher.calls
+        assert transport == "livekit"
+        pair = _pair(c, r["call_id"], transport="livekit")
+        assert pair.status_code == 200, pair.text
+        assert pair.json()["transport"] == "livekit"
+        assert len(app.state.dispatcher.calls) == 1  # the prepared bot, not a cold one
+        assert app.state.dispatcher.disconnected == []
+        assert _event(events, "ring.prepared")["transport"] == "livekit"
+
+
+def test_the_ring_requests_transport_wins_over_the_registration():
+    with TestClient(app) as c:
+        _setup(c, {**FEATURED_BODY, "transport": "livekit"})
+        r = _ring(c, transport="daily")
+        assert r["transport"] == "daily"
+        assert [call[2] for call in app.state.dispatcher.calls] == ["daily"]
+
+
+def test_a_registration_without_a_transport_prepares_nothing_and_waits_for_nothing(events):
+    # An older app registers no transport: a room made now could be the wrong
+    # kind, which the phone's request would find unfit (a delayed ring, then a
+    # cold start after all). Its request during the ring makes the room instead.
+    body = {k: v for k, v in FEATURED_BODY.items() if k != "transport"}
+    with TestClient(app) as c:
+        _setup(c, body)
+        r = _ring(c)
+        assert r["preconnect"] == "media"
+        assert (r["bot_in_room"], r["bot_wait_secs"], r["transport"]) == (None, None, None)
+        assert app.state.dispatcher.calls == [] and app.state.dispatcher.waits == []
+        assert len(app.state.apns.sends) == 1
+        assert _event(events, "ring.transport_unknown") == {"agent": "loopback", "inline": False}
+        pair = _pair(c, r["call_id"], transport="livekit")
+        assert pair.status_code == 200, pair.text
+        assert [call[2] for call in app.state.dispatcher.calls] == ["livekit"]
+
+
+def test_an_inline_ring_without_a_known_transport_uses_the_agents_default():
+    body = {k: v for k, v in FEATURED_BODY.items() if k != "transport"}
+    with TestClient(app) as c:
+        _setup(c, body)
+        r = _ring(c, inline=True)
+        assert r["transport"] == "daily"
+        assert _pushed()["room_url"] == PREPARED_CONNECTION["room_url"]
+
+
+def test_a_smallwebrtc_phone_rings_with_nothing_prepared():
+    # The check is on the phone's transport (registered), not the server's default.
+    with TestClient(app) as c:
+        _setup(c, {**FEATURED_BODY, "transport": "smallwebrtc"})
+        r = _ring(c)
+        assert r["preconnect"] == "media" and r["transport"] is None
+        assert app.state.dispatcher.calls == [] and app.state.dispatcher.waits == []
+
+
+def test_a_registration_naming_an_unknown_transport_is_kept_without_it():
+    with TestClient(app) as c:
+        _setup(c, {**FEATURED_BODY, "transport": "carrier-pigeon"})
+        assert asyncio.run(app.state.registry.get_voip("loopback")).transport is None
+        r = _ring(c)
+        assert r["transport"] is None and app.state.dispatcher.calls == []
 
 
 def test_a_preparation_that_fails_still_rings(events):

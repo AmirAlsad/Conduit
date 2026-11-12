@@ -8,7 +8,9 @@
 //  ours. It travels with the push features this build's engine understands, so the
 //  server sends a cancel push or a `ring_timeout` only to an app that handles them,
 //  and the call-control signals its calls carry, so an agent the server starts for a
-//  ring waits for `call-connected` before it greets.
+//  ring waits for `call-connected` before it greets, and the transport the agent
+//  calls over (the pairing body's `transport`), so a room the server prepares for a
+//  ring is one the app can join.
 //  See `docs/INBOUND_CALLS.md` for the contract.
 //
 
@@ -28,6 +30,7 @@ enum PushTokenRegistrar {
         handle: String,
         endpoint: URL,
         apiKey: String,
+        transport: TransportKind,
         bundleID: String = Bundle.main.bundleIdentifier ?? "",
         pushFeatures: [String] = CallEngine.supportedPushFeatures.sorted(),
         callSignals: [String] = PairingClient.callSignals,
@@ -48,6 +51,7 @@ enum PushTokenRegistrar {
             "handle": handle,
             "push_features": pushFeatures,
             "call_signals": callSignals,
+            "transport": transport.rawValue,
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 

@@ -580,8 +580,9 @@ Key behaviors:
   (`InboundRegistering`), through `PushTokenRegistrar` (`Core/Services/Push/`),
   sending the agent's name (at most 120 Unicode scalars; the ring corrects a
   shortened name once the target resolves), synthetic email and the engine's
-  `supportedPushFeatures` (`push_features`) and the call signals its calls carry
-  (`call_signals`) with the token;
+  `supportedPushFeatures` (`push_features`), the call signals its calls carry
+  (`call_signals`) and the agent's transport (`transport`, as in the pairing body,
+  so a room the server prepares for a ring is one the app can join) with the token;
   deleting an agent best-effort **unregisters** (DELETE on the registration
   endpoint, `PushTokenRegistrar.unregister`). A token PushKit invalidates
   (`callEngineDidInvalidateVoIPPushToken`) is no longer current: the engine's

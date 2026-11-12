@@ -113,8 +113,14 @@ the push then omits the keys too — the app rings under its own name for the ag
 `push_features`, the optional push features their call engine supports (today
 `cancel`, `ring_timeout` and `preconnect`); the engine stores the list, keeping names it
 doesn't know, and uses a feature only with a registration that lists it. Older
-builds omit it, which the engine stores as an empty list. Existing registry
-databases pick up the new columns automatically on the next start.
+builds omit it, which the engine stores as an empty list. Current builds also
+send `transport`, the transport the agent calls over in the app (the same value
+as the `transport` of its `/connect` body): the room a ring prepares before the
+push is made on it. Older builds omit it; a pre-connected pairing ring for them
+then prepares nothing and waits for nothing (the app's request during the ring
+makes the room), since a room on the wrong transport would only delay the ring
+and be thrown away. Existing registry databases pick up the new columns
+automatically on the next start.
 
 Deleting the agent in the app sends a best-effort `DELETE` to the same endpoint — the engine drops the registration
 (`inbound.unregistered`) and `/admin/ring` returns 404 from then on.
@@ -157,11 +163,13 @@ Two modes:
         The app joins inline credentials over the transport **configured for that
         agent in the app**. Pass `--transport daily|livekit` to match it — a
         mismatch (e.g. a Daily room pushed to an agent the app dials over LiveKit)
-        fails at answer time. Pairing mode can't mismatch: the app negotiates the
-        transport in its `/connect` call. A pairing ring's room prepared at ring
-        time uses the same `--transport` (default: the agent's own); when the
-        app asks for another, it gets a fresh room and the prepared one is ended,
-        so match it there too or the agent starts only at that request.
+        fails at answer time. Without `--transport` the engine uses the
+        transport the app registered for the agent, and for an app that
+        registered none the agent's own default. Pairing mode can't mismatch:
+        the app negotiates the transport in its `/connect` call. A pairing
+        ring's room prepared at ring time uses `--transport`, else the
+        registered transport, and with neither prepares nothing; when the app
+        asks for another, it gets a fresh room and the prepared one is ended.
 
 ### Agent-first ringing
 

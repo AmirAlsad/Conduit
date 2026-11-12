@@ -58,6 +58,15 @@ async def test_voip_roundtrip_with_call_signals():
     assert (await reg.get_voip("live")).call_signals == ()
 
 
+async def test_voip_roundtrip_with_transport():
+    reg = SQLiteRegistry(":memory:")
+    livekit = VoipRegistration(**{**_reg().__dict__, "transport": "livekit"})
+    await reg.register_voip(livekit)
+    assert await reg.get_voip("live") == livekit
+    await reg.register_voip(_reg())
+    assert (await reg.get_voip("live")).transport is None
+
+
 async def test_opens_old_six_column_voip_table_and_migrates(tmp_path):
     path = str(tmp_path / "old.db")
     old = sqlite3.connect(path)
@@ -81,12 +90,13 @@ async def test_opens_old_six_column_voip_table_and_migrates(tmp_path):
 
     reg = SQLiteRegistry(path)
     columns = {row[1] for row in reg._conn.execute("PRAGMA table_info(voip_tokens)")}
-    assert {"display_name", "handle", "push_features", "call_signals"} <= columns
+    assert {"display_name", "handle", "push_features", "call_signals", "transport"} <= columns
     legacy = await reg.get_voip("live")
     assert legacy == _reg()
     assert legacy.display_name is None and legacy.handle is None
     assert legacy.push_features == ()
     assert legacy.call_signals == ()
+    assert legacy.transport is None
 
     await reg.register_voip(
         VoipRegistration(
@@ -95,6 +105,7 @@ async def test_opens_old_six_column_voip_table_and_migrates(tmp_path):
                 "display_name": "Ada",
                 "handle": "ada@conduit.example",
                 "push_features": ("cancel",),
+                "transport": "livekit",
             }
         )
     )
@@ -102,11 +113,13 @@ async def test_opens_old_six_column_voip_table_and_migrates(tmp_path):
     assert updated is not None
     assert (updated.display_name, updated.handle) == ("Ada", "ada@conduit.example")
     assert updated.push_features == ("cancel",)
+    assert updated.transport == "livekit"
     reg.close()
 
     # Reopening an already-migrated database must not try to add the columns again.
     reopened = SQLiteRegistry(path)
     assert (await reopened.get_voip("live")).push_features == ("cancel",)
+    assert (await reopened.get_voip("live")).transport == "livekit"
     reopened.close()
 
 
@@ -139,6 +152,7 @@ async def test_migrates_a_table_that_already_has_names_but_not_features(tmp_path
     stored = await reg.get_voip("live")
     assert stored.display_name == "Ada"
     assert stored.push_features == ()
+    assert stored.transport is None
     reg.close()
 
 

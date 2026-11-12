@@ -5,9 +5,10 @@ agent call me" (and on every app launch thereafter). The stored token is what
 /admin/ring sends the push to. Latest registration per agent wins — the token is
 per-install, app-wide. Newer app builds also send the caller's display name and
 CallKit handle, which are stored and echoed in the ring push, the push
-features the device supports, which gate cancel pushes and ring_timeout, and the
+features the device supports, which gate cancel pushes and ring_timeout, the
 call-control signals its calls carry, which tell a bot started for a ring to wait
-for call-connected before it greets.
+for call-connected before it greets, and the transport its agent calls over, which
+a ring prepares its room on.
 
 /inbound/status is the receipt channel: each ring's push carries a status_url
 pointing here, and the app reports how the ring ended (answered / declined /
@@ -52,8 +53,11 @@ async def register(agent_id: str, req: VoipRegisterRequest, request: Request):
             handle=req.handle,
             push_features=tuple(req.push_features),
             call_signals=tuple(req.call_signals),
+            transport=req.known_transport,
         )
     )
+    if req.transport is not None and req.known_transport is None:
+        event(_log, "inbound.transport_unknown", agent=agent_id, transport=req.transport)
     return {"ok": True}
 
 

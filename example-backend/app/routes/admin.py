@@ -125,8 +125,15 @@ async def ring(
         ring_timeout=ring_timeout,
     )
     wait_secs = settings.ring_bot_wait_secs if req.wait_for_bot else 0.0
-    transport = resolve_transport(agent, req.transport)
+    # The room made at ring time must be on the transport the phone's agent calls
+    # over, or the phone's own request finds it unfit and starts a cold one.
+    transport = req.transport or reg.transport
+    if transport is None:
+        event(_log, "ring.transport_unknown", agent=agent_id, inline=req.inline)
     if req.inline:
+        # The push must carry a room: without the phone's transport, the agent's
+        # default, as before the registration named one.
+        transport = transport or resolve_transport(agent, None)
         # Provision NOW and ride the creds in the push: the bot is dispatched
         # before the user answers. Any inline bot ends on a non-answered first
         # receipt; with preconnect it is also a ring bot, with a deadline and a
@@ -158,10 +165,12 @@ async def ring(
         ring.transport = transport
         ring.ring_bot = ring_flags is not None
         ring.joins_before_answer = preconnect == "media"
-    elif preconnect is not None and wait_secs > 0:
+    elif preconnect is not None and wait_secs > 0 and transport is not None:
         # The app will ask for credentials during the ring (with the ring's
         # call_id), so its room and agent can be made now. Without preconnect the
-        # app asks only after the answer, with nothing to match a prepared room to.
+        # app asks only after the answer, with nothing to match a prepared room to;
+        # without the phone's transport, a room made now could be the wrong kind,
+        # so nothing is made and nothing waited for (the phone's request makes it).
         await _prepare(state, agent, ring, transport, wait_secs, sends_call_connected)
 
     # Tracked before the push: the app may pair for this ring (preconnect) before
@@ -210,6 +219,7 @@ async def ring(
         ring_timeout=ring.ring_timeout,
         bot_in_room=bot_in_room,
         bot_wait_secs=bot_wait_secs,
+        transport=ring.transport,
     )
 
     return RingResponse(
@@ -221,6 +231,7 @@ async def ring(
         preconnect=ring.preconnect,
         bot_in_room=bot_in_room,
         bot_wait_secs=bot_wait_secs,
+        transport=ring.transport,
         apns_status=result.status,
         apns_id=result.apns_id,
     )
@@ -250,7 +261,8 @@ async def _prepare(
     """Make a pre-connected pairing ring's room and ring bot before the push; the
     app's credential request for the ring then takes them (app/routes/connect.py).
     Best effort: when it fails, the ring goes out as before and that request
-    provisions. SmallWebRTC has no room to prepare: its bot starts at the offer."""
+    provisions. ``transport`` is the phone's (the request's, else its registration's).
+    SmallWebRTC has no room to prepare: its bot starts at the phone's offer."""
     if transport == "smallwebrtc":
         return
     flags = ring_bot_flags(
