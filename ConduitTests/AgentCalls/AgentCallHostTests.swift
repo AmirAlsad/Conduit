@@ -553,6 +553,26 @@ struct AgentCallHostTests {
         #expect(h.engine.state.isConnecting)
     }
 
+    // MARK: - Join deadline
+
+    @Test func anAgentThatNeverJoinsWritesAgentUnreachableRow() async throws {
+        let sleeper = ManualSleeper()
+        let h = try AgentCallHostHarness(joinTimeout: .seconds(30), sleep: sleeper.sleep)
+        await h.placeCall()
+        #expect(h.engine.state.isConnecting)
+
+        await waitUntil { sleeper.pendingCount > 0 }
+        sleeper.fireAll()
+        await waitUntil { h.engine.state.isTerminal }
+
+        #expect(h.engine.state.failureReason == .agentUnreachable)
+        let entry = try #require(try h.loggedEntries().first)
+        #expect(entry.outcome == .failed)
+        #expect(entry.failureReason == .agentUnreachable)
+        #expect(entry.failureReasonRaw == CallFailureReason.agentUnreachable.rawValue)
+        #expect(entry.outcomeDisplayLabel == "Failed — agent didn't join")
+    }
+
     // MARK: - Pre-connect
 
     @Test(arguments: RingPreparation.allCases)

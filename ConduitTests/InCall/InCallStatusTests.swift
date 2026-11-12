@@ -29,7 +29,7 @@ struct InCallStatusTests {
 
     @Test(arguments: [
         (CallFailureReason.badToken, "Authentication failed"),
-        (CallFailureReason.agentUnreachable, "Agent unavailable"),
+        (CallFailureReason.agentUnreachable, "Agent didn't join"),
         (CallFailureReason.lostConnection, "Connection lost"),
         (CallFailureReason.transportError, "Couldn't connect"),
         (CallFailureReason.unknown, "Call failed"),
@@ -41,7 +41,7 @@ struct InCallStatusTests {
 
     @Test(arguments: [
         (CallFailureReason.badToken, "authentication"),
-        (CallFailureReason.agentUnreachable, "agent unreachable"),
+        (CallFailureReason.agentUnreachable, "agent didn't join"),
         (CallFailureReason.lostConnection, "connection lost"),
         (CallFailureReason.transportError, "couldn't connect"),
     ])
@@ -57,5 +57,10 @@ struct InCallStatusTests {
         for reason in [CallFailureReason.badToken, .agentUnreachable, .lostConnection, .transportError, .unknown] {
             #expect(!reason.hint.isEmpty)
         }
+    }
+
+    @Test func agentUnreachableHintPointsAtTheAgentNotTheNetwork() {
+        #expect(CallFailureReason.agentUnreachable.hint
+            == "Conduit reached the call, but your agent never joined it. Check that your server starts the agent for each call.")
     }
 }

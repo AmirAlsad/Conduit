@@ -15,7 +15,7 @@ extension CallFailureReason {
     var displayLabel: String {
         switch self {
         case .badToken: "Authentication failed"
-        case .agentUnreachable: "Agent unavailable"
+        case .agentUnreachable: "Agent didn't join"
         case .lostConnection: "Connection lost"
         case .transportError: "Couldn't connect"
         case .unknown: "Call failed"
@@ -27,7 +27,7 @@ extension CallFailureReason {
     var shortLabel: String? {
         switch self {
         case .badToken: "authentication"
-        case .agentUnreachable: "agent unreachable"
+        case .agentUnreachable: "agent didn't join"
         case .lostConnection: "connection lost"
         case .transportError: "couldn't connect"
         case .unknown: nil
@@ -38,7 +38,7 @@ extension CallFailureReason {
     var hint: String {
         switch self {
         case .badToken: "Check the API key in this agent's settings."
-        case .agentUnreachable: "Is your agent's server running?"
+        case .agentUnreachable: "Conduit reached the call, but your agent never joined it. Check that your server starts the agent for each call."
         case .lostConnection: "The network dropped — try calling again."
         case .transportError: "Check the transport setting and your server's credentials."
         case .unknown: "Try again."
