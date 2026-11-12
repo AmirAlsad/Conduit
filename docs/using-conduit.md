@@ -63,7 +63,9 @@ If your agent's backend supports it, your agent can **call you** — the app rin
 a normal incoming call, even from the lock screen, showing the agent's name and
 photo (once you've added it to Contacts). Turn it on per agent with **"Let this
 agent call me"** in the agent's settings, which registers your device with your
-backend.
+backend. Conduit asks for the microphone then, so that a call you answer from the
+lock screen can carry your voice. A call that rings out, or that your agent
+withdraws, shows in **Recents** as missed, with a quiet notification.
 
 !!! warning "Not ringing? Check Focus / Do Not Disturb"
     iOS silences incoming calls while a **Focus** or **Do Not Disturb** is on. The

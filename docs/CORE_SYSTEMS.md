@@ -54,7 +54,8 @@ SwiftUI previews and the simulator path reuse them.
 | Contacts sync | `ContactSyncing` (`Contacts/`) | `FakeContactSync` | `ContactSyncService` (built) |
 | Persistence | `AgentRepository` (`Persistence/`) | — | `SwiftDataAgentRepository` (built) |
 | Spoken state | `SpokenStateAnnouncing` (`Audio/`) | `FakeSpokenStateAnnouncer` | `SpeechSpokenStateAnnouncer` (built) |
-| Missed-call notification | `MissedCallNotifying` (`Push/`) | test double in `ConduitTests/Support/` | `MissedCallNotifier` (built) |
+| Missed-call notification | `MissedCallNotifying` (`Push/`) | `FakeMissedCallNotifier` | `MissedCallNotifier` (built) |
+| Microphone permission | `MicrophonePermissionProviding` (`Audio/`) | `FakeMicrophonePermission` | `SystemMicrophonePermission` (built) |
 | Siri donation | `CallInteractionDonating` (`Siri/`) | `FakeCallInteractionDonor` | `CallInteractionDonor` (built) |
 | Inbound registration | `InboundRegistering` (`Push/`) | `FakeInboundRegistrar` | `AgentCallHost` (built) |
 
@@ -154,6 +155,17 @@ duplicated → Daily calls crash), so `project.yml` pins our fork built against
 `LiveKitWebRTC` — and the fork stays an **app-only** dependency, never one of the
 engine package's. See `bugs.md` and ROADMAP M9 before bumping any transport SDK;
 `scripts/check-bundle.sh <Conduit.app>` is the static check on the built app.
+What each connect attempt reports is decided by `SmallWebRTCConnectionGate` (pure,
+unit-tested), the same rules as the package's Daily adapter: one `.connected` per
+attempt, and nothing that steers the engine once the attempt has reported a
+disconnect, its connect has thrown, or the host has disconnected (so a failed
+reconnect attempt is not counted twice, and a late bot-left cannot end a
+reconnecting call). A connect that finds the session still up never resets that
+reporting: a ready live attempt reports `.connected` again, a join still under way
+is left to finish, and a session whose attempt is over is retired silently and
+replaced. Every connect error is `.connectionFailed`: the SDK's offer error has no
+status code, and a rejected API key is caught exactly by pairing
+(`PairingError.unauthorized` → `.authenticationFailed`).
 
 All three adapters send the engine's **`end-call` signal** in `disconnect()` — a
 deliberate hangup ends the bot at once instead of burning its human-absent grace
@@ -268,19 +280,32 @@ It knows calls, not agents. The host side is `CallEngineDelegate`
 (`Call/CallEngineDelegate.swift` in the package), synchronous and main-actor:
 `didChangeStateFrom:to:` fires on every real state change (never for a duplicate
 `.connected`), after that transition's other fields are set; `didFinish(CallRecord)`
-fires where a call ends (and for a busy ring), carrying a `missedReason` when the
-ring never reached the user; `targetForIncomingCall` resolves a push to a
+fires where a call ends (and for every missed ring), carrying a `missedReason` for
+a ring nobody answered or declined (`busy`, `filteredByFocus`, `ringTimedOut`,
+`canceledByCaller`); `callEngine(_:cue:)` delivers the moments to mark with a sound;
+`targetForIncomingCall` resolves a push to a
 `CallTarget` (nil = unknown, the ring fails); `ringStatusBearerForTarget` supplies
 the receipt bearer. Conduit's delegate is `AgentCallHost`
 (`Core/Services/AgentCalls/AgentCallHost.swift`): it writes `CallLogEntry` rows
-(looking the agent up by target id — none, no row), posts the missed-call
-notification for busy / Focus-filtered rings, donates outgoing calls to Siri on
-`dialing → connecting`, and speaks the cues from transitions: `→ connecting`
-starts the connecting cue (a looped ringback tone, not speech); `→ connected`
-stops it and says "Connected"; `→ reconnecting(n)` from `connected`, or with
-`n == 1`, says "Disconnected" and starts "Retrying"; `→ ended`/`failed` stops
-repeating. A provider reset stops
-nothing.
+(looking the agent up by target id — none, no row; the missed reason is stored as
+`missedReasonRaw`, and Recents reads every missed ring as "Missed", in red, with
+"— on another call" / "— Focus" for the two the user never heard), posts the
+missed-call notification for every missed ring, donates outgoing calls to Siri on
+`dialing → connecting`, and plays the engine's cues: `.start(.connecting)` loops
+the ringback tone, `.start(.retrying)` repeats "Retrying", `.stop` ends the loop,
+`.moment(.connected)` / `.moment(.reconnected)` say "Connected", and
+`.moment(.connectionLost)` says "Disconnected" (once per outage). The engine
+guarantees every loop is stopped by the time the call ends, a provider reset
+included, and no cues for a ring that is never answered.
+
+**Microphone permission.** Neither the engine nor the SDKs prompt reliably
+(LiveKit 2.17+ never prompts, and refuses to unless the app is active), so the app
+asks itself, through `MicrophonePermissionProviding` (`Audio/`; real:
+`SystemMicrophonePermission` over `AVAudioApplication`): before every outgoing call
+(`AppEnvironment.placeCall`; when refused, no call is placed and RootTabView
+explains it with a way to Settings), and when "Let this agent call me" is turned on
+(a refusal shows a note under the toggle; saving is not blocked). A first inbound
+call answered from the lock screen on an install that never decided has no mic.
 
 `CallState` (package, `Models/CallState.swift`, pure/`Equatable`):
 
@@ -343,15 +368,18 @@ Key behaviors:
   log records `direction` (`.incoming`/`.outgoing`). Edge paths are first-class: a push
   mid-call **reports then immediately ends** under the push's own id (iOS kills the app
   for an unreported VoIP push — `bugs.md`); a Focus/DND-filtered ring logs as missed and
-  returns to `.idle`; both post a quiet local notification (`MissedCallNotifying`,
-  provisional auth). If the push carried a `status_url`, the engine reports the
-  ring's terminal status back (`RingStatusReporting`: answered / declined / busy /
-  suppressed_by_focus). The engine owns PushKit (`startPushRegistration()` at launch,
+  returns to `.idle`; so does a ring nobody answers within the ring timeout (60 s, or
+  the push's shorter `ring_timeout`) and one the server withdraws with a cancel push;
+  all four post a quiet local notification (`MissedCallNotifying`, provisional auth).
+  If the push carried a `status_url`, the engine reports the ring's terminal status
+  back (`RingStatusReporting`: answered / declined / busy / suppressed_by_focus /
+  unanswered / canceled). The engine owns PushKit (`startPushRegistration()` at launch,
   `voipPushToken`); token registration fires on each token update
   (`AgentCallHost`, via `didUpdateVoIPPushToken`) *and* at agent save
   (`InboundRegistering`), through `PushTokenRegistrar` (`Core/Services/Push/`),
   sending the agent's name (at most 120 Unicode scalars; the ring corrects a
-  shortened name once the target resolves) and synthetic email with the token;
+  shortened name once the target resolves), synthetic email and the engine's
+  `supportedPushFeatures` (`push_features`) with the token;
   deleting an agent best-effort **unregisters** (DELETE on the registration
   endpoint, `PushTokenRegistrar.unregister`).
   Push/CallKit-incoming/entitlement are device-only; the engine's ring paths and

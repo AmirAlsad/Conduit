@@ -7,6 +7,43 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### Sounds derived from state transitions drifted from the call (ringback after reset, "Disconnected" twice)
+First seen: 2026-11-11 (pinned by host tests while moving to the engine's cues)
+
+**Pattern:** `AgentCallHost` started and stopped its ringback and "Retrying" loop by
+pattern-matching `didChangeStateFrom:to:`. A CallKit provider reset moved the engine
+to `.idle` with no terminal transition, so the loop never stopped; a transport's
+self-heal (`connected -> reconnecting(0)`) that escalated to the engine's retries
+(`reconnecting(0) -> reconnecting(1)`) matched both rules and said "Disconnected"
+twice for one outage.
+
+**Rule:** Play sounds from `CallEngineDelegate.callEngine(_:cue:)`, which the engine
+guarantees (every start stopped before the call ends, one `connectionLost` per
+outage, no cues for an unanswered ring). Keep transitions for things that must match
+the state exactly (the Siri donation on `dialing -> connecting`).
+
+**Why it's missed:** each rule looks right for the sequences it was written against;
+the gaps are in sequences nobody enumerated.
+
+### SmallWebRTC adapter judged late callbacks as part of the next attempt
+First seen: 2026-11-11 (review against the package's transport contract; not seen on device)
+
+**Pattern:** `PipecatSmallWebRTCTransport.connect` reset its reporting flags before
+calling the SDK. A failed connect both threw and let the Pipecat client report
+`.disconnected`, so a failed reconnect attempt was counted twice; a late bot-left
+from a dropped call could end a reconnecting one; and a connect while the session
+was still up reset the flags, then failed with `BotAlreadyStartedError`. The package
+fixed the same shapes in its Daily and LiveKit adapters (ConduitCallEngine #10).
+
+**Rule:** Gate what each attempt reports (`SmallWebRTCConnectionGate`): an attempt is
+over once it reported a disconnect, its connect threw, or the host disconnected. A
+connect that finds the session up reports `.connected` again, leaves a join under
+way alone, or retires the old session silently; it never resets reporting for a
+connect that does not join.
+
+**Why it's missed:** the fakes never deliver late SDK callbacks, and the adapter is
+device-only.
+
 ### CI step piped `xcodebuild` into `tee` without `pipefail`, so a failed build reported success
 First seen: 2026-11-11 (the Tests workflow was green on `main` while building nothing)
 
