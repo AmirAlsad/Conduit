@@ -188,7 +188,19 @@ control over the agent's playout (its peer connection and remote track are
 internal), so a **held** SmallWebRTC call is silent only because the agent honours
 `call-held`. For the same reason (the SDK configures the session at connect) it
 declares `canConnectWhileRinging` false, so a `media` pre-connect ring stays at
-`credentials`. **Load-bearing:** the stock package's
+`credentials`. **Route:** with no preferred device the SDK configures the session
+for video chat (the loudspeaker) at the start of every join and after every route
+change, so the adapter tells it, through its own device API (`updateMic`), which
+route to prefer, decided by `SmallWebRTCAudioRouteGate` (pure, unit-tested, the
+rules of the package's `DailyAudioRouteGate`): the route the session is on at the
+first attach, or the engine's request, which wins; a join before the first attach
+takes the session's route at that moment provisionally (a loudspeaker reading as
+the earpiece); a headset that appears is followed and one that goes falls back; each
+new client is told before its join, which the SDK keeps and applies from its first
+configuration. While a preference is set the SDK re-applies it after every route
+change, so the native route button cannot move a SmallWebRTC call (use the in-app
+picker). Each decision is written to the DEBUG call trace (`smallwebrtc route:`).
+**Load-bearing:** the stock package's
 stasel/WebRTC collides with Daily's embedded WebRTC (un-prefixed `RTC*` classes
 duplicated → Daily calls crash), so `project.yml` pins our fork built against
 `LiveKitWebRTC` — and the fork stays an **app-only** dependency, never one of the

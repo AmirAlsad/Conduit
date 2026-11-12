@@ -79,3 +79,23 @@ room or client (LiveKit's `Room`, SmallWebRTC's `PipecatClient` during
 test overlaps them; the adapters are device-only. Gate-level tests on the pure
 deciders (`DailyConnectionGate`, `LiveKitConnectGate`, `SmallWebRTCConnectionGate`)
 are what can pin the rules.
+
+### A transport SDK with no preferred device moves the call to the loudspeaker
+First seen: 2026-11-12
+Last seen: 2026-11-12
+Occurrences: 2
+
+**Pattern:** Daily's SDK and the SmallWebRTC SDK both configure `AVAudioSession`
+themselves, and with no preferred device both set the video-chat mode, which iOS
+plays on the loudspeaker, at the join and again after route changes. A call CallKit
+started on the earpiece moved to the speaker while connecting once the engine
+stopped asking for the speaker itself.
+
+**Rule:** For a transport whose SDK manages the session, always give the SDK a
+preferred device through its own device API, before its join: the route the call is
+on at the first attach, with the engine's request winning (`DailyAudioRouteGate` in
+the package, `SmallWebRTCAudioRouteGate` in the app). Never force the session
+yourself; the SDK re-applies its own choice over it.
+
+**Why it's missed:** The fakes do not model the SDK's session management, and a
+speaker default in the engine hid it (the SDK's loudspeaker was what was asked for).

@@ -7,6 +7,24 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### SmallWebRTC calls moved to the loudspeaker while connecting
+First seen: 2026-11-12 (device run with the engine's speaker default off; the package's Daily adapter had the same bug, fixed the same day)
+
+**Pattern:** With `CallEngineConfiguration.defaultsToSpeaker` off, a SmallWebRTC
+call ended up on the loudspeaker. The SDK's audio manager starts managing the
+shared session at every join (`initDevices`) and, with no preferred device, sets
+the video-chat mode (iOS's loudspeaker default) and re-applies it after every route
+change, because its "current device != preferred device" check never matches nil.
+
+**Rule:** Give the SDK a preferred device through its own API (`updateMic`) before
+each new client's join: the route the call is on at the first attach (or, for a
+join before it, the session's route then), and the engine's request over it
+(`SmallWebRTCAudioRouteGate`). When adding a transport, check what its SDK does to
+the session with no device chosen.
+
+**Why it's missed:** The simulator runs `FakeTransport`, and with the speaker
+default on (as before) the SDK's loudspeaker matched what the engine asked for.
+
 ### An answered call played the outgoing ringback and "Connected", as if the user had called
 First seen: 2026-11-12 (device, iOS 27.0, plain rings and Daily D2 rings)
 

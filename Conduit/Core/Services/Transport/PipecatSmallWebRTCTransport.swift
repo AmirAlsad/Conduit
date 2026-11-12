@@ -20,6 +20,14 @@
 //  while a call rings (`canConnectWhileRinging` is false): its connect would
 //  configure the session under the ringtone.
 //
+//  Route: with no preferred device the SDK configures the session for video chat,
+//  which iOS plays on the loudspeaker, at the start of every join and after every
+//  route change. So the transport keeps a call on the route it starts on: it tells
+//  the SDK, through its own device API (`updateMic`), to prefer the route read at
+//  the first attach, or the engine's request, which wins; a new client is told
+//  before its join, which the SDK then applies from its first configuration. See
+//  `SmallWebRTCAudioRouteGate`. Nothing here sets the audio session itself.
+//
 //  Hold: the SDK exposes no control over the agent's playout (its peer
 //  connection and remote track are internal), so `detachAudioSession` can stop
 //  capture but not playout. A held call stays silent only because the agent
@@ -50,6 +58,7 @@
 //  bad token. A rejected API key is caught exactly one step earlier, by pairing.
 //
 
+import AVFoundation
 import ConduitCallEngine
 import Foundation
 import PipecatClientIOS
@@ -71,6 +80,9 @@ final class PipecatSmallWebRTCTransport: CallTransport {
     /// The SDK connect in flight on `session`.
     private var join: SmallWebRTCJoin?
     private var ledger = SmallWebRTCConnectLedger()
+    private var routes = SmallWebRTCAudioRouteGate()
+    /// The giving of preferred-device changes to the SDK in progress.
+    private var routeApplication: Task<Void, Never>?
 
     init() {
         let (stream, continuation) = AsyncStream.makeStream(of: TransportEvent.self)
@@ -90,6 +102,11 @@ final class PipecatSmallWebRTCTransport: CallTransport {
         )
         let events = SmallWebRTCEventMapper(continuation: continuation)
         client.delegate = events
+        events.onAvailableMics = { [weak self, weak events] ids in
+            guard let self, let events, self.session?.events === events else { return }
+            self.audioDevicesDidChange(ids)
+        }
+        routes.sessionDidReset()
         return Session(client: client, events: events)
     }
 
@@ -120,6 +137,12 @@ final class PipecatSmallWebRTCTransport: CallTransport {
             try checkStanding(of: ticket, while: "taking a session over")
         }
 
+        let routeBeforeJoin = Self.readOutputPort()
+        routes.joinWillStart(activeRoute: routeBeforeJoin.flatMap(SmallWebRTCAudioRoute.init(outputPort:)))
+        Self.traceRoute("join: route \(routeBeforeJoin?.rawValue ?? "no output") -> preferred audio device \(Self.describe(routes.wanted)) (\(routes.wantedReason))")
+        await applyRoute().value
+        try checkStanding(of: ticket, while: "giving the SDK its audio route")
+
         session.events.gate.connectDidStart()
         // A pairing agent's connection is the offer URL plus a short-lived bearer
         // for it — the engine key itself never rides the offer leg. Each engine
@@ -144,6 +167,7 @@ final class PipecatSmallWebRTCTransport: CallTransport {
         switch outcome {
         case .joined:
             join = nil
+            Self.traceRoute("joined: SDK selected \(session.client.selectedMic?.id.id ?? "none"), route \(Self.readOutputPort()?.rawValue ?? "no output")")
         case .failed(let error):
             join = nil
             session.events.gate.connectDidFail()
@@ -288,20 +312,93 @@ final class PipecatSmallWebRTCTransport: CallTransport {
         session?.client.selectedMic.map { AudioDeviceInfo(id: $0.id.id, name: $0.name) }
     }
 
+    /// Asks the SDK to prefer the device, at once (or, with no client yet, before
+    /// the next join) and for every later client of this transport, over the route
+    /// the call started on.
     func setAudioDevice(_ id: String) async {
-        guard let client = session?.client else { return }
-        do { try await client.updateMic(micId: MediaDeviceId(id: id)) }
-        catch { Log.error(.audio, "SmallWebRTC setAudioDevice(\(id)) error: \(error)") }
+        guard let route = SmallWebRTCAudioRoute(deviceID: id) else {
+            Log.warning(.audio, "SmallWebRTC setAudioDevice(\(id)) ignored: not a SmallWebRTC audio device")
+            return
+        }
+        routes.engineDidRequest(route)
+        Self.traceRoute("engine request: audio device \(route)")
+        await applyRoute().value
     }
 
     /// The SDK owns its AVAudioSession configuration and its playout never stopped,
-    /// so attaching starts nothing and returns at once: the agent is already audible,
-    /// so the `call-connected` or `call-resumed` the engine sends next reaches an agent
-    /// the user can hear. The engine's `setMicEnabled` that follows reopens capture. If a device pass shows CallKit contention, the upgrade is
+    /// so attaching starts nothing but the route: the agent is already audible, so
+    /// the `call-connected` or `call-resumed` the engine sends next reaches an agent
+    /// the user can hear. The engine's `setMicEnabled` that follows reopens capture.
+    /// The first attach reads the route CallKit activated the call on, for the SDK
+    /// to keep. If a device pass shows CallKit contention, the upgrade is
     /// RTCAudioSession manual-audio gating with the unordered-edges pattern
     /// (potential_skills/callkit.md).
     func attachAudioSession() async {
         Log.info(.audio, "SmallWebRTC attach (capture follows the engine's mic)")
+        if !routes.hasAttached {
+            let port = Self.readOutputPort()
+            let devices = Set((session?.client.getAllMics() ?? []).compactMap { SmallWebRTCAudioRoute(deviceID: $0.id.id) })
+            routes.attach(activeRoute: port.flatMap(SmallWebRTCAudioRoute.init(outputPort:)), devices: devices)
+            Self.traceRoute("route at activation: \(port?.rawValue ?? "no output") -> keep \(Self.describe(routes.followed)); preferred audio device \(Self.describe(routes.wanted)) (\(routes.wantedReason))")
+        }
+        await applyRoute().value
+    }
+
+    /// Gives the SDK the gate's wanted route until the current client has it, one
+    /// change at a time and always toward the latest wanted route. A call while an
+    /// application runs returns that one, which picks up the latest route.
+    @discardableResult
+    private func applyRoute() -> Task<Void, Never> {
+        if let routeApplication { return routeApplication }
+        let task = Task { [weak self] in
+            await self?.applyRouteChanges()
+            self?.routeApplication = nil
+        }
+        routeApplication = task
+        return task
+    }
+
+    private func applyRouteChanges() async {
+        while let client = session?.client, let application = routes.beginApplying() {
+            // An id the SDK does not know clears its preferred device
+            // (`AudioDeviceType(deviceID:)` is nil for it).
+            let id = application.route?.deviceID ?? ""
+            Self.traceRoute("preferred audio device -> \(Self.describe(application.route)) (\(routes.wantedReason))")
+            do {
+                try await client.updateMic(micId: MediaDeviceId(id: id))
+            } catch {
+                routes.applyDidFail(application)
+                Log.warning(.audio, "SmallWebRTC preferred audio device -> \(Self.describe(application.route)) refused: \(error)")
+                Self.traceRoute("preferred audio device -> \(Self.describe(application.route)) refused: \(error)")
+                return
+            }
+            Self.traceRoute("preferred audio device is \(Self.describe(application.route)): SDK selected \(client.selectedMic?.id.id ?? "none"), route \(Self.readOutputPort()?.rawValue ?? "no output")")
+        }
+    }
+
+    /// The SDK reported its device list: a Bluetooth or wired device that came or
+    /// went may move the route the transport keeps the call on.
+    private func audioDevicesDidChange(_ ids: [String]) {
+        let before = routes.wanted
+        routes.devicesDidChange(Set(ids.compactMap(SmallWebRTCAudioRoute.init(deviceID:))))
+        guard routes.wanted != before else { return }
+        Self.traceRoute("devices now \(ids): preferred audio device \(Self.describe(before)) -> \(Self.describe(routes.wanted)) (\(routes.wantedReason))")
+        applyRoute()
+    }
+
+    private static func readOutputPort() -> AVAudioSession.Port? {
+        AVAudioSession.sharedInstance().currentRoute.outputs.first?.portType
+    }
+
+    private static func describe(_ route: SmallWebRTCAudioRoute?) -> String {
+        route.map { "\($0)" } ?? "none (SDK default)"
+    }
+
+    /// Each route decision, to the call trace (which also writes it to Console).
+    private static func traceRoute(_ line: String) {
+        #if DEBUG
+        CallTrace.record("smallwebrtc route: \(line)")
+        #endif
     }
 
     /// Stops capture (the engine reopens it with `setMicEnabled` after the next
@@ -461,7 +558,12 @@ private final class SmallWebRTCEventMapper: PipecatClientDelegate {
         continuation.yield(.remoteAudioLevel(level))
     }
 
+    /// The SDK's device ids each time it reports its list, on the main actor.
+    var onAvailableMics: ((_ ids: [String]) -> Void)?
+
     nonisolated func onAvailableMicsUpdated(mics: [MediaDeviceInfo]) {
+        let ids = mics.map(\.id.id)
+        Task { @MainActor in self.onAvailableMics?(ids) }
         continuation.yield(.audioDevicesChanged)
     }
 
