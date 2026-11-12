@@ -47,11 +47,16 @@ async def provision_pairing(
     *,
     base_url: str | None = None,
     ring_flags: list[str] | None = None,
+    await_connected: bool = False,
 ) -> tuple[ConnectionPayload, str | None]:
     """Returns the payload and the room key the bot was dispatched into (None for
     smallwebrtc, which has no room). ``ring_flags`` (app.rings.ring_bot_flags)
-    dispatch the bot for a ring: with a deadline and a control channel."""
+    dispatch the bot for a ring: with a deadline and a control channel.
+    ``await_connected``: the client sends call-connected, so the bot stays silent
+    until it (for smallwebrtc, the bot the offer starts)."""
     extra = list(ring_flags or ())
+    if await_connected:
+        extra.append("--await-connected")
     control = bool(ring_flags)
     if transport == "daily":
         daily = _daily(state)
@@ -111,7 +116,9 @@ async def provision_pairing(
             raise TransportUnavailable(
                 "smallwebrtc needs a reachable base URL (set PUBLIC_BASE_URL)."
             )
-        token = state.smallwebrtc.mint_token(agent_id, settings.pairing_token_ttl_secs)
+        token = state.smallwebrtc.mint_token(
+            agent_id, settings.pairing_token_ttl_secs, await_connected=await_connected
+        )
         return ConnectionPayload(
             transport="smallwebrtc",
             connection={"room_url": f"{base}/webrtc/{agent_id}/offer", "token": token},

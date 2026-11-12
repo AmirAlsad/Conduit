@@ -1,5 +1,6 @@
-"""Bot-side call control: the await-answer mode, the ring deadline, hold/resume,
-and how each transport's wiring delivers the signals (bot/call_control.py)."""
+"""Bot-side call control: when the agent may speak (call-connected, for a client
+that sends it, with its fallback), the ring deadline, hold/resume, and how each
+transport's wiring delivers the signals (bot/call_control.py)."""
 
 import asyncio
 import json
@@ -70,7 +71,15 @@ class RtviMessage:
         self.type = type_
 
 
-def _make(*, await_answer=False, deadline=None, gates=None, grace=100.0, receipt_grace=0.0):
+def _make(
+    *,
+    await_connected=False,
+    joins_before_answer=False,
+    deadline=None,
+    gates=None,
+    grace=100.0,
+    connected_grace=0.0,
+):
     worker = FakeWorker()
     teardown = TeardownController(worker, grace_secs=grace, log=_log, held_grace_secs=0.3)
     greet = Greeter()
@@ -79,12 +88,19 @@ def _make(*, await_answer=False, deadline=None, gates=None, grace=100.0, receipt
         teardown=teardown,
         greet=greet,
         gates=gates,
-        await_answer=await_answer,
+        await_connected=await_connected,
+        joins_before_answer=joins_before_answer,
         ring_deadline_secs=deadline,
-        receipt_grace_secs=receipt_grace,
+        connected_grace_secs=connected_grace,
         log=_log,
     )
     return call, teardown, worker, greet, gates
+
+
+def _media_ring(**kwargs):
+    """A "media" ring bot for a client that sends call-connected: the phone joins
+    while it still rings."""
+    return _make(await_connected=True, joins_before_answer=True, deadline=60, **kwargs)
 
 
 def _lk_wire(data_t):
@@ -93,49 +109,105 @@ def _lk_wire(data_t):
     ).encode()
 
 
-# --- no ring: today's behaviour ---
+# --- a client that does not send call-connected: today's behaviour ---
 
 
-async def test_without_a_ring_every_client_ready_greets_and_gates_stay_open():
+async def test_without_call_connected_every_client_ready_greets_and_gates_stay_open():
     call, _, _, greet, gates = _make()
-    assert call.answered
+    assert call.answered and call.on_line
     await call.client_ready()
     await call.client_ready()
     assert greet.count == 2  # unchanged: each RTVI client-ready greets
     assert all(g.is_open for g in gates)
 
 
-# --- await-answer (preconnect: media) ---
+async def test_a_call_connected_from_a_client_that_never_listed_it_changes_nothing():
+    call, _, _, greet, gates = _make()
+    await call.client_ready()
+    await call.handle("call-connected")
+    assert greet.count == 1
+    assert all(g.is_open for g in gates)
 
 
-async def test_await_answer_is_silent_until_answered_then_greets_once():
-    call, _, _, greet, gates = _make(await_answer=True, deadline=60)
+# --- a client that sends call-connected: greet on it, on every call ---
+
+
+async def test_an_outgoing_call_is_silent_until_call_connected_then_greets_once():
+    call, _, _, greet, gates = _make(await_connected=True, connected_grace=60)
+    assert call.answered and not call.on_line
     assert not any(g.is_open for g in gates)
-    await call.client_ready()  # the phone joined while ringing
+    await call.human_joined("phone")
+    await call.client_ready()  # the app is in the room, playing its ringback
     assert greet.count == 0
-    await call.handle("call-answered")
-    assert call.answered
+    assert not any(g.is_open for g in gates)
+    await call.handle("call-connected")
+    assert call.on_line
     assert all(g.is_open for g in gates)
     assert greet.count == 1
-    # The app re-sends call-answered after every reconnect; no second greeting.
-    await call.handle("call-answered")
+    # The app sends it again after every reconnect: the same call, no second greeting.
+    await call.handle("call-connected")
     await call.client_ready()
     assert greet.count == 1
     call.stop()
 
 
-async def test_await_answer_greets_at_ready_when_the_answer_came_first():
-    # A 0.1 app ignores preconnect: its answered receipt arrives before it joins.
-    call, _, _, greet, _ = _make(await_answer=True, deadline=60)
-    await call.answer("receipt")
-    assert greet.count == 0
+async def test_call_connected_before_client_ready_greets_at_once():
+    # The client can hear the bot by the time it says the user is on the line.
+    call, _, _, greet, _ = _make(await_connected=True, connected_grace=60)
+    await call.handle("call-connected")
+    assert greet.count == 1
     await call.client_ready()
     assert greet.count == 1
     call.stop()
 
 
-async def test_await_answer_ignores_the_human_joining():
-    call, _, _, greet, gates = _make(await_answer=True, deadline=60)
+async def test_a_lost_call_connected_is_covered_once_the_device_is_in_the_room():
+    call, _, _, greet, gates = _make(await_connected=True, connected_grace=0.1)
+    await asyncio.sleep(0.2)
+    assert greet.count == 0  # nobody in the room yet
+    await call.human_joined("phone")
+    await call.client_ready()
+    await asyncio.sleep(0.05)
+    assert not call.on_line
+    await asyncio.sleep(0.1)
+    assert call.on_line and greet.count == 1
+    assert all(g.is_open for g in gates)
+    await call.handle("call-connected")  # late: the next connection's, nothing new
+    assert greet.count == 1
+    call.stop()
+
+
+async def test_call_connected_inside_the_fallback_wait_greets_once():
+    call, _, _, greet, _ = _make(await_connected=True, connected_grace=0.1)
+    await call.human_joined("phone")
+    await call.client_ready()
+    await call.handle("call-connected")
+    assert greet.count == 1
+    await asyncio.sleep(0.2)
+    assert greet.count == 1
+    call.stop()
+
+
+# --- rings ---
+
+
+async def test_a_media_ring_is_silent_until_call_connected_then_greets_once():
+    call, _, _, greet, gates = _media_ring()
+    assert not any(g.is_open for g in gates)
+    await call.client_ready()  # the phone joined while ringing
+    assert greet.count == 0 and not call.answered
+    await call.handle("call-connected")
+    assert call.answered and call.on_line
+    assert all(g.is_open for g in gates)
+    assert greet.count == 1
+    await call.handle("call-connected")
+    await call.client_ready()
+    assert greet.count == 1
+    call.stop()
+
+
+async def test_a_media_ring_ignores_the_human_joining():
+    call, _, _, _, gates = _media_ring()
     assert await call.human_joined() is True
     assert await call.human_joined() is False
     assert not call.answered
@@ -143,24 +215,34 @@ async def test_await_answer_ignores_the_human_joining():
     call.stop()
 
 
+async def test_a_ring_that_joins_before_the_answer_stays_silent_for_any_client():
+    # A client that never listed call-connected still joins before the answer on
+    # a "media" ring: the bot must not speak to a phone that is still ringing.
+    call, _, _, greet, gates = _make(joins_before_answer=True, deadline=60)
+    await call.client_ready()
+    assert greet.count == 0
+    assert not any(g.is_open for g in gates)
+    call.stop()
+
+
 async def test_ring_deadline_ends_an_unanswered_bot():
-    call, _, worker, greet, _ = _make(await_answer=True, deadline=0.05)
+    call, _, worker, greet, _ = _make(await_connected=True, joins_before_answer=True, deadline=0.05)
     call.start()
     await asyncio.sleep(0.15)
     assert worker.cancelled == 1
     assert greet.count == 0
 
 
-async def test_answer_cancels_the_ring_deadline():
-    call, _, worker, _, _ = _make(await_answer=True, deadline=0.05)
+async def test_call_connected_cancels_the_ring_deadline():
+    call, _, worker, _, _ = _make(await_connected=True, joins_before_answer=True, deadline=0.05)
     call.start()
-    await call.handle("call-answered")
+    await call.handle("call-connected")
     await asyncio.sleep(0.15)
     assert worker.cancelled == 0
 
 
-async def test_ring_bot_without_await_takes_the_join_as_the_answer():
-    # preconnect: credentials — the app joins only after the user answered.
+async def test_ring_bot_that_the_app_joins_after_the_answer_takes_the_join_as_the_answer():
+    # preconnect: credentials -- the app joins only after the user answered.
     call, _, worker, _, gates = _make(deadline=0.05)
     assert all(g.is_open for g in gates)
     call.start()
@@ -168,6 +250,19 @@ async def test_ring_bot_without_await_takes_the_join_as_the_answer():
     assert call.answered
     await asyncio.sleep(0.15)
     assert worker.cancelled == 0
+
+
+async def test_a_credentials_ring_for_a_client_that_sends_call_connected_waits_for_it():
+    call, _, worker, greet, gates = _make(await_connected=True, deadline=0.05, connected_grace=60)
+    call.start()
+    await call.human_joined("phone")  # the join is the answer: the deadline stops
+    await call.client_ready()
+    await asyncio.sleep(0.15)
+    assert worker.cancelled == 0
+    assert greet.count == 0 and not any(g.is_open for g in gates)
+    await call.handle("call-connected")
+    assert greet.count == 1
+    call.stop()
 
 
 # --- hold ---
@@ -186,10 +281,36 @@ async def test_hold_closes_gates_interrupts_and_resume_reopens():
     assert all(g.is_open for g in gates)
 
 
-async def test_answer_while_held_keeps_the_gates_closed():
-    call, _, _, _, gates = _make(await_answer=True, deadline=60)
+async def test_a_call_that_connects_while_held_hears_resumed_then_connected():
+    # The engine's order for a call that connects during a hold.
+    call, _, _, greet, gates = _make(await_connected=True, connected_grace=60)
     await call.handle("call-held")
-    await call.handle("call-answered")
+    await call.handle("call-resumed")
+    assert not any(g.is_open for g in gates)  # resumed, but not on the line yet
+    assert greet.count == 0
+    await call.handle("call-connected")
+    assert all(g.is_open for g in gates)
+    assert greet.count == 1
+    call.stop()
+
+
+async def test_call_connected_says_the_call_is_not_held():
+    # It is never sent while held: a call-resumed lost on the way is implied by it.
+    call, teardown, _, _, gates = _make(await_connected=True, connected_grace=60)
+    await call.handle("call-connected")
+    await call.handle("call-held")
+    await call.handle("call-connected")  # a reconnect after a resume the bot missed
+    assert not call.held
+    assert all(g.is_open for g in gates)
+    call.stop()
+
+
+async def test_the_fallback_does_not_end_a_hold():
+    call, _, _, greet, gates = _make(await_connected=True, connected_grace=0.05)
+    await call.human_joined("phone")
+    await call.handle("call-held")
+    await asyncio.sleep(0.1)
+    assert call.on_line and call.held
     assert not any(g.is_open for g in gates)
     await call.handle("call-resumed")
     assert all(g.is_open for g in gates)
@@ -254,13 +375,13 @@ async def test_livekit_first_join_greets_without_a_ring():
     assert greet.count == 1
 
 
-async def test_livekit_raw_call_answered_releases_an_awaiting_bot():
-    call, teardown, worker, greet, gates = _make(await_answer=True, deadline=60)
+async def test_livekit_raw_call_connected_releases_an_awaiting_bot():
+    call, teardown, worker, greet, gates = _media_ring()
     t = FakeEvents()
     _wire_presence(t, "livekit", teardown, call, _log)
     await t.handlers["on_participant_connected"](t, "user-1")  # joined while ringing
     assert greet.count == 0
-    await t.handlers["on_data_received"](t, _lk_wire("call-answered"), "user-1")
+    await t.handlers["on_data_received"](t, _lk_wire("call-connected"), "user-1")
     assert greet.count == 1
     assert all(g.is_open for g in gates)
     await t.handlers["on_data_received"](t, _lk_wire("call-held"), "user-1")
@@ -273,14 +394,14 @@ async def test_livekit_raw_call_answered_releases_an_awaiting_bot():
 
 
 async def test_daily_signals_arrive_through_rtvi():
-    call, teardown, worker, greet, gates = _make(await_answer=True, deadline=60)
+    call, teardown, worker, greet, gates = _media_ring()
     t, rtvi = FakeEvents(), FakeEvents()
     _wire_presence(t, "daily", teardown, call, _log)
     _wire_rtvi(rtvi, teardown, call, "live", _log)
     await t.handlers["on_participant_joined"](t, {"id": "p1"})
     await rtvi.handlers["on_client_ready"](rtvi)
     assert greet.count == 0
-    await rtvi.handlers["on_client_message"](rtvi, RtviMessage("call-answered"))
+    await rtvi.handlers["on_client_message"](rtvi, RtviMessage("call-connected"))
     assert greet.count == 1
     await rtvi.handlers["on_client_message"](rtvi, RtviMessage("call-held"))
     assert not any(g.is_open for g in gates)
@@ -298,7 +419,7 @@ async def test_daily_join_answers_a_ring_bot_that_does_not_await():
 
 
 async def test_control_line_answered_is_the_receipt():
-    call, _, _, greet, _ = _make(await_answer=True, deadline=60, receipt_grace=0)
+    call, _, _, greet, _ = _media_ring(connected_grace=0)
     await call.client_ready()
 
     async def lines():
@@ -306,8 +427,21 @@ async def test_control_line_answered_is_the_receipt():
         yield "answered"
 
     await _read_control(lines(), call, _log)
-    assert call.answered
+    assert call.answered and call.on_line  # a zero grace releases at once
     assert greet.count == 1
+    call.stop()
+
+
+async def test_smallwebrtc_client_presence_reaches_the_fallback():
+    call, teardown, _, greet, _ = _make(await_connected=True, connected_grace=0.05)
+    t = FakeEvents()
+    _wire_presence(t, "smallwebrtc", teardown, call, _log)
+    await t.handlers["on_client_connected"](t, {"id": "pc-1"})
+    await asyncio.sleep(0.1)
+    assert call.on_line and greet.count == 0  # on the line; greets once ready
+    await call.client_ready()
+    assert greet.count == 1
+    teardown._cancel_timer()
     call.stop()
 
 
@@ -410,15 +544,15 @@ async def _cancel_line(call):
 
 
 async def test_cancel_ends_a_bot_that_has_not_seen_the_answer():
-    call, _, worker, _, _ = _make(await_answer=True, deadline=60)
+    call, _, worker, _, _ = _media_ring()
     assert await _cancel_line(call) == [True]
     assert worker.cancelled == 1
     call.stop()
 
 
-async def test_cancel_is_refused_once_the_bot_saw_call_answered():
-    call, _, worker, _, _ = _make(await_answer=True, deadline=60)
-    await call.handle("call-answered")
+async def test_cancel_is_refused_once_the_bot_saw_call_connected():
+    call, _, worker, _, _ = _media_ring()
+    await call.handle("call-connected")
     assert await _cancel_line(call) == [False]
     assert worker.cancelled == 0
 
@@ -434,7 +568,7 @@ async def test_cancel_is_refused_for_a_ring_bot_the_human_already_joined():
 
 
 async def test_cancel_line_without_a_reply_channel_still_decides():
-    call, _, worker, _, _ = _make(await_answer=True, deadline=60)
+    call, _, worker, _, _ = _media_ring()
 
     async def lines():
         yield "cancel"
@@ -452,7 +586,7 @@ def test_the_verdict_goes_to_stdout_behind_the_control_prefix(capsys):
     )
 
 
-# --- the answered receipt is only a fallback for call-answered ---
+# --- the answered receipt only starts the fallback wait for call-connected ---
 
 
 async def _receipt_line(call):
@@ -462,27 +596,27 @@ async def _receipt_line(call):
     await _read_control(lines(), call, _log)
 
 
-async def test_the_answered_receipt_waits_out_a_grace_for_call_answered():
+async def test_the_answered_receipt_waits_out_a_grace_for_call_connected():
     # The receipt is sent at answer, before the app's audio is up; releasing the
     # greeting on it would play into audio that may not be there yet.
-    call, _, worker, greet, gates = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    call, _, worker, greet, gates = _media_ring(connected_grace=0.1)
     await call.client_ready()
     await _receipt_line(call)
-    assert not call.answered and greet.count == 0
+    assert call.answered and not call.on_line and greet.count == 0
     assert not any(g.is_open for g in gates)
     await asyncio.sleep(0.2)
-    assert call.answered and greet.count == 1
+    assert call.on_line and greet.count == 1
     assert all(g.is_open for g in gates)
     assert worker.cancelled == 0
     call.stop()
 
 
-async def test_call_answered_inside_the_grace_releases_the_bot_once():
-    call, _, _, greet, gates = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+async def test_call_connected_inside_the_grace_releases_the_bot_once():
+    call, _, _, greet, gates = _media_ring(connected_grace=0.1)
     await call.client_ready()
     await _receipt_line(call)
-    await call.handle("call-answered")
-    assert call.answered and greet.count == 1
+    await call.handle("call-connected")
+    assert call.on_line and greet.count == 1
     await asyncio.sleep(0.2)
     assert greet.count == 1
     assert all(g.is_open for g in gates)
@@ -490,19 +624,21 @@ async def test_call_answered_inside_the_grace_releases_the_bot_once():
 
 
 async def test_the_receipt_stops_the_ring_deadline_during_the_grace():
-    call, _, worker, _, _ = _make(await_answer=True, deadline=0.05, receipt_grace=0.2)
+    call, _, worker, _, _ = _make(
+        await_connected=True, joins_before_answer=True, deadline=0.05, connected_grace=0.2
+    )
     call.start()
     await call.human_joined("phone")
     await _receipt_line(call)
     await asyncio.sleep(0.12)
     assert worker.cancelled == 0
     await asyncio.sleep(0.2)
-    assert call.answered
+    assert call.on_line
     call.stop()
 
 
 async def test_a_pending_receipt_blocks_a_cancel():
-    call, _, worker, _, _ = _make(await_answer=True, deadline=60, receipt_grace=1)
+    call, _, worker, _, _ = _media_ring(connected_grace=1)
     await _receipt_line(call)
     replies = []
 
@@ -514,74 +650,74 @@ async def test_a_pending_receipt_blocks_a_cancel():
     call.stop()
 
 
-async def test_stopping_the_bot_drops_a_pending_receipt_release():
-    call, _, _, greet, _ = _make(await_answer=True, deadline=60, receipt_grace=0.05)
+async def test_stopping_the_bot_drops_a_pending_fallback():
+    call, _, _, greet, _ = _media_ring(connected_grace=0.05)
     await call.client_ready()
     await _receipt_line(call)
     call.stop()
     await asyncio.sleep(0.15)
-    assert greet.count == 0 and not call.answered
+    assert greet.count == 0 and not call.on_line
 
 
 async def test_the_receipt_grace_starts_only_once_the_device_is_in_the_room():
     # The receipt is sent at the answer, often before the app has (re)joined: the
     # grace is counted from the later of the receipt and the device's join.
-    call, _, _, greet, gates = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    call, _, _, greet, gates = _media_ring(connected_grace=0.1)
     await _receipt_line(call)
     await asyncio.sleep(0.2)
-    assert not call.answered and greet.count == 0  # nobody in the room yet
+    assert not call.on_line and greet.count == 0  # nobody in the room yet
     await call.human_joined("phone")
     await asyncio.sleep(0.05)
-    assert not call.answered  # a full grace from the join, not from the receipt
+    assert not call.on_line  # a full grace from the join, not from the receipt
     await call.client_ready()
     await asyncio.sleep(0.1)
-    assert call.answered and greet.count == 1
+    assert call.on_line and greet.count == 1
     assert all(g.is_open for g in gates)
     call.stop()
 
 
-async def test_call_answered_after_a_late_join_still_wins_the_grace():
-    call, _, _, greet, _ = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+async def test_call_connected_after_a_late_join_still_wins_the_grace():
+    call, _, _, greet, _ = _media_ring(connected_grace=0.1)
     await _receipt_line(call)
     await call.human_joined("phone")
     await call.client_ready()
-    await call.handle("call-answered")
-    assert call.answered and greet.count == 1
+    await call.handle("call-connected")
+    assert call.on_line and greet.count == 1
     await asyncio.sleep(0.2)
     assert greet.count == 1
     call.stop()
 
 
 async def test_the_device_leaving_stops_the_grace_and_its_return_restarts_it():
-    call, _, _, greet, _ = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    call, _, _, greet, _ = _media_ring(connected_grace=0.1)
     await call.human_joined("phone-1")
     await call.client_ready()
     await _receipt_line(call)
     await asyncio.sleep(0.05)
     call.human_left("phone-1")
     await asyncio.sleep(0.1)
-    assert not call.answered  # the grace never ran out with the device there
+    assert not call.on_line  # the grace never ran out with the device there
     await call.human_joined("phone-2")
     await asyncio.sleep(0.05)
-    assert not call.answered  # restarted in full
+    assert not call.on_line  # restarted in full
     await asyncio.sleep(0.1)
-    assert call.answered and greet.count == 1
+    assert call.on_line and greet.count == 1
     call.stop()
 
 
 async def test_a_reconnect_that_joins_before_the_old_participant_leaves_keeps_the_grace():
-    call, _, _, _, _ = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    call, _, _, _, _ = _media_ring(connected_grace=0.1)
     await call.human_joined("phone-1")
     await _receipt_line(call)
     await call.human_joined("phone-2")
     call.human_left("phone-1")
     await asyncio.sleep(0.15)
-    assert call.answered
+    assert call.on_line
     call.stop()
 
 
 async def test_a_cancel_after_the_receipt_is_refused_while_the_device_is_away():
-    call, _, worker, _, _ = _make(await_answer=True, deadline=60, receipt_grace=0.1)
+    call, _, worker, _, _ = _media_ring(connected_grace=0.1)
     await call.human_joined("phone")
     await _receipt_line(call)
     call.human_left("phone")
@@ -590,34 +726,34 @@ async def test_a_cancel_after_the_receipt_is_refused_while_the_device_is_away():
     call.stop()
 
 
-async def test_daily_and_livekit_leaves_reach_the_receipt_wait():
+async def test_daily_and_livekit_leaves_reach_the_fallback_wait():
     for transport_type, join, leave, join_args, leave_args in (
         ("daily", "on_participant_joined", "on_participant_left", ({"id": "p1"},), ({"id": "p1"}, "left")),
         ("livekit", "on_participant_connected", "on_participant_left", ("p1",), ("p1", "left")),
     ):
-        call, teardown, _, _, _ = _make(await_answer=True, deadline=60, receipt_grace=0.05)
+        call, teardown, _, _, _ = _media_ring(connected_grace=0.05)
         t = FakeLiveKitTransport() if transport_type == "livekit" else FakeEvents()
         _wire_presence(t, transport_type, teardown, call, _log)
         await t.handlers[join](t, *join_args)
         await _receipt_line(call)
         await t.handlers[leave](t, *leave_args)
         await asyncio.sleep(0.1)
-        assert not call.answered, transport_type
+        assert not call.on_line, transport_type
         teardown._cancel_timer()
         call.stop()
 
 
-def test_the_receipt_grace_is_a_setting_of_at_least_five_seconds():
-    # The push contract: release on the receipt only if call-answered has not come
-    # 5 or more seconds after both the receipt and the device being in the room.
+def test_the_call_connected_grace_is_a_setting_of_at_least_five_seconds():
+    # Longer than the app's own sequence after it joins (its minimum connecting
+    # time and its "Connected"); the push contract's floor is 5 seconds.
     import pytest
     from pydantic import ValidationError
 
     from app.config import Settings, settings
 
-    assert settings.answered_receipt_grace_secs >= 5
-    assert Settings().answered_receipt_grace_secs == 5
+    assert settings.call_connected_grace_secs >= 5
+    assert Settings().call_connected_grace_secs == 10
     for bad in (4, 0, -1):
         with pytest.raises(ValidationError):
-            Settings(answered_receipt_grace_secs=bad)
-    assert Settings(answered_receipt_grace_secs=8).answered_receipt_grace_secs == 8
+            Settings(call_connected_grace_secs=bad)
+    assert Settings(call_connected_grace_secs=8).call_connected_grace_secs == 8

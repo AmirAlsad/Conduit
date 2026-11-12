@@ -28,17 +28,29 @@ from app.obs import event, get_logger
 class SmallWebRTCService:
     def __init__(self) -> None:
         self._handler = None
-        self._tokens: dict[str, tuple[str, float]] = {}  # token -> (agent_id, expires_at)
+        # token -> (agent_id, expires_at, the client sends call-connected)
+        self._tokens: dict[str, tuple[str, float, bool]] = {}
         self._tasks: set[asyncio.Task] = set()
         self._log = get_logger("smallwebrtc")
 
     # --- ephemeral offer tokens (the pairing "credential" for this transport) ---
 
-    def mint_token(self, agent_id: str, ttl_secs: int) -> str:
+    def mint_token(self, agent_id: str, ttl_secs: int, *, await_connected: bool = False) -> str:
+        """``await_connected``: the pairing request said the client sends
+        call-connected, so the bot its offer starts waits for it."""
         self._prune()
         token = secrets.token_hex(16)
-        self._tokens[token] = (agent_id, time.time() + ttl_secs)
+        self._tokens[token] = (agent_id, time.time() + ttl_secs, await_connected)
         return token
+
+    def awaits_connected(self, presented: str) -> bool:
+        """Whether the offer token's pairing request said the client sends
+        call-connected; False for the engine key or an unknown token."""
+        self._prune()
+        for token, (_owner, _expires, awaits) in self._tokens.items():
+            if hmac.compare_digest(presented, token):
+                return awaits
+        return False
 
     def validate_token(self, presented: str, agent_id: str) -> bool:
         """Constant-time scan over the (small) live-token set; expiry gates only
@@ -46,7 +58,7 @@ class SmallWebRTCService:
         within the TTL."""
         self._prune()
         ok = False
-        for token, (owner, _expires) in self._tokens.items():
+        for token, (owner, _expires, _awaits) in self._tokens.items():
             if hmac.compare_digest(presented, token) and owner == agent_id:
                 ok = True
         return ok
@@ -67,7 +79,7 @@ class SmallWebRTCService:
             self._handler = SmallWebRTCRequestHandler()
         return self._handler
 
-    async def handle_offer(self, agent_id: str, payload: dict) -> dict:
+    async def handle_offer(self, agent_id: str, payload: dict, *, await_connected: bool = False) -> dict:
         from pipecat.transports.smallwebrtc.request_handler import SmallWebRTCRequest
 
         request = SmallWebRTCRequest.from_dict(payload)
@@ -86,6 +98,7 @@ class SmallWebRTCService:
                     # would clobber uvicorn's own SIGINT/SIGTERM handling.
                     handle_sigint=False,
                     handle_sigterm=False,
+                    await_connected=await_connected,
                 )
             )
             self.track(task)

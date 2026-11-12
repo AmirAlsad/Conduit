@@ -50,7 +50,8 @@ class TrackedRing:
     # True when that bot was dispatched with the ring flags (deadline + control
     # channel): receipts then steer it.
     ring_bot: bool = False
-    awaits_answer: bool = False
+    # The device joins the bot's room before the user answers ("media").
+    joins_before_answer: bool = False
     status: str | None = None  # the ring's receipt, once it arrives
     canceled: bool = False
     created_at: float = 0.0
@@ -62,11 +63,11 @@ def ring_deadline_secs(ring_timeout: int | None) -> float:
     return timeout + settings.ring_deadline_margin_secs
 
 
-def ring_bot_flags(*, ring_timeout: int | None, await_answer: bool) -> list[str]:
+def ring_bot_flags(*, ring_timeout: int | None, joins_before_answer: bool) -> list[str]:
     """argv flags for a bot dispatched for a ring (see bot/bot.py)."""
     flags = ["--ring-deadline", f"{ring_deadline_secs(ring_timeout):g}"]
-    if await_answer:
-        flags.append("--await-answer")
+    if joins_before_answer:
+        flags.append("--joins-before-answer")
     return flags
 
 
@@ -95,7 +96,7 @@ class RingTracker:
         *,
         room_key: str,
         transport: str,
-        awaits_answer: bool,
+        joins_before_answer: bool,
     ) -> TrackedRing | None:
         """Record the ring bot dispatched when the app paired during the ring. A
         call_id the tracker doesn't know (e.g. sent before a restart) is adopted so
@@ -108,7 +109,7 @@ class RingTracker:
         ring.room_key = room_key
         ring.transport = transport
         ring.ring_bot = True
-        ring.awaits_answer = awaits_answer
+        ring.joins_before_answer = joins_before_answer
         return ring
 
     def _prune(self) -> None:

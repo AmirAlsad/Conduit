@@ -146,11 +146,12 @@ long-lived direct token won't sabotage reconnection-with-backoff.
   agent. (`LOOPBACK_BOT_SPEAKING=false` for a pure passthrough.)
 - **`live`** — a complete reference agent that satisfies all three contracts:
   `STT → LLM → TTS` (Deepgram · Groq · Cartesia by default), RTVI speaking-state,
-  greet-on-connect, barge-in, reconnection-safe teardown. **Copy this** as the
+  a greeting when the user is on the line (`call-connected`), barge-in,
+  reconnection-safe teardown. **Copy this** as the
   starting point for your own. Swap any stage in `bot/pipelines/live.py`
   (TTS is also runtime-selectable via `TTS_PROVIDER`).
 - **`tone`** — a test agent, not an example: a continuous 440 Hz tone from the moment
-  a human joins, no keys, and it ignores client-ready, `call-answered` and hold. Ring
+  a human joins, no keys, and it ignores client-ready, `call-connected` and hold. Ring
   it pre-connected (`scripts/ring.py --agent tone --inline --preconnect media`) to
   hear whether a ringing phone leaks any audio; see
   [Inbound calls](../docs/backend/inbound-calls.md).
@@ -214,7 +215,8 @@ Body for `/connect*` and `/credentials*`:
 `{"transport": "daily"|"livekit"|"smallwebrtc"}`
 (optional → agent/engine default; on the bare routes `agent_id` may ride in the
 body, but a path `agent_id` always wins — **the endpoint identifies the agent**,
-which is the shape the Conduit app expects: it POSTs only `{"transport": ...}`).
+which is the shape the Conduit app expects: it POSTs `{"transport": ...,
+"call_signals": [...]}` and no agent id).
 Smallwebrtc is **pairing-only** (no `/credentials`), runs its bots as asyncio
 tasks inside the dispatcher process, and needs the device to reach the engine
 directly over UDP — LAN / self-hosted, not Railway.
@@ -223,9 +225,11 @@ payload). `/admin/ring` rings via APNs VoIP push (`scripts/ring.py` wraps it;
 needs the `APNS_*` vars) — full setup in the docs site's **Inbound calls** guide.
 Body for `/admin/ring/{agent_id}` (all optional): `{"inline": bool, "transport":
 …, "ring_timeout": <seconds>, "preconnect": "credentials"|"media"}`; for its
-`/cancel`: `{"call_id": "<from the ring response>"}`. A pairing `/connect` made
-during a pre-connected ring carries `"ring": {"call_id", "await_answer"}` and
-dispatches a **ring bot** (`--ring-deadline`, plus `--await-answer` for media).
+`/cancel`: `{"call_id": "<from the ring response>"}`. A `/connect` whose body
+lists `"call-connected"` in `call_signals` dispatches a bot that waits for it
+(`--await-connected`); one made during a pre-connected ring also carries
+`"ring": {"call_id", "joins_before_answer"}` and dispatches a **ring bot**
+(`--ring-deadline`, plus `--joins-before-answer` for media).
 
 ---
 
@@ -251,30 +255,39 @@ and reconnects with backoff while CallKit still shows the call up. So:
 > be ≥ the client's total reconnect-with-backoff budget, and no longer (your agent
 > is a billed participant during the window).
 
-### Call-control signals: answer and hold
+### Call-control signals: when to speak, and hold
 
-The app also sends `call-answered`, `call-held` and `call-resumed` client
+The app also sends `call-connected`, `call-held` and `call-resumed` client
 messages (same RTVI envelope as `end-call`; same per-transport delivery). The
 entrypoint handles them for you (`bot/call_control.py`):
 
-- **Await-answer.** A bot dispatched with `--await-answer` (the app joined while
-  the phone still rang) keeps the pipeline's audio gates closed and doesn't greet
-  until `call-answered`. The ring's `answered` receipt is only the fallback for a
-  lost `call-answered`: it releases the bot if `call-answered` has not come
-  `ANSWERED_RECEIPT_GRACE_SECS` after both the receipt and the device being in
-  the room, whichever is later (the receipt is sent at the moment of answer,
-  before the app's audio is up and often before it has rejoined; the device
-  leaving stops that wait and its return restarts it). With `--ring-deadline` it
-  ends if no answer comes in time; the receipt also stops that deadline.
+- **Speak on `call-connected`.** The app sends it on every call once the user is
+  on the line: the call is connected, iOS has activated its audio, it is not held,
+  and the app's own "Connected" has played. An app says it sends it by listing it
+  in `call_signals` (in the `/connect` body, and in its `/inbound/register` body
+  for rings whose bot starts before the app asks for anything). Such a bot
+  (`--await-connected`, on Daily, LiveKit and SmallWebRTC alike, for outgoing
+  calls and rings) keeps the pipeline's audio gates closed and doesn't greet until
+  it arrives; a repeat after a reconnect greets no one again. An app that lists
+  nothing is greeted when it is ready, exactly as before. As a fallback for a lost
+  `call-connected`, the bot greets anyway `CALL_CONNECTED_GRACE_SECS` after it
+  knows the user answered and the device is in the room, whichever is later. For
+  a ring, the answer is `call-connected`, the ring's `answered` receipt (sent at
+  the moment of answer, before the app's audio is up, so it only starts that
+  wait), or the device joining a ring it joins only after the answer; the device
+  leaving stops the wait and its return restarts it. With `--ring-deadline` the
+  bot ends if no answer comes in time. A `"media"` ring (`--joins-before-answer`)
+  stays silent until then even for an app that lists nothing, and is only sent to
+  an app that lists `call-connected`.
 - **Hold.** `call-held` interrupts the bot and closes its audio gates (no turns,
   no speech) until `call-resumed`; a human who drops while held gets
   `HELD_GRACE_SECS` instead of `HUMAN_ABSENT_GRACE_SECS`.
-- **Greeting.** `on_ready` runs on RTVI client-ready (Daily, SmallWebRTC) and on
-  the first human join on LiveKit, whose app sends no client-ready (and whose
-  client messages never reach Pipecat's RTVI processor). An awaiting bot greets
-  once, when it is both ready and answered.
+- **Greeting.** `on_ready` runs on `call-connected` for an awaiting bot, once;
+  otherwise on RTVI client-ready (Daily, SmallWebRTC) and on the first human join
+  on LiveKit, whose app sends no client-ready (and whose client messages never
+  reach Pipecat's RTVI processor).
 
-For your own pipeline to honour await-answer and hold, put an
+For your own pipeline to honour `call-connected` and hold, put an
 `AudioGate` after `transport.input()` and one before `transport.output()`, and
 return them as `BotBuild(gates=…)` — see `bot/pipelines/live.py`.
 
@@ -294,11 +307,13 @@ return them as `BotBuild(gates=…)` — see `bot/pipelines/live.py`.
   then rings for its own configured timeout (60 s by default, but the app can make
   it longer or unlimited), so match it to your app's. A sender that wants a firm
   bound should always send `ring_timeout` (to devices that list the feature).
-- **`ANSWERED_RECEIPT_GRACE_SECS`** (default `5`, must be >= 5, the push
-  contract's floor) — how long a ring bot that got the ring's `answered` receipt
-  waits for the app's `call-answered`, counted from the receipt or the device
-  being in the room, whichever is later, before it treats the receipt as the
-  answer.
+- **`CALL_CONNECTED_GRACE_SECS`** (default `10`, must be >= 5, the push
+  contract's floor) — how long an awaiting bot waits for a `call-connected` that
+  may have been lost, counted from the later of knowing the user answered and the
+  device being in the room, before it greets anyway. Keep it above the app's own
+  sequence after it joins (Conduit's minimum connecting time, about 2.6 s, and its
+  "Connected", which the engine bounds at 5 s). It replaces
+  `ANSWERED_RECEIPT_GRACE_SECS`, which is no longer read.
 
 See `.env.example` for the full list and which feature needs which key.
 

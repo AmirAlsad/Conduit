@@ -111,13 +111,15 @@ class Settings(BaseSettings):
     # ring_timeout (a firm bound: the app clamps it to [10 s, its own timeout]).
     ring_timeout_secs: int = Field(default=60, gt=0)
     ring_deadline_margin_secs: float = 15.0
-    # The app sends the ring's "answered" receipt at the moment of answer, before
-    # its audio is up and often before it has (re)joined, and the call-answered
-    # message once it is. The receipt is only the fallback for a lost
-    # call-answered: a ring bot takes it as the answer only if call-answered has
-    # not come this long after both the receipt and the device being in the room,
-    # whichever is later. The push contract asks for 5 seconds or more.
-    answered_receipt_grace_secs: float = Field(default=5.0, ge=5.0)
+    # A bot for a client that sends call-connected greets when it arrives. The
+    # fallback for a lost one: once the bot knows the user answered (at once for an
+    # ordinary call; for a ring, the "answered" receipt, or the device joining a
+    # ring it joins only after the answer) and the device is in the room, it
+    # greets anyway this long after the later of the two. It must outlast the
+    # app's own sequence after it joins (its minimum connecting time, about 2.6 s
+    # in Conduit, and its "Connected", which the engine bounds at 5 s), and the
+    # push contract asks for 5 seconds or more.
+    call_connected_grace_secs: float = Field(default=10.0, ge=5.0)
 
     # Token TTLs. Pairing tokens are born per-call (short); direct tokens are pasted
     # into the app once and must outlive many calls (long). Expiry gates only the

@@ -1,6 +1,6 @@
 """Ring lifecycle on the engine: ring_timeout / preconnect push keys, ring bots
-(deadline + await-answer flags), receipts steering them, and the cancel
-endpoint (docs/INBOUND_CALLS.md). APNs, Daily, LiveKit and the dispatcher are
+(deadline, joins-before-answer and await-connected flags), receipts steering
+them, and the cancel endpoint (docs/INBOUND_CALLS.md). APNs, Daily, LiveKit and the dispatcher are
 faked; no network."""
 
 import uuid
@@ -16,12 +16,13 @@ from test_connect_flow import FakeDaily, FakeDispatcher, FakeLiveKit
 from test_inbound import AUTH, FEATURES, NAMED_BODY, REGISTER_BODY, FakeApns
 
 _BASE_KEYS = {"agent_id", "call_id", "status_url"}
-# An app on call engine 0.2+, which lists the push features; REGISTER_BODY is
-# an older app, which lists none.
+# An app on call engine 0.2+, which lists the push features and the call signals
+# its calls carry; REGISTER_BODY is an older app, which lists none.
 ALL_FEATURES = [*FEATURES, "preconnect"]
-FEATURED_BODY = {**REGISTER_BODY, "push_features": ALL_FEATURES}
+CALL_SIGNALS = ["call-connected", "call-held", "call-resumed"]
+FEATURED_BODY = {**REGISTER_BODY, "push_features": ALL_FEATURES, "call_signals": CALL_SIGNALS}
 # Takes a pre-connected ring but no cancel push.
-NO_CANCEL_BODY = {**REGISTER_BODY, "push_features": ["preconnect"]}
+NO_CANCEL_BODY = {**REGISTER_BODY, "push_features": ["preconnect"], "call_signals": CALL_SIGNALS}
 
 
 class PresenceDaily(FakeDaily):
@@ -78,10 +79,20 @@ def test_ring_without_new_keys_sends_todays_payload():
         assert set(payload) == _BASE_KEYS
         _, payload = _ring(c, inline=True)
         assert set(payload) == _BASE_KEYS | {"room_url", "token"}
-        # A plain inline bot is not a ring bot: no flags, no control pipe.
+        # A plain inline bot is not a ring bot: no ring flags, no control pipe. It
+        # waits for call-connected, which this registration says the app sends.
         argv = list(app.state.dispatcher.calls[-1][3])
-        assert "--ring-deadline" not in argv and "--await-answer" not in argv
+        assert "--ring-deadline" not in argv and "--joins-before-answer" not in argv
+        assert "--await-connected" in argv
         assert app.state.dispatcher.controls == [False]
+
+
+def test_an_inline_bot_for_an_app_that_lists_no_call_signals_greets_as_before():
+    with TestClient(app) as c:
+        _setup(c, body={**REGISTER_BODY, "push_features": ALL_FEATURES})
+        _ring(c, inline=True)
+        argv = list(app.state.dispatcher.calls[-1][3])
+        assert "--await-connected" not in argv
 
 
 def test_ring_timeout_and_preconnect_ride_the_push_as_strings():
@@ -135,7 +146,7 @@ def test_pairing_ring_bot_deadline_assumes_the_default_when_ring_timeout_is_not_
         call_id, _ = _ring(c, preconnect="media", ring_timeout=20)
         r = c.post(
             "/connect/loopback",
-            json={"transport": "daily", "ring": {"call_id": call_id, "await_answer": True}},
+            json={"transport": "daily", "call_signals": CALL_SIGNALS, "ring": {"call_id": call_id, "joins_before_answer": True}},
             headers=AUTH,
         )
         assert r.status_code == 200, r.text
@@ -156,7 +167,7 @@ def test_inline_media_ring_dispatches_an_awaiting_ring_bot():
         _setup(c)
         _ring(c, inline=True, preconnect="media")
         argv = _argv()
-        assert "--await-answer" in argv
+        assert "--joins-before-answer" in argv and "--await-connected" in argv
         assert _deadline(argv) == settings.ring_timeout_secs + settings.ring_deadline_margin_secs
         assert app.state.dispatcher.controls == [True]
 
@@ -166,8 +177,27 @@ def test_inline_credentials_ring_gets_a_deadline_but_does_not_await():
         _setup(c)
         _ring(c, inline=True, preconnect="credentials", ring_timeout=30)
         argv = _argv()
-        assert "--await-answer" not in argv
+        assert "--joins-before-answer" not in argv
         assert _deadline(argv) == 30 + settings.ring_deadline_margin_secs
+
+
+def test_a_media_ring_needs_an_app_that_sends_call_connected():
+    # Only call-connected tells a bot in the room during the ring that the user
+    # answered: an app that lists no call signals gets "credentials" instead.
+    body = {**REGISTER_BODY, "push_features": ALL_FEATURES}
+    for kwargs in ({}, {"inline": True}):
+        with TestClient(app) as c:
+            _setup(c, body=body)
+            r = c.post("/admin/ring/loopback", json={**kwargs, "preconnect": "media"}, headers=AUTH)
+            assert r.status_code == 200, r.text
+            assert r.json()["preconnect"] == "credentials"
+            payload = app.state.apns.sends[-1][2]
+            assert payload["preconnect"] == "credentials"
+            ring = app.state.rings.get(payload["call_id"])
+            assert not ring.joins_before_answer
+            if kwargs:
+                argv = _argv()
+                assert "--joins-before-answer" not in argv and "--await-connected" not in argv
 
 
 def test_ring_deadline_respects_the_apps_ten_second_floor():
@@ -176,8 +206,7 @@ def test_ring_deadline_respects_the_apps_ten_second_floor():
 
 
 def test_preconnect_is_left_out_for_a_device_without_the_feature():
-    # An older app would answer an inline media ring into a bot whose audio is
-    # closed and that waits for a call-answered the app never sends.
+    # An older app would ignore the preconnect.
     for features in ([], ["cancel", "ring_timeout"]):
         body = {**REGISTER_BODY, "push_features": features}
         for kwargs in ({}, {"inline": True}):
@@ -193,10 +222,11 @@ def test_preconnect_is_left_out_for_a_device_without_the_feature():
                 payload = app.state.apns.sends[-1][2]
                 assert "preconnect" not in payload
                 ring = app.state.rings.get(payload["call_id"])
-                assert ring.preconnect is None and not ring.ring_bot and not ring.awaits_answer
+                assert ring.preconnect is None and not ring.ring_bot and not ring.joins_before_answer
                 if kwargs:
                     # Dispatched exactly like a plain inline ring.
-                    assert "--await-answer" not in _argv()
+                    assert "--joins-before-answer" not in _argv()
+                    assert "--await-connected" not in _argv()
                     assert "--ring-deadline" not in _argv()
                     assert app.state.dispatcher.controls == [False]
                 else:
@@ -241,15 +271,15 @@ def test_connect_with_ring_dispatches_a_ring_bot_and_tracks_it():
         call_id, _ = _ring(c, preconnect="media", ring_timeout=20)
         r = c.post(
             "/connect/loopback",
-            json={"transport": "daily", "ring": {"call_id": call_id, "await_answer": True}},
+            json={"transport": "daily", "call_signals": CALL_SIGNALS, "ring": {"call_id": call_id, "joins_before_answer": True}},
             headers=AUTH,
         )
         assert r.status_code == 200, r.text
         argv = _argv()
-        assert "--await-answer" in argv
+        assert "--joins-before-answer" in argv and "--await-connected" in argv
         assert _deadline(argv) == 20 + settings.ring_deadline_margin_secs
         ring = app.state.rings.get(call_id)
-        assert (ring.room_key, ring.transport, ring.ring_bot, ring.awaits_answer) == (
+        assert (ring.room_key, ring.transport, ring.ring_bot, ring.joins_before_answer) == (
             "room-abc", "daily", True, True,
         )
 
@@ -261,7 +291,7 @@ def test_connect_with_an_uppercase_ring_id_attaches_to_the_tracked_ring():
         call_id, _ = _ring(c, preconnect="credentials", ring_timeout=20)
         r = c.post(
             "/connect/loopback",
-            json={"transport": "daily", "ring": {"call_id": call_id.upper(), "await_answer": False}},
+            json={"transport": "daily", "call_signals": CALL_SIGNALS, "ring": {"call_id": call_id.upper(), "joins_before_answer": False}},
             headers=AUTH,
         )
         assert r.status_code == 200, r.text
@@ -290,10 +320,10 @@ def test_connect_with_ring_for_smallwebrtc_dispatches_nothing():
         assert app.state.rings.get("abc") is None
 
 
-def _pair(c, call_id, await_answer=True):
+def _pair(c, call_id, joins_before_answer=True):
     return c.post(
         "/connect/loopback",
-        json={"transport": "daily", "ring": {"call_id": call_id, "await_answer": await_answer}},
+        json={"transport": "daily", "call_signals": CALL_SIGNALS, "ring": {"call_id": call_id, "joins_before_answer": joins_before_answer}},
         headers=AUTH,
     )
 
@@ -362,7 +392,7 @@ def test_connect_for_another_agents_ring_is_unaffected_by_its_status():
         _receipt(c, call_id, "declined")
         r = c.post(
             "/connect/live",
-            json={"transport": "daily", "ring": {"call_id": call_id, "await_answer": True}},
+            json={"transport": "daily", "call_signals": CALL_SIGNALS, "ring": {"call_id": call_id, "joins_before_answer": True}},
             headers=AUTH,
         )
         assert r.status_code == 200, r.text
@@ -371,10 +401,10 @@ def test_connect_for_another_agents_ring_is_unaffected_by_its_status():
 
 def test_tracker_adopts_unknown_rings_but_not_other_agents():
     rings = RingTracker()
-    adopted = rings.attach_bot("c1", "live", room_key="r", transport="daily", awaits_answer=False)
+    adopted = rings.attach_bot("c1", "live", room_key="r", transport="daily", joins_before_answer=False)
     assert adopted is not None and adopted.mode == "pairing" and adopted.ring_bot
     rings.add(TrackedRing(call_id="c2", agent_id="loopback", mode="pairing"))
-    assert rings.attach_bot("c2", "live", room_key="r", transport="daily", awaits_answer=False) is None
+    assert rings.attach_bot("c2", "live", room_key="r", transport="daily", joins_before_answer=False) is None
 
 
 def test_tracker_forgets_rings_after_an_hour():
@@ -614,7 +644,7 @@ def test_cancel_of_a_pairing_ring_bot_asks_the_bot_too():
         call_id, _ = _ring(c, preconnect="media")
         r = c.post(
             "/connect/loopback",
-            json={"transport": "daily", "ring": {"call_id": call_id, "await_answer": True}},
+            json={"transport": "daily", "call_signals": CALL_SIGNALS, "ring": {"call_id": call_id, "joins_before_answer": True}},
             headers=AUTH,
         )
         assert r.status_code == 200, r.text
@@ -831,7 +861,7 @@ def test_pairing_for_a_ring_before_apns_answers_is_kept():
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
                 r = await ac.post(
                     "/connect/loopback",
-                    json={"transport": "daily", "ring": {"call_id": payload["call_id"], "await_answer": True}},
+                    json={"transport": "daily", "call_signals": CALL_SIGNALS, "ring": {"call_id": payload["call_id"], "joins_before_answer": True}},
                     headers=AUTH,
                 )
                 connect_status.append(r.status_code)

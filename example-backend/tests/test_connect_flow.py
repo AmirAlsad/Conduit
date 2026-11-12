@@ -91,6 +91,39 @@ def test_connect_pairing_daily_dispatches_and_returns_contract():
         room_key, agent_id, transport, argv = calls[0]
         assert (room_key, agent_id, transport) == ("room-abc", "loopback", "daily")
         assert "token-bot" in argv and "--room-url" in argv
+        # The request listed no call signals: the bot greets when the client is ready.
+        assert "--await-connected" not in argv
+
+
+def test_connect_for_a_client_that_sends_call_connected_starts_an_awaiting_bot():
+    for transport in ("daily", "livekit"):
+        with TestClient(app) as c:
+            app.state.daily = FakeDaily()
+            app.state.livekit = FakeLiveKit()
+            app.state.dispatcher = FakeDispatcher()
+            r = c.post(
+                "/connect/loopback",
+                json={"transport": transport, "call_signals": ["call-connected", "call-held", "call-resumed"]},
+                headers=AUTH,
+            )
+            assert r.status_code == 200, r.text
+            ((_, _, _, argv),) = app.state.dispatcher.calls
+            assert "--await-connected" in argv, transport
+            # An outgoing call: no ring flags.
+            assert "--ring-deadline" not in argv and "--joins-before-answer" not in argv
+
+
+def test_connect_ignores_signals_it_does_not_know_and_rejects_malformed_ones():
+    with TestClient(app) as c:
+        app.state.daily = FakeDaily()
+        app.state.dispatcher = FakeDispatcher()
+        r = c.post("/connect/loopback", json={"transport": "daily", "call_signals": ["call-teleported"]}, headers=AUTH)
+        assert r.status_code == 200, r.text
+        ((_, _, _, argv),) = app.state.dispatcher.calls
+        assert "--await-connected" not in argv
+        for bad in ("call-connected", [1], [""], ["x" * 65], ["s"] * 33):
+            r = c.post("/connect/loopback", json={"transport": "daily", "call_signals": bad}, headers=AUTH)
+            assert r.status_code == 422, (bad, r.text)
 
 
 def test_credentials_direct_registers_room_without_dispatch():

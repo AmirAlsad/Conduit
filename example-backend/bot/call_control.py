@@ -1,25 +1,31 @@
-"""Call-control signals from the device and the ring deadline.
+"""Call-control signals from the device, when the agent may speak, and the ring
+deadline.
 
 The Conduit app sends RTVI client-messages beside ``end-call``
 (``{"label":"rtvi-ai","type":"client-message","data":{"t":…}}``):
 
-- ``call-answered``: the user answered a ring this bot was dispatched for. A bot
-  dispatched with ``--await-answer`` (the app joins while the phone still rings)
-  produces no audio and does not greet until it hears this. The ring's
-  ``answered`` receipt, relayed by the dispatcher, is only a fallback for a lost
-  ``call-answered``: the app sends it at the moment of answer, before its audio is
-  up and often before it has (re)joined, and ``call-answered`` once it is. So the
-  receipt releases the bot only if ``call-answered`` has not come
-  ``receipt_grace_secs`` (5 or more, the push contract's floor) after both the
-  receipt and the device being in the room, whichever is later. The device
-  leaving stops that wait, and its return starts it again in full.
+- ``call-connected``: the user is on the line and can hear the agent. The app
+  sends it on every call once the call is connected, iOS has activated its audio,
+  it is not held, and the app's own "Connected" has played; again after every
+  reconnect. A bot started for a client that said it sends it (``call_signals``
+  in its pairing request or push registration, ``--await-connected`` here)
+  produces no audio and does not greet until it arrives. It is the one moment to
+  start speaking; a client that never said so is greeted when it is ready, as
+  before. As a fallback for a lost one, once the bot knows the user answered and
+  the device is in the room, whichever is later, it releases itself after
+  ``connected_grace_secs``; the device leaving stops that wait, and its return
+  starts it again in full.
 - ``call-held`` / ``call-resumed``: the call went on hold (e.g. a cellular call)
   and back. Held: the bot is interrupted, hears nothing and says nothing, and a
-  human leaving gets the longer held grace window.
+  human leaving gets the longer held grace window. ``call-connected`` is never
+  sent while held, so it also says the call is not held.
 
-A ring bot (``--ring-deadline``) ends if no answer arrives in time. Without
-``--await-answer`` the human joining also counts as the answer, because the app
-only joins such a ring after the user answered.
+A ring bot (``--ring-deadline``) ends if no answer arrives in time. The answer is
+``call-connected``, the ring's ``answered`` receipt (relayed by the dispatcher),
+or, unless the device joins before the answer (``--joins-before-answer``, a
+``"media"`` ring), the device joining. The receipt is sent at the moment of
+answer, before the app's audio is up, so it starts the fallback wait; it never
+releases the bot by itself.
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from app.obs import event
 
-CALL_ANSWERED = "call-answered"
+CALL_CONNECTED = "call-connected"
 CALL_HELD = "call-held"
 CALL_RESUMED = "call-resumed"
 
@@ -77,37 +83,48 @@ class CallControl:
         teardown,
         greet: Callable[[], Awaitable[None]] | None,
         gates: Sequence[AudioGate] = (),
-        await_answer: bool = False,
+        await_connected: bool = False,
+        joins_before_answer: bool = False,
         ring_deadline_secs: float | None = None,
-        receipt_grace_secs: float = 0.0,
+        connected_grace_secs: float = 0.0,
         log,
     ):
         self._teardown = teardown
         self._greet = greet
         self._gates = tuple(gates)
-        self._awaiting = await_answer
+        # A device in the room before the answer must not hear the bot, even from a
+        # client that never said it sends call-connected (the fallback releases it).
+        self._awaiting = await_connected or joins_before_answer
+        self._joins_before_answer = joins_before_answer
         self._deadline_secs = ring_deadline_secs
-        self._receipt_grace_secs = receipt_grace_secs
+        self._grace_secs = connected_grace_secs
         self._receipt_seen = False
-        self._receipt_task: asyncio.Task | None = None
+        self._fallback_task: asyncio.Task | None = None
         # The device's participants in the room (a reconnect can join a new one
         # before the old one leaves).
         self._present: set[str] = set()
         self._log = log
-        # A bot not dispatched for a ring was answered before it existed.
-        self._answered = not (await_answer or ring_deadline_secs is not None)
+        # Whether the bot knows the user answered: a bot not dispatched for a ring
+        # was answered before it existed.
+        self._answered = not (joins_before_answer or ring_deadline_secs is not None)
+        # Whether the user is on the line, so the bot may speak.
+        self._on_line = not self._awaiting
         self._ready = False
         self._greeted = False
         self._held = False
         self._joined = False
         self._deadline_task: asyncio.Task | None = None
-        if await_answer:
+        if self._awaiting:
             for gate in self._gates:
                 gate.close()
 
     @property
     def answered(self) -> bool:
         return self._answered
+
+    @property
+    def on_line(self) -> bool:
+        return self._on_line
 
     @property
     def held(self) -> bool:
@@ -118,10 +135,8 @@ class CallControl:
             self._deadline_task = asyncio.create_task(self._ring_deadline())
 
     def stop(self) -> None:
-        if self._deadline_task and not self._deadline_task.done():
-            self._deadline_task.cancel()
-        self._deadline_task = None
-        self._drop_receipt_release()
+        self._cancel_deadline()
+        self._drop_fallback()
 
     # --- readiness and presence ---
 
@@ -129,8 +144,8 @@ class CallControl:
         """The client can hear the bot: RTVI client-ready (Daily, SmallWebRTC), or
         the first human join on LiveKit, whose app sends no client-ready."""
         if not self._awaiting:
-            # Without await-answer the app connects only after the answer.
-            await self.answer("ready")
+            # The app connects such a call only after the answer.
+            await self._mark_answered("ready")
             # As before: every client-ready greets.
             await self._run_greet()
             return
@@ -138,7 +153,9 @@ class CallControl:
         if not self._present:
             # A ready client is in the room, even where no join was reported.
             self._present.add(READY_CLIENT)
-        await self._arm_receipt_release()
+        if not self._joins_before_answer:
+            await self._mark_answered("ready")
+        await self._arm_fallback()
         await self._maybe_greet()
 
     async def human_joined(self, participant_id: str = "human") -> bool:
@@ -146,26 +163,26 @@ class CallControl:
         first = not self._joined
         self._joined = True
         self._present.add(participant_id)
-        if not self._awaiting:
-            await self.answer("join")
-        await self._arm_receipt_release()
+        if not self._joins_before_answer:
+            await self._mark_answered("join")
+        await self._arm_fallback()
         return first
 
     def human_left(self, participant_id: str = "human") -> None:
-        """A human left. With nobody left in the room, a pending receipt release
+        """A human left. With nobody left in the room, a pending fallback release
         stops; the next join starts its wait again in full."""
         self._present.discard(participant_id)
         self._present.discard(READY_CLIENT)
         if not self._present:
-            self._drop_receipt_release()
+            self._drop_fallback()
 
     # --- signals ---
 
     async def handle(self, signal: str) -> bool:
         """Apply one call-control signal (the client-message ``t``). False if it
         isn't one."""
-        if signal == CALL_ANSWERED:
-            await self.answer("signal")
+        if signal == CALL_CONNECTED:
+            await self.connected("signal")
         elif signal == CALL_HELD:
             await self.hold()
         elif signal == CALL_RESUMED:
@@ -174,16 +191,25 @@ class CallControl:
             return False
         return True
 
-    async def answer(self, via: str) -> None:
-        if self._answered:
+    async def connected(self, via: str) -> None:
+        """The user is on the line (``call-connected``, or the fallback). A repeat
+        (every reconnect sends one) is the same call coming back: it greets no
+        one again, but it does say the call is not held."""
+        await self._mark_answered(via)
+        if self._held and via == "signal":
+            await self.resume()
+        if self._on_line:
             return
-        self._answered = True
-        self.stop()
-        event(self._log, "bot.call_answered", via=via)
-        if self._awaiting:
-            if not self._held:
-                self._open_gates()
-            await self._maybe_greet()
+        self._on_line = True
+        if via == "signal":
+            # The client says the user can hear the bot; the fallback still waits
+            # for the client to be ready.
+            self._ready = True
+        self._drop_fallback()
+        event(self._log, "bot.call_connected", via=via)
+        if not self._held:
+            self._open_gates()
+        await self._maybe_greet()
 
     async def cancel(self, announce: Callable[[bool], None] | None = None) -> bool:
         """The dispatcher withdrew the ring. End the bot unless it has itself seen
@@ -203,22 +229,19 @@ class CallControl:
 
     async def receipt_answered(self) -> None:
         """The ring's ``answered`` receipt. The phone has answered, so the ring
-        deadline no longer applies; the bot is released only if ``call-answered``
-        has not come by the end of the grace, counted from the receipt or the
-        device being in the room, whichever is later."""
-        if self._answered or self._receipt_seen:
+        deadline no longer applies, and the fallback wait for ``call-connected``
+        can start once the device is in the room."""
+        if self._receipt_seen:
             return
         self._receipt_seen = True
-        if self._deadline_task and not self._deadline_task.done():
-            self._deadline_task.cancel()
-        self._deadline_task = None
         event(
             self._log,
             "bot.receipt_answered",
-            grace_secs=self._receipt_grace_secs,
+            grace_secs=self._grace_secs,
             device_in_room=bool(self._present),
         )
-        await self._arm_receipt_release()
+        await self._mark_answered("receipt")
+        await self._arm_fallback()
 
     async def hold(self) -> None:
         if self._held:
@@ -236,41 +259,55 @@ class CallControl:
             return
         self._held = False
         self._teardown.set_held(False)
-        if self._answered:
+        if self._on_line:
             self._open_gates()
         event(self._log, "bot.call_resumed")
 
     # --- internals ---
 
-    async def _arm_receipt_release(self) -> None:
-        """Start the receipt's grace once both it and the device are there."""
-        if self._answered or not self._receipt_seen or not self._present:
+    async def _mark_answered(self, via: str) -> None:
+        if self._answered:
             return
-        if self._receipt_task is not None:
-            return
-        if self._receipt_grace_secs <= 0:
-            await self.answer("receipt")
-            return
-        self._receipt_task = asyncio.create_task(self._release_after_grace())
+        self._answered = True
+        self._cancel_deadline()
+        event(self._log, "bot.call_answered", via=via)
 
-    def _drop_receipt_release(self) -> None:
-        task, self._receipt_task = self._receipt_task, None
+    async def _arm_fallback(self) -> None:
+        """Start the fallback wait once the user answered and the device is there."""
+        if self._on_line or not self._answered or not self._present:
+            return
+        if self._fallback_task is not None:
+            return
+        if self._grace_secs <= 0:
+            await self.connected("fallback")
+            return
+        self._fallback_task = asyncio.create_task(self._release_after_grace())
+
+    def _drop_fallback(self) -> None:
+        task, self._fallback_task = self._fallback_task, None
+        if task is not None and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+
+    def _cancel_deadline(self) -> None:
+        task, self._deadline_task = self._deadline_task, None
         if task is not None and not task.done() and task is not asyncio.current_task():
             task.cancel()
 
     async def _release_after_grace(self) -> None:
         try:
-            await asyncio.sleep(self._receipt_grace_secs)
+            await asyncio.sleep(self._grace_secs)
         except asyncio.CancelledError:
             return
-        await self.answer("receipt")
+        self._fallback_task = None
+        event(self._log, "bot.call_connected_missing", grace_secs=self._grace_secs)
+        await self.connected("fallback")
 
     def _open_gates(self) -> None:
         for gate in self._gates:
             gate.open()
 
     async def _maybe_greet(self) -> None:
-        if self._answered and self._ready and not self._greeted:
+        if self._on_line and self._ready and not self._greeted:
             self._greeted = True
             await self._run_greet()
 

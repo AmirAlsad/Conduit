@@ -97,6 +97,13 @@ def test_ring_notes_a_preconnect_the_device_could_not_take(monkeypatch, capsys):
     assert "Pre-connect not sent" not in out and "Pre-connect requested: media" in out
 
 
+def test_ring_notes_a_media_ring_sent_as_credentials(monkeypatch, capsys):
+    rang = (200, {**_RANG[1], "preconnect": "credentials"})
+    _run(monkeypatch, ["--agent", "live", "--preconnect", "media"], [rang])
+    out = capsys.readouterr().out
+    assert "Pre-connect sent as credentials" in out and "call-connected" in out
+
+
 def test_cancel_refused_because_the_bot_saw_the_answer_says_the_call_is_live(monkeypatch, capsys):
     refused = (409, {"detail": {"call_id": "c-9", "status": "answered",
                                 "reason": ring.CANCEL_ANSWERED}})

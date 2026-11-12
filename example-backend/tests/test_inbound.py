@@ -90,6 +90,17 @@ def test_register_stores_push_features_keeping_unknown_names():
         assert app.state.registry._get_voip("loopback").push_features == ()
 
 
+def test_register_stores_call_signals_and_older_apps_list_none():
+    with TestClient(app) as c:
+        _register(c)
+        assert app.state.registry._get_voip("loopback").call_signals == ()
+        body = {**REGISTER_BODY, "call_signals": ["call-connected", "call-held", "call-resumed"]}
+        r = c.post("/inbound/register/loopback", json=body, headers=AUTH)
+        assert r.status_code == 200, r.text
+        stored = app.state.registry._get_voip("loopback")
+        assert stored.call_signals == ("call-connected", "call-held", "call-resumed")
+
+
 def test_register_rejects_malformed_push_features():
     with TestClient(app) as c:
         for features in (

@@ -15,7 +15,8 @@ the script prints the name it rang as.
 engine sends it only to a device that registered the ``ring_timeout`` push
 feature. ``--preconnect credentials|media`` asks the app to prepare during the
 ring (likewise sent only to a device that registered the ``preconnect`` push
-feature; otherwise the ring is a plain one). ``--cancel CALL_ID`` withdraws a ring that is still ringing (no new ring);
+feature; otherwise the ring is a plain one; ``media`` also needs the device to
+list the ``call-connected`` call signal, and is sent as ``credentials`` without it). ``--cancel CALL_ID`` withdraws a ring that is still ringing (no new ring);
 ``--cancel-after SECONDS`` rings, waits, then cancels that ring. A cancel push
 goes only to a device that registered the ``cancel`` push feature; otherwise the
 engine refuses it (409) unless the agent can leave a pre-connected room instead.
@@ -235,7 +236,10 @@ def main() -> None:
     print("APNs accepted the push — the device should be ringing now.")
     if args.preconnect and body.get("preconnect") is None:
         print("Pre-connect not sent: the device's app doesn't list the preconnect")
-        print("push feature, so it rings as a plain ring (no ring bot, no await-answer).")
+        print("push feature, so it rings as a plain ring (no ring bot).")
+    elif args.preconnect and body.get("preconnect") != args.preconnect:
+        print(f"Pre-connect sent as {body['preconnect']}: the device's app doesn't list")
+        print("the call-connected call signal, which a media ring needs.")
     elif args.preconnect:
         print(f"Pre-connect requested: {args.preconnect}.")
     if args.ring_timeout is not None and "ring_timeout" in body and body["ring_timeout"] is None:

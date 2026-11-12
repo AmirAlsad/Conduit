@@ -71,15 +71,15 @@ async def _provision(request: Request, req: ConnectRequest, *, direct: bool) -> 
         ring_flags = None
         if req.ring is not None:
             # The app is pairing while the phone still rings (preconnect): the bot
-            # gets the ring deadline, and with await_answer stays silent until
-            # call-answered.
+            # gets the ring deadline, and if the app joins before the answer, its
+            # joining is not the answer.
             tracked = _own_ring(state, req.ring.call_id, agent.agent_id)
             if over := _ring_over(tracked):
                 event(_log, "connect.ring_over", call_id=req.ring.call_id, status=tracked.status)
                 raise over
             ring_flags = ring_bot_flags(
                 ring_timeout=tracked.ring_timeout if tracked else None,
-                await_answer=req.ring.await_answer,
+                joins_before_answer=req.ring.joins_before_answer,
             )
         # base_url backs smallwebrtc's offer URL when PUBLIC_BASE_URL is unset:
         # the device reached us at this address, so the offer URL at the same
@@ -90,6 +90,8 @@ async def _provision(request: Request, req: ConnectRequest, *, direct: bool) -> 
             transport,
             base_url=str(request.base_url),
             ring_flags=ring_flags,
+            # A client that sends call-connected is greeted when it arrives.
+            await_connected=req.sends_call_connected,
         )
         if req.ring is not None and room_key is not None:
             # A receipt may have landed while the room was being made: it found no
@@ -103,7 +105,7 @@ async def _provision(request: Request, req: ConnectRequest, *, direct: bool) -> 
                 agent.agent_id,
                 room_key=room_key,
                 transport=transport,
-                awaits_answer=req.ring.await_answer,
+                joins_before_answer=req.ring.joins_before_answer,
             )
             if ring is not None and ring.status == "answered":
                 # The receipt came first, so nothing will relay it to this bot.
@@ -113,7 +115,8 @@ async def _provision(request: Request, req: ConnectRequest, *, direct: bool) -> 
                 "connect.ring_bot",
                 call_id=req.ring.call_id,
                 room=room_key,
-                await_answer=req.ring.await_answer,
+                joins_before_answer=req.ring.joins_before_answer,
+                await_connected=req.sends_call_connected,
             )
         return payload
     except (TransportUnavailable, MissingSettingError) as e:

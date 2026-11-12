@@ -1,7 +1,7 @@
 """`tone` pipeline — a test agent for pre-connect checks on a device.
 
 Plays a continuous 440 Hz tone from the moment a human joins the room, and
-ignores client-ready, ``call-answered`` and hold. Ring a phone with
+ignores client-ready, ``call-connected`` and hold. Ring a phone with
 ``preconnect: "media"`` and this agent: anything the phone lets out while it is
 still ringing is audible. No model, no keys. The caller's audio is dropped.
 """

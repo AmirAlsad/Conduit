@@ -11,9 +11,11 @@
 
 Optional push keys go only to devices whose registration lists the matching
 push feature ("ring_timeout", "preconnect", "cancel"): an older app would ignore
-a ring_timeout or a preconnect (and answer a pre-connected ring into a bot that
-waits for a call-answered it never sends), and would show a cancel push as a
-brief incoming call.
+a ring_timeout or a preconnect, and would show a cancel push as a brief incoming
+call. A "media" preconnect also needs the registration to list the
+"call-connected" call signal: the device then joins before the answer, and only
+call-connected tells the bot the user is on the line. Without it the ring asks
+for "credentials" instead.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from app.agents import get_agent, resolve_transport
 from app.auth import require_engine_key
 from app.config import MissingSettingError, settings
 from app.models import (
+    CALL_CONNECTED,
     DisconnectRequest,
     RingCancelRequest,
     RingCancelResponse,
@@ -97,10 +100,14 @@ async def ring(
     if ring_timeout is not None:
         payload["ring_timeout"] = str(ring_timeout)
     # Without the feature the ring is exactly one that never asked: no push key,
-    # no ring bot, no await-answer.
+    # no ring bot.
     preconnect = req.preconnect if "preconnect" in reg.push_features else None
     if req.preconnect is not None and preconnect is None:
         event(_log, "ring.preconnect_unsupported", agent=agent_id)
+    sends_call_connected = CALL_CONNECTED in reg.call_signals
+    if preconnect == "media" and not sends_call_connected:
+        event(_log, "ring.preconnect_media_needs_call_connected", agent=agent_id)
+        preconnect = "credentials"
     if preconnect is not None:
         payload["preconnect"] = preconnect
     ring = TrackedRing(
@@ -120,12 +127,18 @@ async def ring(
         ring_flags = None
         if preconnect is not None:
             ring_flags = ring_bot_flags(
-                ring_timeout=ring_timeout, await_answer=preconnect == "media"
+                ring_timeout=ring_timeout, joins_before_answer=preconnect == "media"
             )
         try:
             settings.require(*agent.required_settings)
             creds, room_key = await provision_pairing(
-                state, agent.agent_id, transport, ring_flags=ring_flags
+                state,
+                agent.agent_id,
+                transport,
+                ring_flags=ring_flags,
+                # The bot starts before the app asks for anything, so only the
+                # registration says whether the app sends call-connected.
+                await_connected=sends_call_connected,
             )
         except (TransportUnavailable, MissingSettingError) as e:
             raise HTTPException(status_code=503, detail=str(e))
@@ -134,7 +147,7 @@ async def ring(
         ring.room_key = room_key
         ring.transport = transport
         ring.ring_bot = ring_flags is not None
-        ring.awaits_answer = preconnect == "media"
+        ring.joins_before_answer = preconnect == "media"
 
     # Tracked before the push: the app may pair for this ring (preconnect) before
     # APNs has even answered us.
@@ -238,7 +251,8 @@ async def _end_ring_bot(state, ring: TrackedRing) -> bool:
     """End the bot dispatched for a ring being withdrawn; True if one was ended.
 
     A ring bot is asked, not signalled: it ends unless it has itself seen the call
-    answered (call-answered, or the human joining a ring that waits for no answer),
+    answered (call-connected, or the human joining a ring it joins only after the
+    answer),
     which can happen before the answered receipt reaches the engine, and the room
     is full of humans both before and after an answer on a pre-connected ring. A
     refusal raises 409. A bot that can't be asked (no control pipe: a plain inline

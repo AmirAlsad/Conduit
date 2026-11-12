@@ -15,8 +15,8 @@ class BotBuild:
     - ``on_ready``: optional coroutine factory invoked when the client is ready
       (e.g. speak an opening line). ``None`` for pipelines that don't greet.
     - ``gates``: the pipeline's audio gates (bot.call_control.AudioGate), closed
-      while a ring awaits its answer and while the call is on hold. Empty for a
-      pipeline that ignores both (the tone test agent).
+      until the user is on the line (call-connected) and while the call is on
+      hold. Empty for a pipeline that ignores both (the tone test agent).
     """
 
     worker: object  # pipecat.pipeline.worker.PipelineWorker

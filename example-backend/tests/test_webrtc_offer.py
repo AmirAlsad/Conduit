@@ -24,19 +24,27 @@ class FakeSmallWebRTC:
     """Stands in for SmallWebRTCService on app.state: real token semantics are
     unit-tested below; routes only need validate/handle recording."""
 
-    def __init__(self, valid_token=None, valid_agent=None):
+    def __init__(self, valid_token=None, valid_agent=None, awaiting_token=None):
         self.valid = (valid_token, valid_agent)
+        self.awaiting_token = awaiting_token
+        self.minted = []
         self.offers = []
+        self.awaits = []
         self.patches = []
 
-    def mint_token(self, agent_id, ttl_secs):
+    def mint_token(self, agent_id, ttl_secs, *, await_connected=False):
+        self.minted.append((agent_id, await_connected))
         return "minted-token"
 
     def validate_token(self, presented, agent_id):
         return (presented, agent_id) == self.valid
 
-    async def handle_offer(self, agent_id, payload):
+    def awaits_connected(self, presented):
+        return presented == self.awaiting_token
+
+    async def handle_offer(self, agent_id, payload, *, await_connected=False):
         self.offers.append((agent_id, payload))
+        self.awaits.append(await_connected)
         return {"sdp": "v=0...answer", "type": "answer", "pc_id": "pc-1"}
 
     async def handle_patch(self, payload):
@@ -78,6 +86,20 @@ def test_connect_pairing_smallwebrtc_contract_and_no_dispatch():
         }
         assert body["expires_at"] is not None
         assert app.state.dispatcher.calls == []  # bot spawns on the offer, not here
+        assert fake.minted == [("loopback", False)]  # a client that listed no signals
+
+
+def test_connect_pairing_smallwebrtc_remembers_that_the_client_sends_call_connected():
+    with TestClient(app) as c:
+        fake = FakeSmallWebRTC()
+        app.state.smallwebrtc = fake
+        r = c.post(
+            "/connect/loopback",
+            json={"transport": "smallwebrtc", "call_signals": ["call-connected", "call-held"]},
+            headers=AUTH,
+        )
+        assert r.status_code == 200, r.text
+        assert fake.minted == [("loopback", True)]
 
 
 def test_connect_pairing_smallwebrtc_prefers_public_base_url(monkeypatch):
@@ -126,6 +148,22 @@ def test_offer_accepts_engine_key():
         agent_id, payload = fake.offers[0]
         assert agent_id == "loopback"
         assert payload["sdp"] == "v=0..."
+        assert fake.awaits == [False]  # the engine key carries no pairing request
+
+
+def test_an_offer_on_a_token_whose_pairing_listed_call_connected_starts_an_awaiting_bot():
+    with TestClient(app) as c:
+        fake = FakeSmallWebRTC(
+            valid_token="minted-token", valid_agent="loopback", awaiting_token="minted-token"
+        )
+        app.state.smallwebrtc = fake
+        r = c.post(
+            "/webrtc/loopback/offer",
+            json=OFFER_BODY,
+            headers={"Authorization": "Bearer minted-token"},
+        )
+        assert r.status_code == 200, r.text
+        assert fake.awaits == [True]
 
 
 def test_offer_accepts_minted_token_for_matching_agent_only():
@@ -178,6 +216,16 @@ def test_token_store_mint_validate_and_cross_agent():
     assert svc.validate_token(token, "loopback")
     assert not svc.validate_token(token, "live")
     assert not svc.validate_token("forged", "loopback")
+
+
+def test_token_store_remembers_whether_the_client_sends_call_connected():
+    svc = SmallWebRTCService()
+    awaiting = svc.mint_token("loopback", ttl_secs=300, await_connected=True)
+    plain = svc.mint_token("loopback", ttl_secs=300)
+    assert svc.awaits_connected(awaiting)
+    assert not svc.awaits_connected(plain)
+    assert not svc.awaits_connected("forged")
+    assert not svc.awaits_connected(settings.engine_api_key)
 
 
 def test_token_store_expiry(monkeypatch):

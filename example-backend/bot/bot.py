@@ -3,8 +3,10 @@ that branches between two launch modes converging on ``run_bot``:
 
   * production: ``python -m bot.bot --transport … --agent … --token …``
     (the dispatcher spawns this per call). Builds the transport from argv. A bot
+    for a client that sends call-connected gets ``--await-connected``; one
     dispatched for a ring also gets ``--ring-deadline SECS`` (and, when the app
-    joins during the ring, ``--await-answer``) and reads control lines from stdin.
+    joins during the ring, ``--joins-before-answer``) and reads control lines
+    from stdin.
   * local dev: ``python -m bot.bot`` (no dispatch args) → the Pipecat dev runner
     serves a prebuilt client at :7860/client. Pick the agent with CONDUIT_AGENT.
 
@@ -58,8 +60,11 @@ async def _run_from_cli() -> None:
     parser.add_argument("--room-url")  # daily
     parser.add_argument("--url")  # livekit server url
     parser.add_argument("--room-name")  # livekit
-    # Ring bots (app/rings.py): stay silent until the answer; end without one.
-    parser.add_argument("--await-answer", action="store_true")
+    # The client sends call-connected: stay silent until it (bot/call_control.py).
+    parser.add_argument("--await-connected", action="store_true")
+    # Ring bots (app/rings.py): end without an answer; with the device in the room
+    # before the answer, its joining is not the answer.
+    parser.add_argument("--joins-before-answer", action="store_true")
     parser.add_argument("--ring-deadline", type=float)
     args = parser.parse_args()
 
@@ -74,7 +79,8 @@ async def _run_from_cli() -> None:
         args.agent,
         args.transport,
         handle_sigint=True,
-        await_answer=args.await_answer,
+        await_connected=args.await_connected,
+        joins_before_answer=args.joins_before_answer,
         ring_deadline_secs=args.ring_deadline,
         # The dispatcher gives ring bots a stdin pipe for the receipt-driven answer.
         control=_stdin_lines() if args.ring_deadline is not None else None,

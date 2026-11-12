@@ -80,8 +80,13 @@ async def webrtc_offer(
 ) -> dict:
     _authorize(request, agent_id, authorization)
     agent = _validated_agent(agent_id)
-    answer = await request.app.state.smallwebrtc.handle_offer(
-        agent.agent_id, req.model_dump()
+    service = request.app.state.smallwebrtc
+    answer = await service.handle_offer(
+        agent.agent_id,
+        req.model_dump(),
+        # The pairing request that minted this bearer said whether the client
+        # sends call-connected.
+        await_connected=service.awaits_connected(authorization.removeprefix("Bearer ")),
     )
     if answer is None:
         raise HTTPException(status_code=500, detail="No SDP answer produced.")

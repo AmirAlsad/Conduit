@@ -2,10 +2,10 @@
 
 à la carte ``input -> STT -> context -> LLM -> TTS -> output`` with RTVI on
 (PipelineWorker default). Reference stack: Deepgram STT · Groq LLM · Cartesia TTS
-— each a one-line swap (design §2.3). Greets when the client is ready (RTVI
-client-ready; the first human join on LiveKit) so there is immediate downlink
-audio the moment the session activates — or, for a ring dispatched with
-``--await-answer``, once the user answers. Barge-in is on by default via VAD.
+— each a one-line swap (design §2.3). Greets when the user is on the line: on
+``call-connected``, for a client that sends it (``--await-connected``), or when
+the client is ready (RTVI client-ready; the first human join on LiveKit) for any
+other. Barge-in is on by default via VAD.
 """
 
 from __future__ import annotations
@@ -100,8 +100,8 @@ def build(transport) -> BotBuild:
         ),
     )
 
-    # Closed while a ring awaits its answer and while on hold: no caller audio
-    # reaches STT (so no turns), and no bot audio reaches the room.
+    # Closed until the user is on the line (call-connected) and while on hold: no
+    # caller audio reaches STT (so no turns), and no bot audio reaches the room.
     gate_in, gate_out = AudioGate(), AudioGate()
 
     pipeline = Pipeline(
@@ -125,8 +125,8 @@ def build(transport) -> BotBuild:
     )
 
     async def on_ready() -> None:
-        # Greet on connect: immediate downlink audio confirms the session activated
-        # (Layer-1 connect-and-downlink check) and naturally opens the call.
+        # Greet once the user can hear it: immediate downlink audio confirms the call
+        # is up (Layer-1 connect-and-downlink check) and naturally opens it.
         context.add_message(
             {"role": "developer", "content": "Briefly greet the user and invite them to talk."}
         )

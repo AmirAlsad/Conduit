@@ -53,7 +53,7 @@ AGENTS: dict[str, AgentConfig] = {
         default_transport=settings.default_transport,
         description=(
             "Test agent: a continuous tone from the moment the human joins, ignoring "
-            "client-ready and call-answered, so audio leaking from a ringing phone is "
+            "client-ready and call-connected, so audio leaking from a ringing phone is "
             "audible. No model, no keys."
         ),
     ),

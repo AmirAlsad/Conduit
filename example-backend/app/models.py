@@ -14,6 +14,9 @@ from pydantic import AfterValidator, BaseModel, Field
 Transport = Literal["daily", "livekit", "smallwebrtc"]
 Preconnect = Literal["credentials", "media"]
 PushFeature = Annotated[str, Field(min_length=1, max_length=64)]
+# A call-control signal the client says its calls carry ("call-connected", ...).
+CallSignalName = Annotated[str, Field(min_length=1, max_length=64)]
+CALL_CONNECTED = "call-connected"
 # A ring's call_id as the app sends it back. The engine issues lowercase UUIDs; the
 # app's engine sends lowercase from 0.2 on (earlier engines sent Swift's uppercase
 # uuidString), and the push contract says to compare ids case-insensitively, so
@@ -37,9 +40,9 @@ class RingContext(BaseModel):
     credentials while the phone is still ringing (``preconnect``)."""
 
     call_id: CallID
-    # True when the app will join the room before the user answers ("media"):
-    # the bot must then stay silent until it hears call-answered.
-    await_answer: bool = False
+    # True when the app will join the room before the user answers ("media"): its
+    # joining is then not the answer, and the bot must stay silent until it is.
+    joins_before_answer: bool = False
 
 
 class ConnectRequest(BaseModel):
@@ -47,11 +50,18 @@ class ConnectRequest(BaseModel):
     ``transport`` omitted → fall back to the agent's default, then the engine default.
     The default agent is ``loopback`` so a bare deploy works with zero AI-provider
     keys; the path routes (/connect/{agent_id}) override ``agent_id`` entirely.
-    ``ring`` is pairing-only and ignored by /credentials."""
+    ``ring`` is pairing-only and ignored by /credentials. ``call_signals`` lists
+    the call-control signals the client's calls carry; with "call-connected" the
+    bot stays silent until the user is on the line. Older clients omit it."""
 
     agent_id: str = "loopback"
     transport: Transport | None = None
     ring: RingContext | None = None
+    call_signals: list[CallSignalName] = Field(default_factory=list, max_length=32)
+
+    @property
+    def sends_call_connected(self) -> bool:
+        return CALL_CONNECTED in self.call_signals
 
 
 class DisconnectRequest(BaseModel):
@@ -72,7 +82,10 @@ class VoipRegisterRequest(BaseModel):
     ``push_features`` lists the optional push features the app's engine supports
     (``CallEngine.supportedPushFeatures``: "cancel", "ring_timeout", and names
     added later, kept as sent). Older builds omit it: an empty list, meaning the
-    engine uses none of them with this device."""
+    engine uses none of them with this device. ``call_signals`` lists the
+    call-control signals the app's calls carry; a bot started for a ring before
+    the app asks for credentials waits for "call-connected" only when it is listed,
+    and a "media" ring needs it."""
 
     voip_token: str = Field(..., min_length=1)
     platform: str = "ios"
@@ -81,6 +94,7 @@ class VoipRegisterRequest(BaseModel):
     display_name: str | None = Field(default=None, max_length=128)
     handle: str | None = Field(default=None, max_length=256)
     push_features: list[PushFeature] = Field(default_factory=list, max_length=32)
+    call_signals: list[CallSignalName] = Field(default_factory=list, max_length=32)
 
 
 class RingRequest(BaseModel):
@@ -101,7 +115,8 @@ class RingRequest(BaseModel):
     # Shortens this ring (whole seconds; the app clamps it to [10, its own timeout]).
     ring_timeout: int | None = Field(default=None, gt=0)
     # Ask the app to prepare during the ring: "credentials" fetches /connect while
-    # ringing, "media" also joins the room (the bot then waits for call-answered).
+    # ringing, "media" also joins the room (the bot then waits for call-connected;
+    # a device that does not list it gets "credentials").
     preconnect: Preconnect | None = None
 
 

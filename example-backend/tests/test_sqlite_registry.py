@@ -49,6 +49,15 @@ async def test_voip_roundtrip_with_push_features():
     assert (await reg.get_voip("live")).push_features == ()
 
 
+async def test_voip_roundtrip_with_call_signals():
+    reg = SQLiteRegistry(":memory:")
+    signalled = VoipRegistration(**{**_reg().__dict__, "call_signals": ("call-connected", "call-held")})
+    await reg.register_voip(signalled)
+    assert await reg.get_voip("live") == signalled
+    await reg.register_voip(_reg())
+    assert (await reg.get_voip("live")).call_signals == ()
+
+
 async def test_opens_old_six_column_voip_table_and_migrates(tmp_path):
     path = str(tmp_path / "old.db")
     old = sqlite3.connect(path)
@@ -72,11 +81,12 @@ async def test_opens_old_six_column_voip_table_and_migrates(tmp_path):
 
     reg = SQLiteRegistry(path)
     columns = {row[1] for row in reg._conn.execute("PRAGMA table_info(voip_tokens)")}
-    assert {"display_name", "handle", "push_features"} <= columns
+    assert {"display_name", "handle", "push_features", "call_signals"} <= columns
     legacy = await reg.get_voip("live")
     assert legacy == _reg()
     assert legacy.display_name is None and legacy.handle is None
     assert legacy.push_features == ()
+    assert legacy.call_signals == ()
 
     await reg.register_voip(
         VoipRegistration(

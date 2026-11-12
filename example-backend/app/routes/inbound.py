@@ -4,8 +4,10 @@ The Conduit app POSTs its device VoIP token here when the user enables "Let this
 agent call me" (and on every app launch thereafter). The stored token is what
 /admin/ring sends the push to. Latest registration per agent wins — the token is
 per-install, app-wide. Newer app builds also send the caller's display name and
-CallKit handle, which are stored and echoed in the ring push, and the push
-features the device supports, which gate cancel pushes and ring_timeout.
+CallKit handle, which are stored and echoed in the ring push, the push
+features the device supports, which gate cancel pushes and ring_timeout, and the
+call-control signals its calls carry, which tell a bot started for a ring to wait
+for call-connected before it greets.
 
 /inbound/status is the receipt channel: each ring's push carries a status_url
 pointing here, and the app reports how the ring ended (answered / declined /
@@ -47,6 +49,7 @@ async def register(agent_id: str, req: VoipRegisterRequest, request: Request):
             display_name=req.display_name,
             handle=req.handle,
             push_features=tuple(req.push_features),
+            call_signals=tuple(req.call_signals),
         )
     )
     return {"ok": True}
@@ -86,9 +89,8 @@ async def ring_status(agent_id: str, req: RingStatusRequest, request: Request):
     if ring.room_key:
         if req.status == "answered":
             if ring.ring_bot:
-                # Stops the bot's deadline and, as a fallback, releases a bot awaiting
-                # the answer if call-answered doesn't follow within its grace (the
-                # app sends this receipt before its audio is up).
+                # Stops the bot's deadline and starts its fallback wait for
+                # call-connected (the app sends this receipt before its audio is up).
                 await state.dispatcher.send_control(ring.room_key, "answered")
         else:
             ended = await state.dispatcher.disconnect(ring.room_key)

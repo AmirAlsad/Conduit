@@ -1,11 +1,12 @@
 """The launch-agnostic bot core.
 
 ``run_bot`` takes a built transport, an agent id, and the transport type, then:
-builds the pipeline, greets when the client is ready, honors the explicit
-end-call signal and the call-control signals (bot/call_control.py), applies the
-grace-window teardown policy, and runs the worker. It does not know or care
-whether a pairing call, a webhook, a ring, or a dev script launched it; a ring
-only adds the await-answer mode and the ring deadline.
+builds the pipeline, greets when the user is on the line (``call-connected``, for
+a client that sends it) or when the client is ready (any other), honors the
+explicit end-call signal and the call-control signals (bot/call_control.py),
+applies the grace-window teardown policy, and runs the worker. It does not know
+or care whether a pairing call, a webhook, a ring, or a dev script launched it; a
+ring only adds the ring deadline.
 """
 
 from __future__ import annotations
@@ -154,6 +155,7 @@ def _wire_presence(
         @transport.event_handler("on_client_connected")
         async def _on_conn(transport, client):  # noqa: ANN001
             controller.human_joined(_client_id(client))
+            await call.human_joined(_client_id(client))
 
         # End immediately instead of granting the grace window: the iOS client
         # has no in-place reconnect — its retry sends a NEW offer, which spawns a
@@ -178,12 +180,14 @@ async def run_bot(
     *,
     handle_sigint: bool = True,
     handle_sigterm: bool = True,
-    await_answer: bool = False,
+    await_connected: bool = False,
+    joins_before_answer: bool = False,
     ring_deadline_secs: float | None = None,
     control: AsyncIterator[str] | None = None,
     control_reply: Callable[[bool], None] | None = reply_on_stdout,
 ) -> None:
-    """``await_answer`` / ``ring_deadline_secs``: see bot/call_control.py.
+    """``await_connected`` / ``joins_before_answer`` / ``ring_deadline_secs``: see
+    bot/call_control.py.
     ``control``: lines from the dispatcher (a ring bot's stdin); "answered" is the
     ring's answered receipt, "cancel" a withdrawn ring (answered with
     ``reply_on_stdout`` unless ``control_reply`` says otherwise)."""
@@ -205,9 +209,10 @@ async def run_bot(
         teardown=controller,
         greet=bot_build.on_ready,
         gates=bot_build.gates,
-        await_answer=await_answer,
+        await_connected=await_connected,
+        joins_before_answer=joins_before_answer,
         ring_deadline_secs=ring_deadline_secs,
-        receipt_grace_secs=settings.answered_receipt_grace_secs,
+        connected_grace_secs=settings.call_connected_grace_secs,
         log=log,
     )
 
@@ -228,7 +233,8 @@ async def run_bot(
         "bot.starting",
         agent=agent_id,
         transport=transport_type,
-        await_answer=await_answer,
+        await_connected=await_connected,
+        joins_before_answer=joins_before_answer,
         ring_deadline=ring_deadline_secs,
     )
     call.start()
