@@ -289,7 +289,11 @@ entrypoint handles them for you (`bot/call_control.py`):
   an app that lists `call-connected`.
 - **Hold.** `call-held` interrupts the bot and closes its audio gates (no turns,
   no speech) until `call-resumed`; a human who drops while held gets
-  `HELD_GRACE_SECS` instead of `HUMAN_ABSENT_GRACE_SECS`.
+  `HELD_GRACE_SECS` instead of `HUMAN_ABSENT_GRACE_SECS`. The app sends it as soon
+  as it is in the room, also while the call still shows connecting, so a hold
+  stops the `call-connected` fallback wait: nothing is released or greeted while
+  held. `call-resumed` starts that wait again in full, and greets at once a bot
+  already on the line that has not greeted yet.
 - **Greeting.** `on_ready` runs on `call-connected` for an awaiting bot, once;
   otherwise on RTVI client-ready (Daily, SmallWebRTC) and on the first human join
   on LiveKit, whose app sends no client-ready (and whose client messages never

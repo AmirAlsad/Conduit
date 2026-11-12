@@ -305,15 +305,76 @@ async def test_call_connected_says_the_call_is_not_held():
     call.stop()
 
 
-async def test_the_fallback_does_not_end_a_hold():
+async def test_the_fallback_neither_releases_nor_greets_while_held():
+    # The app tells the bot of a hold as soon as it is in the room, even while the
+    # call still shows connecting: the fallback must not greet into a held call
+    # (an outgoing one held during its minimum, or an answered one still
+    # connecting), nor greet behind a closed output gate.
     call, _, _, greet, gates = _make(await_connected=True, connected_grace=0.05)
     await call.human_joined("phone")
+    await call.client_ready()
     await call.handle("call-held")
     await asyncio.sleep(0.1)
-    assert call.on_line and call.held
+    assert call.held and not call.on_line
+    assert greet.count == 0
     assert not any(g.is_open for g in gates)
+    # The resume starts the wait again in full; the app's call-connected wins it.
     await call.handle("call-resumed")
+    await asyncio.sleep(0.02)
+    assert greet.count == 0
+    await call.handle("call-connected")
+    assert call.on_line and greet.count == 1
     assert all(g.is_open for g in gates)
+    await asyncio.sleep(0.1)
+    assert greet.count == 1
+    call.stop()
+
+
+async def test_a_lost_call_connected_after_a_hold_is_covered_from_the_resume():
+    call, _, _, greet, gates = _make(await_connected=True, connected_grace=0.05)
+    await call.human_joined("phone")
+    await call.client_ready()
+    await asyncio.sleep(0.03)  # part of the wait, then the hold stops it
+    await call.handle("call-held")
+    await asyncio.sleep(0.1)
+    assert greet.count == 0
+    await call.handle("call-resumed")
+    await asyncio.sleep(0.03)
+    assert greet.count == 0  # in full from the resume, not the rest of the first wait
+    await asyncio.sleep(0.05)
+    assert call.on_line and greet.count == 1
+    assert all(g.is_open for g in gates)
+    call.stop()
+
+
+async def test_a_bot_on_the_line_that_has_not_greeted_greets_at_the_resume():
+    # Released by the fallback before the client was ready (no greeting yet), then
+    # held: the client becoming ready during the hold greets no one until the resume.
+    call, _, _, greet, gates = _make(await_connected=True, connected_grace=0.05)
+    await call.human_joined("phone")
+    await asyncio.sleep(0.1)
+    assert call.on_line and greet.count == 0
+    await call.handle("call-held")
+    await call.client_ready()
+    assert greet.count == 0
+    await call.handle("call-resumed")
+    assert greet.count == 1
+    assert all(g.is_open for g in gates)
+    await call.handle("call-connected")
+    assert greet.count == 1
+    call.stop()
+
+
+async def test_the_answered_receipt_during_a_hold_waits_for_the_resume():
+    call, _, _, greet, _ = _media_ring(connected_grace=0.05)
+    await call.client_ready()
+    await call.handle("call-held")
+    await call.receipt_answered()
+    await asyncio.sleep(0.1)
+    assert call.answered and not call.on_line and greet.count == 0
+    await call.handle("call-resumed")
+    await asyncio.sleep(0.1)
+    assert call.on_line and greet.count == 1
     call.stop()
 
 

@@ -18,7 +18,11 @@ The Conduit app sends RTVI client-messages beside ``end-call``
 - ``call-held`` / ``call-resumed``: the call went on hold (e.g. a cellular call)
   and back. Held: the bot is interrupted, hears nothing and says nothing, and a
   human leaving gets the longer held grace window. ``call-connected`` is never
-  sent while held, so it also says the call is not held.
+  sent while held, so it also says the call is not held. The app sends
+  ``call-held`` as soon as it is in the room, also while the call still shows
+  connecting. A hold stops the fallback wait: nothing is released or greeted
+  while held. The resume starts the wait again in full if the user is not on the
+  line yet, and greets at once if the bot is on the line but has not greeted.
 
 A ring bot (``--ring-deadline``) ends if no answer arrives in time. The answer is
 ``call-connected``, the ring's ``answered`` receipt (relayed by the dispatcher),
@@ -196,7 +200,10 @@ class CallControl:
         (every reconnect sends one) is the same call coming back: it greets no
         one again, but it does say the call is not held."""
         await self._mark_answered(via)
-        if self._held and via == "signal":
+        if self._held:
+            if via != "signal":
+                # A held user cannot hear the bot; the resume waits again.
+                return
             await self.resume()
         if self._on_line:
             return
@@ -248,6 +255,8 @@ class CallControl:
             return
         self._held = True
         self._teardown.set_held(True)
+        # The user cannot hear a greeting now; the resume waits again.
+        self._drop_fallback()
         for gate in self._gates:
             gate.close()
         if self._gates:
@@ -259,9 +268,14 @@ class CallControl:
             return
         self._held = False
         self._teardown.set_held(False)
+        event(self._log, "bot.call_resumed")
         if self._on_line:
             self._open_gates()
-        event(self._log, "bot.call_resumed")
+            await self._maybe_greet()
+        else:
+            # The app's own sequence runs again after a resume (the rest of the
+            # outgoing minimum, its "Connected"), so the wait starts in full.
+            await self._arm_fallback()
 
     # --- internals ---
 
@@ -273,8 +287,9 @@ class CallControl:
         event(self._log, "bot.call_answered", via=via)
 
     async def _arm_fallback(self) -> None:
-        """Start the fallback wait once the user answered and the device is there."""
-        if self._on_line or not self._answered or not self._present:
+        """Start the fallback wait once the user answered and the device is there,
+        unless the call is held (the resume starts it)."""
+        if self._on_line or self._held or not self._answered or not self._present:
             return
         if self._fallback_task is not None:
             return
@@ -307,7 +322,9 @@ class CallControl:
             gate.open()
 
     async def _maybe_greet(self) -> None:
-        if self._on_line and self._ready and not self._greeted:
+        # Never while held: the output gate would drop the greeting, leaving it in
+        # the conversation as if it had been heard.
+        if self._on_line and self._ready and not self._greeted and not self._held:
             self._greeted = True
             await self._run_greet()
 

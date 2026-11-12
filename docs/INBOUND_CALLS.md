@@ -403,7 +403,7 @@ same envelope:
 | `t` | When |
 |---|---|
 | `call-connected` | The user is on the line: on every call (placed by the user, or a ring answered, prepared or not), once the call is connected, iOS has activated its audio, it is not held, and the app's own "Connected" has finished; sent again after every reconnect |
-| `call-held` | The call went on hold: the user took or placed a cellular call, or pressed Hold in the app. Any call, incoming or outgoing; sent again after every reconnect of a held call |
+| `call-held` | The call went on hold: the user took or placed a cellular call, or pressed Hold in the app. Any call, incoming or outgoing; sent as soon as the app is in the room, also while the call still shows connecting (so it can come before `call-connected`); sent again after every reconnect of a held call |
 | `call-resumed` | The call came back from hold |
 
 **When your agent should start speaking: on `call-connected`, not when the
@@ -428,7 +428,12 @@ receipt, or the device joining a ring it joins only after the answer) and the de
 is in the room, it greets anyway if `call-connected` has not come within a grace
 period: 5 seconds at least, 10 to cover the app's own sequence after it joins (on a
 call the user placed, the minimum connecting time; and its "Connected", which the
-app bounds at 5 s). The
+app bounds at 5 s). The fallback must not fire while the call is held: the app
+sends `call-held` as soon as it is in the room, also while the call still shows
+connecting, so stop the wait on `call-held`, start it again in full on
+`call-resumed`, and greet at the resume if your agent is on the line but has not
+greeted. A greeting during a hold plays to nobody (or is dropped by your own audio
+gate while staying in the conversation as if it had been said). The
 reference engine does all of this (`CALL_CONNECTED_GRACE_SECS`, default 10).
 
 On hold the app's mic is off and, where the transport can, its playout too. A
