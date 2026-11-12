@@ -1226,6 +1226,51 @@ struct AgentCallHostTests {
         #expect(target.ringPreparation == requested)
     }
 
+    /// A fixed room (direct mode, no pairing endpoint) has a bot nobody told whether
+    /// this app sends `call-connected`: the app never joins it before the answer,
+    /// where a bot that greets on the device's join would speak into the ring.
+    /// The credentials tier, the room it already has, is harmless.
+    @Test(arguments: RingPreparation.allCases)
+    func aFixedRoomIsNeverJoinedBeforeTheAnswer(requested: RingPreparation) throws {
+        let h = try AgentCallHostHarness() // direct mode
+        let call = IncomingCall(
+            callID: UUID(), targetID: h.agent.id, displayName: h.agent.name,
+            handle: h.agent.syntheticEmail, connection: nil, requestedPreparation: requested
+        )
+
+        let target = try #require(h.host.callEngine(h.engine, targetForIncomingCall: call))
+        #expect(target.ringPreparation == min(requested, .credentials))
+    }
+
+    /// Inline credentials come from the server that rang, which has the device's
+    /// registration and its `call_signals`, and made the room: what it asks for stands.
+    @Test func aRingWithInlineCredentialsGetsWhatItAsksForEvenForADirectAgent() throws {
+        let h = try AgentCallHostHarness()
+        let call = IncomingCall(
+            callID: UUID(), targetID: h.agent.id, displayName: h.agent.name,
+            handle: h.agent.syntheticEmail,
+            connection: CallConnection(url: URL(string: "https://example.daily.co/inline")!, token: "t"),
+            requestedPreparation: .media
+        )
+
+        let target = try #require(h.host.callEngine(h.engine, targetForIncomingCall: call))
+        #expect(target.ringPreparation == .media)
+    }
+
+    /// The whole path: a direct agent's media ring fetches its room during the ring
+    /// but joins only after the answer.
+    @Test func aDirectAgentsMediaRingJoinsOnlyAfterTheAnswer() async throws {
+        let h = try AgentCallHostHarness()
+        h.transport.canConnectWhileRinging = true
+        h.ring(preconnect: "media")
+        #expect(await h.system.awaitRingPreparation() == .credentialsReady)
+        #expect(h.transport.connectCount == 0)
+
+        await h.system.answerIncomingCall()
+        await h.system.awaitPendingWork()
+        #expect(h.transport.connectCount == 1)
+    }
+
     @Test func outgoingTargetsAllowNoRingPreparation() throws {
         let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
         #expect(h.host.target(for: h.agent).ringPreparation == .none)

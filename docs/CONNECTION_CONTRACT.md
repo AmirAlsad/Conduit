@@ -204,6 +204,21 @@ Conduit connects directly with these and makes no HTTP call. The trade-off is th
 a token pasted here is fixed: when it expires, the user must edit the agent. Prefer
 pairing for anything long-lived.
 
+**When your agent should speak in a fixed room.** Conduit sends `call-connected`
+on every call, a direct room's included, but a fixed room's agent is never told so:
+only a pairing request and the token registration carry `call_signals`. If you run
+an agent in a fixed room for Conduit, **wait for `call-connected` before you greet,
+with a short fallback** (greet anyway about 10 seconds after the device joined if
+it has not come), and treat a later `call-connected` as the same call coming back.
+If your agent greets as soon as the device joins or is ready instead, on a call the
+user places the greeting plays over Conduit's ringback (the call shows connecting
+for at least about 2.6 s) and then over its spoken "Connected", while the user's
+mic stays closed until "Connected" has finished: the start of the greeting is lost
+and the user cannot answer it at once. On a call your server rings, Conduit never
+joins a fixed room before the user answers (it prepares at most the credentials it
+already has), so the greeting cannot reach a ringing phone, but it can still overlap
+"Connecting" and "Connected" while the answered call connects.
+
 ---
 
 ## Multiple agents

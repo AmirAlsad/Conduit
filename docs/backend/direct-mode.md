@@ -100,6 +100,28 @@ Join the printed Room URL + Token. The SFU fires participant-joined → your tun
 → the engine dispatches the agent. Watch Terminal 1 for `webhook.daily_received`
 then `dispatch.requested` / `dispatch.accepted`.
 
+## When the agent speaks
+
+Conduit sends `call-connected`
+on every call, a direct room's included, but a fixed room's agent is never told so:
+only a pairing request and the token registration carry `call_signals`. If you run
+an agent in a fixed room for Conduit, **wait for `call-connected` before you greet,
+with a short fallback** (greet anyway about 10 seconds after the device joined if
+it has not come), and treat a later `call-connected` as the same call coming back.
+If your agent greets as soon as the device joins or is ready instead, on a call the
+user places the greeting plays over Conduit's ringback (the call shows connecting
+for at least about 2.6 s) and then over its spoken "Connected", while the user's
+mic stays closed until "Connected" has finished: the start of the greeting is lost
+and the user cannot answer it at once. On a call your server rings, Conduit never
+joins a fixed room before the user answers (it prepares at most the credentials it
+already has), so the greeting cannot reach a ringing phone, but it can still overlap
+"Connecting" and "Connected" while the answered call connects.
+
+The reference engine's webhook-dispatched bots cannot tell which client joined (the
+web test client sends no `call-connected`), so they greet when the client is ready,
+as before; with Conduit that is the overlap described above. Use pairing for the
+Conduit app: its bots wait for `call-connected`.
+
 ## Operational caveats
 
 - **Ephemeral tunnel URLs** — quick tunnels get a new host every restart;

@@ -337,6 +337,13 @@ answered call sat connecting for 4.6 s. So:
   pairing request the app makes during the ring: it carries the ring's `call_id`
   (`ring.call_id`, §2).
 
+For an agent the user added as a fixed room (direct mode, no pairing endpoint),
+Conduit joins the room only after the answer: a `media` request is lowered to
+`credentials` unless the push carries inline credentials, because that room's agent
+was never told whether the app sends `call-connected` and may greet on the device's
+join, into the ringing phone. Inline credentials come from your server, which has
+the registration's `call_signals` and made the room, so their `preconnect` stands.
+
 The reference engine does all three by default (see the backend guide,
 `docs/backend/inbound-calls.md`); the room it prepares at ring time for a pairing
 ring uses the ring's transport (`--transport`, else the transport the device

@@ -110,8 +110,12 @@ final class AgentCallHost: CallEngineDelegate {
     // MARK: - CallEngineDelegate
 
     /// Allows whatever preparation the ring's push asks for: the sender is the
-    /// user's own backend, which knows whether its agent waits for the answer. The
-    /// engine still lowers `.media` to `.credentials` for a transport that cannot
+    /// user's own backend, which knows whether its agent waits for the answer. Not
+    /// for a fixed room (direct mode) without inline credentials: its bot was never
+    /// told whether this app sends `call-connected` (only pairing requests and the
+    /// token registration carry `call_signals`), so it may greet on the device's
+    /// join, and the device joins it only after the answer (`.credentials` at most).
+    /// The engine still lowers `.media` to `.credentials` for a transport that cannot
     /// join while ringing.
     func callEngine(_ engine: CallEngine, targetForIncomingCall call: IncomingCall) -> CallTarget? {
         let agent = agent(id: call.targetID)
@@ -120,7 +124,9 @@ final class AgentCallHost: CallEngineDelegate {
         inline=\(call.connection != nil) transport=\(agent?.transportKind.rawValue ?? "-")
         """)
         return agent.map {
-            target(for: $0, inlineConnection: call.connection, ringPreparation: call.requestedPreparation)
+            let isFixedRoom = $0.pairingEndpoint == nil && call.connection == nil
+            let allowed = isFixedRoom ? min(call.requestedPreparation, .credentials) : call.requestedPreparation
+            return target(for: $0, inlineConnection: call.connection, ringPreparation: allowed)
         }
     }
 
