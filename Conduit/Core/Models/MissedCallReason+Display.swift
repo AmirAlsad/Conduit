@@ -18,6 +18,7 @@ extension MissedCallReason {
         case .busy: "on another call"
         case .filteredByFocus: "Focus"
         case .ringTimedOut, .canceledByCaller: nil
+        @unknown default: nil
         }
     }
 
@@ -26,6 +27,7 @@ extension MissedCallReason {
         case .busy: "\(agentName) tried to call you during another call."
         case .filteredByFocus: "\(agentName) tried to call you while Focus was on."
         case .ringTimedOut, .canceledByCaller: "\(agentName) tried to call you."
+        @unknown default: "\(agentName) tried to call you."
         }
     }
 }

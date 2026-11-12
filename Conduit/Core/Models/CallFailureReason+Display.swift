@@ -19,6 +19,7 @@ extension CallFailureReason {
         case .lostConnection: "Connection lost"
         case .transportError: "Couldn't connect"
         case .unknown: "Call failed"
+        @unknown default: "Call failed"
         }
     }
 
@@ -31,6 +32,7 @@ extension CallFailureReason {
         case .lostConnection: "connection lost"
         case .transportError: "couldn't connect"
         case .unknown: nil
+        @unknown default: nil
         }
     }
 
@@ -42,6 +44,7 @@ extension CallFailureReason {
         case .lostConnection: "The network dropped — try calling again."
         case .transportError: "Check the transport setting and your server's credentials."
         case .unknown: "Try again."
+        @unknown default: "Try again."
         }
     }
 }

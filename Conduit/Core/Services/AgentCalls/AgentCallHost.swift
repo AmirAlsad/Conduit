@@ -108,6 +108,7 @@ final class AgentCallHost: CallEngineDelegate {
         case .moment(.connected), .moment(.reconnected): announcer.announce(.connected)
         case .moment(.connectionLost): announcer.announce(.disconnected)
         case .moment(.held), .moment(.resumed): break
+        @unknown default: break
         }
     }
 
