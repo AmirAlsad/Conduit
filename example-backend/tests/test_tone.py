@@ -1,5 +1,5 @@
 """The `tone` test agent: a continuous tone from the first human join, no keys,
-and nothing that waits for client-ready or call-answered."""
+and nothing that waits for client-ready or call-connected."""
 
 import array
 import asyncio
@@ -70,7 +70,7 @@ def test_tone_agent_needs_no_keys_and_ignores_answer_and_ready():
 
     build = tone.build(FakeTransport())
     assert build.on_ready is None  # client-ready does nothing
-    assert build.gates == ()  # nothing for call-answered or hold to open or close
+    assert build.gates == ()  # nothing for call-connected or hold to open or close
 
 
 async def test_tone_source_in_a_running_pipeline():

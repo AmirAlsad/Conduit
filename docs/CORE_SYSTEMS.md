@@ -213,7 +213,7 @@ by pairing (`PairingError.unauthorized` → `.authenticationFailed`).
 
 All three adapters send the engine's **`end-call` signal** in `disconnect()` — a
 deliberate hangup ends the bot at once instead of burning its human-absent grace
-window — and deliver the engine's **call-control signals** (`call-answered`,
+window — and deliver the engine's **call-control signals** (`call-connected`,
 `call-held`, `call-resumed`) from `send(_:)`, all as the same RTVI client message
 (`{"label": "rtvi-ai", "type": "client-message", "data": {"t": …}}`). Daily and
 SmallWebRTC send it through the Pipecat transport's message path once the call is
@@ -382,10 +382,13 @@ the receipt bearer.
 or `.reconnect(attempt:)`, plus the ring's `callID` for an incoming call). Inline
 push credentials are returned for every purpose without a network call; a direct
 agent returns its room; a pairing agent re-pairs every time, and a request made
-while the phone rings adds `ring: {call_id, await_answer}` to the pairing body
-(`PairingRing`; `await_answer` when the transport joins before the answer), so
-the user's backend can dispatch its agent for that ring and keep it silent until
-`call-answered`. A backend that predates the field ignores it. **Pre-connect
+while the phone rings adds `ring: {call_id, joins_before_answer}` to the pairing
+body (`PairingRing`; `joins_before_answer` when the transport joins before the
+answer), so the user's backend can dispatch its agent for that ring. Every pairing
+request also lists the call-control signals the app's calls carry
+(`call_signals`: `call-connected`, `call-held`, `call-resumed`), so the backend's
+agent waits for `call-connected` before it greets. A backend that predates the
+fields ignores them. **Pre-connect
 policy:** `AgentCallHost` allows each ring whatever its push's `preconnect` asks
 for (`CallTarget.ringPreparation = IncomingCall.requestedPreparation`), since the
 sender is the user's own backend; the engine still lowers `media` to `credentials`
@@ -397,27 +400,36 @@ DEBUG ring-join switch is on; today only LiveKit joins). Outgoing targets allow 
 "— on another call" / "— Focus" for the two the user never heard), posts the
 missed-call notification for every missed ring, donates outgoing calls to Siri on
 `dialing → connecting`, and plays the engine's cues: `.start(.connecting)` loops
-the ringback tone, `.start(.retrying)` repeats "Retrying", `.stop` ends the loop,
+the ringback tone (starting `Ringback.startDelay`, 0.5 s, after the cue, so it never
+starts while the call screen slides up and a call that ends sooner never rings),
+`.start(.retrying)` repeats "Retrying", `.stop` ends the loop at once,
 `.moment(.connected)` / `.moment(.reconnected)` say "Connected" (the engine sends
 `.moment(.connected)` only once CallKit has activated the call's audio, so it is
 said into a live session), and
 `.moment(.connectionLost)` says "Disconnected" (once per outage);
 `.moment(.held)` and `.moment(.resumed)` play nothing. The engine
 guarantees every loop is stopped by the time the call ends, a provider reset
-included, and no cues for a ring that is never answered. So the agent does not
-hear Conduit's own sounds through the mic (on the speaker it would, and could take
-them for the user), the host keeps the mic closed with the engine's
+included, and no cues for a ring that is never answered. **The connect sequence**
+is the same for every call: the engine holds the call in `.connecting` for at least
+`Ringback.minimumConnectingDuration` (the 0.5 s start delay plus the 2.1 s audible
+tone, the engine's `minimumConnectingDuration`) even when the transport is ready
+sooner, so the first tone always plays in full and the state, the call screen,
+CallKit and the cue stop together; a pre-connected ring answered with its agent
+there skips `.connecting` and is not delayed. The engine keeps the mic closed until
+the call is connected, so the ringback needs nothing. At `.moment(.connected)` (and
+`.moment(.reconnected)`) the host keeps the mic closed with the engine's
 `setMicWithheld(_:)` (not mute: the call screen and CallKit still show it unmuted)
-from `.start(.connecting)` until the announcer reports that the ringback has
-stopped and "Connected" has finished (`announce(_:completion:)`, from the
-synthesizer's didFinish/didCancel); a pre-connected answer, which has no connecting
-cue, withholds at `.moment(.connected)`, and so does a reconnect for its short
-"Connected". It releases at once when "Connected" will not come: the call ends or
-fails, or a hold (`.moment(.held)`; a resume while still connecting withholds again
-for the replayed ringback). "Disconnected" and "Retrying" are not withheld for: the
+until the announcer reports that "Connected" has finished
+(`announce(_:completion:)`, from the synthesizer's didFinish/didCancel, or
+`stopNow()` cutting it off), so the agent does not hear it through the mic (on the
+speaker it would, and could take it for the user). The release opens the mic, and
+the engine then tells the agent `call-connected`: the moment to start speaking.
+The host releases at once when "Connected" will not come: the call ends or fails,
+or a hold (`.moment(.held)`). "Disconnected" and "Retrying" are not withheld for: the
 transport is down while they play. The engine ends a withhold with the call, and
 releases one still in place 5 seconds after the call connected with its audio
-activated (`micWithholdTimeout`), logging a warning. The engine runs a ring
+activated (`micWithholdTimeout`), logging a warning, which also sends
+`call-connected`. The engine runs a ring
 for at most its `ringTimeout` (60 s) and waits at most `joinTimeout` (30 s) for the
 agent after the transport's `connect` returns; the app keeps both defaults.
 
@@ -480,14 +492,15 @@ Key behaviors:
   transport must stop and restart playout there: LiveKit and Daily do (Daily by
   unsubscribing from the agent's audio), SmallWebRTC cannot, so a held SmallWebRTC
   call is silent only if the agent honours `call-held`.
-- **Call-control signals.** `send(_:)` on the transport carries `call-held`,
-  `call-resumed` and `call-answered` (as RTVI client messages) and returns a
+- **Call-control signals.** `send(_:)` on the transport carries `call-connected`,
+  `call-held` and `call-resumed` (as RTVI client messages) and returns a
   `CallSignalDelivery` (`.sent`, `.failed`, `.unsupported`). The engine retries a
   `.failed` signal (after 1, 2, 4, 8, 16, 30 s) and repeats the call's state after
   every reconnect, never retries `.unsupported`, and counts an agent as possibly
-  still held until a `call-resumed` is `.sent`. `call-answered` is sent for every
-  incoming call whose push carried `preconnect`, once the call is answered, CallKit
-  has activated its audio and the transport is connected.
+  still held until a `call-resumed` is `.sent`. `call-connected` is sent on every
+  call, once it is connected, CallKit has activated its audio, it is not held and
+  the host is not withholding the mic (after "Connected"), and again after every
+  reconnect.
 - **Pre-connect (ringing).** Once CallKit has accepted a ring, the engine prepares
   it up to the lowest of the push's `preconnect`, the target's `ringPreparation` and
   what the transport can do. `credentials` runs the target's `connect` during the
@@ -501,7 +514,7 @@ Key behaviors:
   (`canceledByCaller`, a `canceled` receipt). A ring that ends unanswered disconnects
   the transport it prepared, sending `end-call` first if it was up. The app's
   host-side part is `PairingRing`: a pairing request made during a ring carries
-  `ring: {call_id, await_answer}`.
+  `ring: {call_id, joins_before_answer}`.
 - **Audio interruptions.** `AudioInterruptionObserving` (real:
   `SystemAudioInterruptionObserver` over `AVAudioSession.interruptionNotification`)
   drives `isInterrupted`: on `.began` the mic pauses (`setMicEnabled(false)`); on
@@ -545,7 +558,8 @@ Key behaviors:
   (`InboundRegistering`), through `PushTokenRegistrar` (`Core/Services/Push/`),
   sending the agent's name (at most 120 Unicode scalars; the ring corrects a
   shortened name once the target resolves), synthetic email and the engine's
-  `supportedPushFeatures` (`push_features`) with the token;
+  `supportedPushFeatures` (`push_features`) and the call signals its calls carry
+  (`call_signals`) with the token;
   deleting an agent best-effort **unregisters** (DELETE on the registration
   endpoint, `PushTokenRegistrar.unregister`). A token PushKit invalidates
   (`callEngineDidInvalidateVoIPPushToken`) is no longer current: the engine's
@@ -616,7 +630,9 @@ single client calling one agent, so there is no thundering-herd to spread.
 deliberately robotic built-in voice, distinct from the agent's, since the agent is
 exactly what's unreachable: "Retrying connection" repeats on a ~7 s cadence,
 "Connected"/"Disconnected" once, and `.connecting` plays a looped phone ringback
-tone instead of speaking. The real `SpeechSpokenStateAnnouncer` uses
+tone (`Ringback`, `SystemRingback`) instead of speaking, starting 0.5 s after the cue.
+A stop silences it at once (the engine's minimum connecting time covers the first
+tone), and `stopNow()` also cuts off speech in progress. The real `SpeechSpokenStateAnnouncer` uses
 `AVSpeechSynthesizer` and the system-sound server for the tone; it must mix with
 (never deactivate) the CallKit-owned session — that ducking/session wiring is
 finalized in WS-3. `AgentCallHost` drives it from the engine's cue events (see

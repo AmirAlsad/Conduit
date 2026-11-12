@@ -168,14 +168,17 @@ uv run python scripts/ring.py --agent live --ring-timeout 30 --preconnect media
 - **`preconnect`** asks the app to prepare while the phone rings. Like
   `ring_timeout`, the engine sends it only to a registration that lists the
   `preconnect` push feature. Otherwise the ring goes out as if it had not been
-  requested: no `preconnect` key, no ring bot, no await-answer (an `--inline` bot
-  is then a plain inline bot), the ring response's `preconnect` is `null`, and the
-  engine logs `ring.preconnect_unsupported`. An older app would otherwise answer
-  into a bot whose audio is closed. When it is sent:
+  requested: no `preconnect` key, no ring bot (an `--inline` bot is then a plain
+  inline bot), the ring response's `preconnect` is `null`, and the engine logs
+  `ring.preconnect_unsupported`. A `media` request to a registration that does not
+  list the `call-connected` call signal is sent as `credentials` (the response says
+  so, and the engine logs `ring.preconnect_media_needs_call_connected`): only
+  `call-connected` would tell a bot that met the phone in the room that the user
+  answered. When it is sent:
   `credentials` fetches `/connect/{agent_id}` during the ring; `media` also
   joins the room before the answer (only where the transport supports it: LiveKit
   does; Daily and SmallWebRTC stay at `credentials`). In pairing mode the app's `/connect` then carries
-  `"ring": {"call_id", "await_answer"}`, and the engine dispatches a **ring bot**
+  `"ring": {"call_id", "joins_before_answer"}`, and the engine dispatches a **ring bot**
   for it. With `--inline` the ring bot is dispatched at ring time.
   If that `/connect` lands after the ring already ended (a declined, busy,
   unanswered or canceled receipt, or the engine's own cancel; for example the user
@@ -195,16 +198,18 @@ A ring bot differs from a normal bot in three ways:
   assumes `RING_TIMEOUT_SECS` (default 60, must be above 0): set it to match your
   app, or a bot ends mid-ring on a phone still ringing. A sender that wants a firm
   bound should always send `ring_timeout`.
-- For `media` it is dispatched with `--await-answer`: no audio and no greeting
-  until the app's `call-answered` message, or, as a fallback for a lost one, the
-  ring's `answered` receipt (relayed to the bot by the engine). The app sends the
-  receipt at the moment of answer, before its audio is up and often before it
-  has (re)joined, and `call-answered` once it is, so the receipt always arrives
-  first: the bot releases itself only if `call-answered` has not come
-  `ANSWERED_RECEIPT_GRACE_SECS` (default 5, at least 5 as the push contract asks)
-  after both the receipt and the device being in the room, whichever is later.
-  The device leaving the room stops that wait, and its return starts it again in
-  full. The receipt does stop the ring deadline at once.
+- Like every bot for an app that lists `call-connected` (in its `/connect` body,
+  or, for an `--inline` ring, its registration), it is dispatched with
+  `--await-connected`: no audio and no greeting until the app's `call-connected`
+  message, or, as a fallback for a lost one, `CALL_CONNECTED_GRACE_SECS` (default
+  10, at least 5 as the push contract asks) after it knows the user answered and
+  the device is in the room, whichever is later. For `media`
+  (`--joins-before-answer`) the device's joining is not the answer: the answer is
+  `call-connected` or the ring's `answered` receipt (relayed to the bot by the
+  engine). The app sends the receipt at the moment of answer, before its audio is
+  up and often before it has (re)joined, so the receipt only starts the fallback
+  wait. The device leaving the room stops that wait, and its return starts it
+  again in full. The receipt stops the ring deadline at once.
 - The ring's first receipt steers it: `answered` starts that fallback, any other
   status ends it at once. (A plain inline ring's bot is ended the same way, but has no deadline
   and no control pipe.)
@@ -236,14 +241,14 @@ uv run python scripts/ring.py --agent live --cancel-after 8        # ring, wait 
   without touching the bot or sending a push. Before the receipt, the engine does
   not signal a ring bot: it asks it (a `cancel` line on the bot's stdin; the
   verdict returns on its stdout, so the bot is the one place that knows) and the
-  bot ends itself unless it has seen `call-answered`, or, for a ring that waits
-  for no answer, the human join. A refusal is `409` with
+  bot ends itself unless it has seen `call-connected`, the receipt, or, for a ring
+  the phone joins only after the answer, the human join. A refusal is `409` with
   `{"call_id": …, "status": "answered", "reason": "ring answered"}`, the bot and
   ring are left alone, and on the push branch the cancel push has already gone out
   (the answered phone ignores it). A bot that cannot be asked (a plain inline bot
   has no control pipe; or it is gone, or silent for 3 s) is force-ended as before.
   The residual race is the answered receipt's flight time: the user answered, but
-  neither the receipt nor `call-answered` has reached the engine or bot yet.
+  neither the receipt nor `call-connected` has reached the engine or bot yet.
 - If it doesn't (an app build that sent no `push_features`, or one without
   `cancel`), the engine sends nothing, since that app would show the push as a
   brief incoming-call flash. It returns `409` with
@@ -262,7 +267,7 @@ reconnect. The bot stops talking and hears nothing while held, and if the phone 
 ### The `tone` test agent
 
 `tone` plays a continuous 440 Hz tone from the moment a human joins the room
-and ignores client-ready and `call-answered`. It needs no model keys. Ring it
+and ignores client-ready and `call-connected`. It needs no model keys. Ring it
 pre-connected to hear whether a ringing phone lets any audio out:
 
 ```bash

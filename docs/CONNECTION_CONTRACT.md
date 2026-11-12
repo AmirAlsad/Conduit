@@ -29,7 +29,8 @@ POST <your pairing endpoint>
 Content-Type: application/json
 Authorization: Bearer <API key>      # the key the user entered; omitted if blank
 
-{ "transport": "daily" }             # or "livekit" / "smallwebrtc"
+{ "transport": "daily",              # or "livekit" / "smallwebrtc"
+  "call_signals": ["call-connected", "call-held", "call-resumed"] }
 ```
 
 - **Method:** always `POST`.
@@ -38,11 +39,15 @@ Authorization: Bearer <API key>      # the key the user entered; omitted if blan
   rate-limit on it, ignore it for an open endpoint).
 - **Body:** a JSON object with a `transport` field — `"daily"`, `"livekit"`, or
   `"smallwebrtc"` — telling you which WebRTC transport the user selected, so you can
-  provision the matching room (or offer endpoint). For an outgoing call that is the
-  whole body. For an incoming call that the app prepares while the phone is still
-  ringing, it also carries a `ring` object, `{"call_id": "<the ring's id, lowercase>",
-  "await_answer": <bool>}`; see [Inbound calls](INBOUND_CALLS.md#2-ringing-the-user).
-  An endpoint that does not know `ring` can ignore it.
+  provision the matching room (or offer endpoint). `call_signals` lists the
+  call-control messages the app's calls carry; with `call-connected` in it, the app
+  tells your agent when the user is on the line, and your agent should wait for that
+  before it greets (see [When to start speaking](#when-to-start-speaking)). For an
+  outgoing call that is the whole body. For an incoming call that the app prepares
+  while the phone is still ringing, it also carries a `ring` object,
+  `{"call_id": "<the ring's id, lowercase>", "joins_before_answer": <bool>}`; see
+  [Inbound calls](INBOUND_CALLS.md#2-ringing-the-user). An endpoint that knows
+  neither `call_signals` nor `ring` can ignore them; older app builds send neither.
 - **No agent identifier is sent.** *The endpoint identifies the agent* — one
   endpoint per agent (see [Multiple agents](#multiple-agents)). Conduit does not
   send an `agent_id`.
@@ -256,8 +261,25 @@ need opposite responses:
   `call-held` and, later, `call-resumed`, in the same envelope as `end-call`. A
   reasonable agent stops talking while held and gives a human who drops during the
   hold a longer grace window. Agents that don't know the messages can ignore them.
-  Details, and the other call-control message (`call-answered`, for rings), are in
+  Details, and the other call-control message (`call-connected`), are in
   [Inbound calls](INBOUND_CALLS.md#6-call-control-messages-to-your-agent-engine-02).
+
+### When to start speaking
+
+**Greet when `call-connected` arrives, not when the session connects** — when the
+pairing request listed it in `call_signals`. The app sends this RTVI client message
+(same envelope as `end-call`, same per-transport delivery) on every call once the
+user is on the line: the call is connected, iOS has activated its audio, it is not
+held, and the app's own "Connected" has finished playing. Before it, the app may
+already be in the room playing its ringback (it stays "connecting" for at least
+about 2.6 s, so the ring's first tone is never cut), so a greeting on the join or on
+RTVI client-ready plays over it. It comes again after every reconnect: greet once.
+A request that does not list it (an older app) gets the old behaviour: greet when
+the client is ready. If it is listed but never arrives (lost on the way), greet
+anyway about 10 seconds after the device joined; the reference engine's
+`CALL_CONNECTED_GRACE_SECS`. Full rules, including how it combines with
+`call-held` / `call-resumed`:
+[Inbound calls §6](INBOUND_CALLS.md#6-call-control-messages-to-your-agent-engine-02).
 
 ---
 

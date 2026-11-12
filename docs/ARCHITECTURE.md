@@ -87,7 +87,7 @@ transport selection can unit-test against fakes (voice plan "Layer 1").
 The protocol also lets a transport state what it can do: whether it can join a
 room while the phone still rings (`canConnectWhileRinging` — LiveKit yes; Daily and
 SmallWebRTC no, Daily only behind a DEBUG experiment), and whether a call-control
-signal (`call-held`, `call-resumed`, `call-answered`) reached the agent
+signal (`call-connected`, `call-held`, `call-resumed`) reached the agent
 (`send(_:)`'s `CallSignalDelivery`). The engine adapts to what each one reports.
 
 ### (3) The agent — the user's

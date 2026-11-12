@@ -93,19 +93,23 @@ because breaking one fails in ways that are easy to misdiagnose:
    processor). `POST /admin/disconnect` is the manual equivalent.
 
 A **greeting** (`on_ready`) is optional but recommended — immediate downlink audio
-confirms the call connected.
+confirms the call connected. The entrypoint runs it at the right moment: on the
+app's `call-connected` (the user is on the line, after the app's own ringback and
+"Connected") for an app that says it sends it, and on client-ready for any other.
 
-## Hold and rings that wait for the answer (optional)
+## When to speak, hold, and rings (optional)
 
-The app also sends `call-held` / `call-resumed` (the user took a phone call or
-pressed Hold) and, for a ring it prepares while the phone rings, `call-answered`.
-The entrypoint receives them for you (`bot/call_control.py`), but your pipeline
-only honours them if it can close its audio: put an `AudioGate`
+The app sends `call-connected` on every call once the user is on the line, and
+`call-held` / `call-resumed` (the user took a phone call or pressed Hold). The
+entrypoint receives them for you (`bot/call_control.py`), but your pipeline only
+honours them if it can close its audio: put an `AudioGate`
 (`from bot.call_control import AudioGate`) after `transport.input()` and one before
 `transport.output()`, and return them as `BotBuild(worker=..., gates=(gate_in,
-gate_out))`; `live.py` shows it. The gates stay closed while a ring awaits its
-answer and while the call is held, so the agent hears nothing and says nothing. An
-agent without gates still works: it simply keeps talking through a hold, and a
+gate_out))`; `live.py` shows it. For an app that lists `call-connected` in its
+`call_signals`, the gates stay closed until it arrives (with a grace-period
+fallback, `CALL_CONNECTED_GRACE_SECS`), and they close while the call is held, so
+the agent hears nothing and says nothing. An agent without gates still works: it
+simply talks over the app's ringback, keeps talking through a hold, and a
 pre-connected ring would be audible before the user answers. See
 [Inbound calls](inbound-calls.md) for the messages.
 

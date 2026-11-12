@@ -290,7 +290,7 @@ How to use it:
 | Piece | Notes |
 |---|---|
 | Backend | The reference engine from the commit under test, on pipecat-ai 1.4.0, with the `APNS_*` vars, Daily and LiveKit keys and the registry on a volume. It has the `tone` agent, the ring tracker and the cancel endpoint. |
-| `tone` agent | An app agent on **LiveKit** pointing at `https://<host>/connect/tone`, and one on **Daily** pointing at the same URL, both with "Let this agent call me" on and the registration endpoint `https://<host>/inbound/register/tone`. The registry is keyed by engine agent id and the latest registration wins, so register **one at a time**: re-save the agent you want to ring (this re-registers) before each T and DJ row, and use `--transport` to match it. The tone is 440 Hz from the moment a human joins the room; it ignores client-ready, `call-answered` and hold, which is what makes it a leak detector. |
+| `tone` agent | An app agent on **LiveKit** pointing at `https://<host>/connect/tone`, and one on **Daily** pointing at the same URL, both with "Let this agent call me" on and the registration endpoint `https://<host>/inbound/register/tone`. The registry is keyed by engine agent id and the latest registration wins, so register **one at a time**: re-save the agent you want to ring (this re-registers) before each T and DJ row, and use `--transport` to match it. The tone is 440 Hz from the moment a human joins the room; it ignores client-ready, `call-connected` and hold, which is what makes it a leak detector. |
 | Second phone | Another phone that can call the test phone's number (H rows). |
 | AirPods or a car | For route checks (X rows, C rows). |
 | Registrations | The Daily and LiveKit agents of the main sheet, inbound on, registered by this build (so the engine stores `push_features`). A registration made by the November build has none, and the engine then sends no `ring_timeout`, `preconnect` or cancel push to it: that is itself a check (R1). |
@@ -401,6 +401,27 @@ exists to find out which playback paths are audible.
 | C6 | Cue Lab in the last retry phase | On a LiveKit call, airplane mode on until "Retrying connection" goes silent (about a minute), then press the candidates. | *Record* which numbers are heard in the phase where the normal cues were not. | |
 | C7 | Cue Lab, SmallWebRTC call | The same on a SmallWebRTC call. | *Record* into the grid. | |
 | C8 | The agent does not hear the connect sounds | On the phone speaker, call an echo agent (one that plays the caller's own voice back), on LiveKit and on Daily; then answer a ring from it, and a pre-connected (`--preconnect media`) ring on LiveKit. Stay silent until "Connected" has finished, then speak. Repeat with airplane mode on for 10 seconds mid-call. | No ringback and no "Connected" comes back from the agent, and your own voice does, from the first word after "Connected". The call screen never shows muted. The trace shows `mic withheld: true` at the ringback and `mic withheld: false` just after "Connected", with no "mic was still withheld" warning. After the outage, "Disconnected"/"Retrying" are not echoed either (the connection is down) and the second "Connected" is not echoed. *Record* any echoed cue and how long after "Connected" your first words were echoed. | |
+
+### S. The connect sequence
+
+The same on every call: the ringback starts half a second after dialing (or the
+answer) and the call stays "Connecting" for at least 2.6 s, so the first tone plays
+in full; then "Connected" with the mic closed; then the mic opens and the agent is
+sent `call-connected`, which is when a reference agent greets. Run against a backend
+from this build (it reads `call_signals`) and an app agent re-saved with this build
+(so its registration lists them). `tone` plays from the moment the device joins and
+ignores every signal; `loopback` echoes once it is released.
+
+| # | Check | Steps | Pass when | Result |
+|---|---|---|---|---|
+| S1 | Outgoing, fast agent | LiveKit `loopback` on the speaker: dial and say "one two three" continuously. | Nothing for about 0.5 s, then one full ring tone; the screen and the system call UI show connecting until the tone ends (about 2.6 s from dialing, not 1.2 s); then "Connected"; nothing of the ring, "Connected" or your words before it comes back to you; your voice echoes only after "Connected" finished. The backend logs `bot.call_signal signal=call-connected` once and `bot.call_connected via=signal`. | |
+| S2 | Outgoing, the same on Daily | S1 on Daily. | As S1, with the route caveat of Daily's late speaker (the tone may start on the earpiece). | |
+| S3 | Outgoing, tone agent | LiveKit `tone`, then Daily `tone`. | The tone is heard from about the device's join, under the ring (the tone agent ignores the signals by design); the call still shows connecting until the ring's tone ends. | |
+| S4 | Answered ring | `ring.py --agent loopback` (pairing mode), answer. | Ringback 0.5 s after the answer, at least 2.6 s of connecting, "Connected", then the echo; the backend logs `bot.call_connected via=signal`. | |
+| S5 | Pre-connected ring | `ring.py --agent loopback --inline --preconnect media --transport livekit`, wait for the device's join, answer. | No ringback (straight to connected), "Connected", then the echo; nothing audible before the answer. With `tone` instead: no tone before the answer, tone at once after it. | |
+| S6 | Reconnect | During S1, airplane mode on for 10 s, then off. | "Disconnected", "Retrying connection", then "Connected" on return; the echo resumes only after it; the backend logs a second `bot.call_signal signal=call-connected` and no second `bot.call_connected`; the agent does not greet again. | |
+| S7 | Hang up during the wait | Dial and hang up within 2 s. | No "Connected"; Recents shows a canceled call; the backend logs `client-end-call`. Hang up within 0.5 s: no ring tone at all. | |
+| S8 | Older backend | S1 against a backend from before this build (it ignores `call_signals`). | The agent greets when the device joins, as before, possibly over the ring tone; the app works unchanged. | |
 
 ### G. The join deadline
 

@@ -57,7 +57,8 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
   "agent_id": "<the agent's UUID in the app>",
   "display_name": "<optional>",          // the caller name the user gave the agent in the app
   "handle": "<optional>",                // the CallKit handle the app uses for it
-  "push_features": ["cancel", "ring_timeout", "preconnect"]   // optional — see below
+  "push_features": ["cancel", "ring_timeout", "preconnect"],  // optional — see below
+  "call_signals": ["call-connected", "call-held", "call-resumed"]   // optional — see below
 }
 ```
 
@@ -73,6 +74,11 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
   Store it with the token and use a feature only with a registration that lists it.
   Keep names you don't know (later engines add more) and ignore them when ringing.
   Older builds omit the key: treat that as an empty list, so they get neither.
+- `call_signals` lists the call-control messages the app's calls carry (§6), the
+  same list it sends with every pairing request. An agent you start for a ring
+  before the app asks for credentials (inline credentials, §2) waits for
+  `call-connected` before it greets only if the registration lists it. Send
+  `preconnect: "media"` only to a registration that lists `call-connected` (§5).
 
 - The **VoIP token is per-install, app-wide** (not per-agent, not per-transport). The
   same token is registered with every agent the user opted in — each of your servers
@@ -126,11 +132,11 @@ All values are strings. `ring_timeout` and `preconnect` need a Conduit build on
 call engine 0.2 or later; older builds ignore them, so a ring that carries them
 still rings exactly as before. Send `ring_timeout` only when the registration's
 `push_features` lists `ring_timeout`, and `preconnect` only when it lists
-`preconnect` (§1). Without `ring_timeout` the phone rings for its own timeout, so
-time anything you tie to the ring from that. Without `preconnect` the app will
-not prepare, so a `media` agent you dispatched would sit in a room whose audio you
-hold closed, waiting for a `call-answered` that never comes: ring such a device as
-if you had not asked for pre-connect, and dispatch a plain agent.
+`preconnect` (§1), and `"media"` only when it also lists the `call-connected` call
+signal. Without `ring_timeout` the phone rings for its own timeout, so time
+anything you tie to the ring from that. Without `preconnect` the app will not
+prepare: ring such a device as if you had not asked for pre-connect, and dispatch a
+plain agent.
 
 **Ring timeout.** The app ends a ring nobody answers after its own timeout
 (60 s by default) and reports `unanswered` (§4). `ring_timeout` shortens one
@@ -161,12 +167,14 @@ When a ring asks for `preconnect` (§5), the app may call the pairing endpoint
 **while the phone is still ringing**, and then adds the ring to the usual body:
 
 ```
-{ "transport": "<…>", "ring": { "call_id": "<the push's call_id>", "await_answer": true } }
+{ "transport": "<…>", "call_signals": [ … ],
+  "ring": { "call_id": "<the push's call_id>", "joins_before_answer": true } }
 ```
 
-`await_answer` is `true` when the app will also join the room before the user
-answers (the `media` tier): the agent you dispatch must then stay silent until it
-hears `call-answered` (§6). Without `ring` the request is an ordinary pairing call.
+`joins_before_answer` is `true` when the app will also join the room before the
+user answers (the `media` tier): the device joining is then not the answer, and the
+agent you dispatch must stay silent until it hears `call-connected` (§6). Without
+`ring` the request is an ordinary pairing call.
 
 The ring may already be over when this request lands (the user declined, or you
 canceled it, while the app was waking). Dispatch no agent for a ring whose first
@@ -274,27 +282,27 @@ behaviour for a `media` ring. Anything missing means today's behaviour.
 `"media"` is your promise that the agent holds its audio until the user answers.
 Your agent must:
 
-1. Produce no audio until it receives `call-answered` (§6).
+1. Produce no audio until it receives `call-connected` (§6).
 2. End at once on `end-call`, as for any call. A decline, a timeout or a cancel
    while the phone is in the room all send it.
-3. End by itself if no `call-answered` arrives within the ring timeout plus 15 s
+3. End by itself if no `call-connected` arrives within the ring timeout plus 15 s
    of being dispatched. Use the `ring_timeout` you sent; if the push carried none,
    the phone rings for the app's own configured timeout (60 s by default, but it
    can be longer or unlimited), which you can only assume. Send `ring_timeout`
    when you want a firm bound.
-4. Use receipts as a fallback, not as the signal: wait for `call-answered`, and
-   let `answered` release the greeting only if `call-answered` has not come 5 or
-   more seconds after both the receipt and the device being in the room,
-   whichever is later (a `call-answered` lost on the way). The app sends
+4. Use receipts as a fallback, not as the signal: wait for `call-connected`, and
+   let `answered` release the greeting only if `call-connected` has not come 5 or
+   more seconds (10 is safer) after both the receipt and the device being in the
+   room, whichever is later (a `call-connected` lost on the way). The app sends
    `answered` at the moment of answer, before its audio is up and often before it
-   has (re)joined, and `call-answered` once it is, so a greeting released on the
-   receipt itself plays into audio that is not up yet. The reference engine waits
-   `ANSWERED_RECEIPT_GRACE_SECS` (default 5);
+   has (re)joined, and `call-connected` once the user is on the line, so a
+   greeting released on the receipt itself plays into audio that is not up yet.
+   The reference engine waits `CALL_CONNECTED_GRACE_SECS` (default 10);
    `declined`, `unanswered`, `canceled`, `busy` or `suppressed_by_focus` mean end
    the agent. So send `status_url` with every pre-connected inline ring.
 
 With `"credentials"` the app joins only after the answer, so the human joining
-already means "answered"; the app still sends `call-answered`.
+already means "answered"; as on every call, greet on `call-connected` (§6).
 
 ### Canceling a ring
 
@@ -327,9 +335,9 @@ A cancel push that arrives after the ring was answered changes nothing on the
 phone, but an agent that leaves a room the user has already answered into ends the
 live call, and on a pre-connected ring the room holds the phone both before and
 after the answer. So an agent must not leave for a cancel once it has seen the
-answer itself (`call-answered`, §6, or the human's audio), and must not act on a
+answer itself (`call-connected`, §6, or the human's audio), and must not act on a
 cancel after the ring's `answered` receipt (§4). The `answered` receipt is sent at
-the moment of answer, but `call-answered` only once audio is up, so the agent can
+the moment of answer, but `call-connected` only once audio is up, so the agent can
 hold either one first. What stays racy is only the receipt's flight time: a cancel
 that reaches the agent in the moment between the user answering and either signal
 arriving cannot be told from one that came first. The reference engine's cancel
@@ -344,14 +352,36 @@ Besides `end-call`, the app sends these RTVI client messages to the agent, in th
 same envelope:
 
 ```json
-{ "id": "<…>", "label": "rtvi-ai", "type": "client-message", "data": { "t": "call-answered" } }
+{ "id": "<…>", "label": "rtvi-ai", "type": "client-message", "data": { "t": "call-connected" } }
 ```
 
 | `t` | When |
 |---|---|
-| `call-answered` | The user answered a ring whose push carried `preconnect` (any value), once iOS has activated the call's audio and the transport is connected; sent again after every reconnect of that call |
+| `call-connected` | The user is on the line: on every call (placed by the user, or a ring answered, prepared or not), once the call is connected, iOS has activated its audio, it is not held, and the app's own "Connected" has finished; sent again after every reconnect |
 | `call-held` | The call went on hold: the user took or placed a cellular call, or pressed Hold in the app. Any call, incoming or outgoing; sent again after every reconnect of a held call |
 | `call-resumed` | The call came back from hold |
+
+**When your agent should start speaking: on `call-connected`, not when the
+session connects.** The app lists the messages it sends as `call_signals` in every
+pairing request and in its token registration (§1). An agent started for a request
+or registration that lists `call-connected` keeps quiet until it arrives, then
+greets, once: a repeat after a reconnect is the same call. Before it, the device can
+already be in the room: during its ringback (the app shows "connecting" for at
+least about 2.6 s, so the first ring tone always plays in full), and, for a `media`
+ring, while the phone still rings. Being muted or in push-to-talk does not delay it:
+the user hears you. Treat it with `call-held` and `call-resumed` as state: the user
+is on the line once you have had `call-connected`, and away while the latest of the
+three is `call-held` (`call-connected` is never sent while the call is held; a call
+that connects during a hold gets `call-resumed` and then `call-connected` at the
+resume). An agent started for a request or registration that does not list it (an
+older app, a third-party client, a direct room) greets when the client is ready, as
+before. **Fallback:** a listed `call-connected` can be lost, so once your agent
+knows the user answered (at once for an ordinary call; for a ring, its `answered`
+receipt, or the device joining a ring it joins only after the answer) and the device
+is in the room, it greets anyway if `call-connected` has not come within a grace
+period: 5 seconds at least, 10 to cover the app's own sequence after it joins (the
+minimum connecting time and its "Connected", which the app bounds at 5 s). The
+reference engine does all of this (`CALL_CONNECTED_GRACE_SECS`, default 10).
 
 On hold the app's mic is off and, where the transport can, its playout too. A
 reasonable agent stops talking, takes no turns, and gives a human who drops while
