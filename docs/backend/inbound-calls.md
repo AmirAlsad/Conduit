@@ -10,11 +10,15 @@ How it fits together:
 1. The user enables **"Let this agent call me"** in the app → the app registers its
    VoIP push token at `POST /inbound/register/{agent_id}` (sent on save and
    automatically re-sent on every app launch).
-2. You trigger `POST /admin/ring/{agent_id}` (or `scripts/ring.py`) → the engine
-   sends a **VoIP push** to Apple → the phone rings.
-3. The user answers → the app resolves your pairing endpoint
-   (`/connect/{agent_id}`) exactly like an outgoing call, and your agent is
-   dispatched into the room.
+2. You trigger `POST /admin/ring/{agent_id}` (or `scripts/ring.py`) → when the
+   ring needs your agent before the answer (inline credentials, or pre-connect,
+   the default for apps that support it) the engine starts it in a room first,
+   then sends a **VoIP push** to Apple once the agent is in that room → the
+   phone rings.
+3. The app fetches its credentials from your pairing endpoint
+   (`/connect/{agent_id}`), during the ring with pre-connect (it then gets that
+   room) or after the user answers without it (exactly like an outgoing call:
+   your agent is dispatched then), and joins the room.
 
 !!! note "Device + paid account only"
     None of this runs in the iOS Simulator (no PushKit, no CallKit), and the push
@@ -132,31 +136,78 @@ Two modes:
 
 - **Pairing (default)** — the push carries no credentials, only `agent_id` +
   `call_id` (and `status_url`, plus the caller `display_name` and `handle` when the
-  app registered them); the app resolves `/connect/{agent_id}` after the user
-  **answers**. Nothing sensitive rides the push, and **a declined ring costs nothing** (no room, no bot).
+  app registered them, and `preconnect`, below). Nothing sensitive rides the
+  push. With pre-connect, the default for an app that lists it, the engine
+  prepares the room and a ring bot **before the push** and hands that room to
+  the app's `/connect/{agent_id}` during the ring, so the agent is in the room
+  on pickup; the bot ends on a decline or any other non-answer (below). Without
+  pre-connect (`--preconnect none`, `--no-wait`, or an app that does not list
+  it) the app resolves `/connect/{agent_id}` after the user **answers**, and **a
+  declined ring costs nothing** (no room, no bot).
 - **Inline (`--inline` / `{"inline": true}`)** — the engine provisions a room and
-  embeds `room_url` + `token` in the push. The bot is **dispatched before the user
-  answers**, so the agent is already in the room on pickup. The engine ends that
+  embeds `room_url` + `token` in the push. The bot is **dispatched before the
+  push**, so the agent is already in the room on pickup. The engine ends that
   bot when the ring's first receipt is anything but `answered` (a decline, busy,
   Focus, a timeout, a cancel); with no receipt at all it runs (billing) until
-  `PIPELINE_IDLE_TIMEOUT_SECS` reaps it. Prefer pairing unless you need the agent
-  mid-sentence-ready at pickup.
+  `PIPELINE_IDLE_TIMEOUT_SECS` reaps it, or, for a ring bot, until its ring
+  deadline. Pairing with pre-connect gets the agent just as ready, without
+  credentials in the push.
 
     !!! warning "Inline must match the app's transport"
         The app joins inline credentials over the transport **configured for that
         agent in the app**. Pass `--transport daily|livekit` to match it — a
         mismatch (e.g. a Daily room pushed to an agent the app dials over LiveKit)
         fails at answer time. Pairing mode can't mismatch: the app negotiates the
-        transport in its `/connect` call.
+        transport in its `/connect` call. A pairing ring's room prepared at ring
+        time uses the same `--transport` (default: the agent's own); when the
+        app asks for another, it gets a fresh room and the prepared one is ended,
+        so match it there too or the agent starts only at that request.
+
+### Agent-first ringing
+
+So the agent is ready when the user picks up, a ring whose agent starts before
+the push (every `--inline` ring, and a pre-connected pairing ring) is pushed only
+once the agent's bot **has joined its room**. The bot (started with
+`--report-joined`) says so on its stdout, which the engine reads, as soon as its
+transport reports the join. The wait is bounded by `RING_BOT_WAIT_SECS` (default 8; observed joins take
+2 to 7 s): past it, or as soon as the bot exits, the push goes out anyway, so a
+slow or broken agent never blocks a ring. `0` turns agent-first ringing off for
+the whole engine; for one ring, `--no-wait` (`{"wait_for_bot": false}`) pushes at
+once, and a pairing ring then prepares nothing (its agent starts at the app's
+request, as without pre-connect).
+
+The ring response says how it went: `bot_in_room` is `true` when the bot had
+joined when the push went out, `false` when the wait ran out or the bot exited,
+and `bot_wait_secs` is how long the push waited; both are `null` for a ring that
+did not wait. The engine logs `ring.waiting_for_bot` (with the `call_id`, so you
+can cancel during the wait), `ring.bot_wait` (`outcome` = `joined`, `timeout`,
+`exited` or `withdrawn`) and `ring.sent` with the same fields.
+
+```
+dispatch bot ──► bot joins the room ──► push ──► phone rings ──► answer
+               (≤ RING_BOT_WAIT_SECS)        (pairing + pre-connect: /connect
+                                              during the ring gets that room)
+```
+
+The wait never shortens the ring: a ring bot's deadline is the ring's timeout
+plus `RING_DEADLINE_MARGIN_SECS` plus `RING_BOT_WAIT_SECS`, counted from the
+bot's start. A ring canceled while the engine waits is never pushed (the cancel
+answers `"method": "before_push"` and ends the bot; the ring request answers
+`409` `{"call_id": …, "status": "canceled", "reason": "ring ended"}`), and a
+receipt for it during the wait does the same. A push APNs rejects ends the bot
+started for it.
 
 ### Ring timeout and pre-connect
 
-Two optional ring options (Conduit builds on call engine 0.2+; older builds
-ignore them and ring as before):
+Two ring options for Conduit builds on call engine 0.2+ (older builds ignore
+them and ring as before; the engine sends each only to a registration that lists
+it):
 
 ```bash
 uv run python scripts/ring.py --agent live --ring-timeout 30 --preconnect media
 # raw: -d '{"ring_timeout": 30, "preconnect": "media"}'
+uv run python scripts/ring.py --agent live --preconnect none   # a plain ring
+# raw: -d '{"preconnect": "none"}'
 ```
 
 - **`ring_timeout`** shortens this ring (the app clamps it to at least 10 s and
@@ -165,21 +216,37 @@ uv run python scripts/ring.py --agent live --ring-timeout 30 --preconnect media
   the `ring_timeout` push feature; otherwise the phone rings for its own
   default, the ring bot's deadline assumes that default, and the ring response's
   `ring_timeout` is `null`.
-- **`preconnect`** asks the app to prepare while the phone rings. Like
-  `ring_timeout`, the engine sends it only to a registration that lists the
-  `preconnect` push feature. Otherwise the ring goes out as if it had not been
-  requested: no `preconnect` key, no ring bot (an `--inline` bot is then a plain
-  inline bot), the ring response's `preconnect` is `null`, and the engine logs
-  `ring.preconnect_unsupported`. A `media` request to a registration that does not
-  list the `call-connected` call signal is sent as `credentials` (the response says
-  so, and the engine logs `ring.preconnect_media_needs_call_connected`): only
-  `call-connected` would tell a bot that met the phone in the room that the user
-  answered. When it is sent:
+- **`preconnect`** asks the app to prepare while the phone rings. **Every ring
+  asks for it by default**: the best tier the registration takes, `media` when it
+  lists the `preconnect` push feature and the `call-connected` call signal,
+  `credentials` when it lists the feature only. `--preconnect credentials|media`
+  asks for one tier, and `--preconnect none` (`{"preconnect": "none"}`) opts out:
+  a plain ring. A registration that does not list the `preconnect` push feature
+  gets a ring exactly as if it had not been requested: no `preconnect` key (the
+  same push as before pre-connect existed), no ring bot (an `--inline` bot is
+  then a plain inline bot), the ring response's `preconnect` is `null`, and, for
+  an explicit tier, the engine logs `ring.preconnect_unsupported`. A `media`
+  request to a registration that does not list the `call-connected` call signal
+  is sent as `credentials` (the response says so, and the engine logs
+  `ring.preconnect_media_needs_call_connected`): only `call-connected` would tell
+  a bot that met the phone in the room that the user answered. When it is sent:
   `credentials` fetches `/connect/{agent_id}` during the ring; `media` also
   joins the room before the answer (only where the transport supports it: LiveKit
-  does; Daily and SmallWebRTC stay at `credentials`). In pairing mode the app's `/connect` then carries
-  `"ring": {"call_id", "joins_before_answer"}`, and the engine dispatches a **ring bot**
-  for it. With `--inline` the ring bot is dispatched at ring time.
+  does; Daily and SmallWebRTC stay at `credentials`). In pairing mode the app's
+  `/connect` then carries `"ring": {"call_id", "joins_before_answer"}`. The
+  engine has already prepared a room and **ring bot** for the ring (Daily and
+  LiveKit; SmallWebRTC has no room, its bot starts at the app's offer), and the
+  first such request gets that room, with no second bot. A later request for the
+  ring, or one the prepared bot does not fit (another transport, a phone that
+  will join before the answer when the bot was prepared for `credentials`, or
+  `call_signals` that differ from the registration's), or one after that bot
+  exited, gets a fresh room and ring bot as before (an unfit prepared bot is
+  ended). A request without `ring` (after the answer, or a reconnect) always gets
+  a fresh room. If the ring is `answered` before its prepared room was taken (an
+  app that did not prepare), the engine ends that bot: the app connects with a
+  request of its own. If preparing fails (say the transport isn't configured),
+  the ring still goes out and that request provisions as before. With
+  `--inline` the ring bot is dispatched at ring time.
   If that `/connect` lands after the ring already ended (a declined, busy,
   unanswered or canceled receipt, or the engine's own cancel; for example the user
   declined before the phone woke), the engine creates no room and dispatches no
@@ -192,7 +259,9 @@ uv run python scripts/ring.py --agent live --ring-timeout 30 --preconnect media
 A ring bot differs from a normal bot in three ways:
 
 - It ends by itself if nobody answers within the ring's timeout (at least 10 s)
-  plus `RING_DEADLINE_MARGIN_SECS` (15). When the push carried no `ring_timeout`
+  plus `RING_DEADLINE_MARGIN_SECS` (15), plus `RING_BOT_WAIT_SECS` (8) for a bot
+  started before the push, which may go out that much later (agent-first
+  ringing, above). When the push carried no `ring_timeout`
   the engine cannot know how long the phone will ring, since the app's timeout is
   configurable (60 s by default, longer or unlimited if the user changed it), so it
   assumes `RING_TIMEOUT_SECS` (default 60, must be above 0): set it to match your
@@ -229,6 +298,9 @@ uv run python scripts/ring.py --agent live --cancel-after 8        # ring, wait 
   the ring's receipt arrived (it was answered, declined, …), after a cancel,
   when the ring bot has itself seen the call answered (below), or when the device
   can't take a cancel push (below).
+- A ring the engine is still holding for its bot (agent-first ringing) is
+  withdrawn **before its push**: the engine ends the bot and never sends the
+  push, and answers `{"method": "before_push", "bot_ended": true}`.
 - A `media` ring whose phone is in the room (Daily presence API / LiveKit
   `ListParticipants`) is canceled **in band**: the engine ends the bot, the app
   takes the agent leaving as the cancel and reports `canceled`. No push.
@@ -313,4 +385,6 @@ commands. A status receipt also reveals the user's busy/Focus state — fine her
 | `502` · `TopicDisallowed` | Push Notifications not enabled on the App ID, or the topic doesn't match `<bundle id>.voip` |
 | `502` · `Unregistered` | The token is stale (app reinstalled); the engine evicted it — re-enable inbound in the app |
 | `503` | APNs vars not set on the engine (or, for `--inline`, the transport/model keys are missing) |
+| `409` from `/admin/ring` · `ring ended` | The ring was canceled, or got a receipt, while the engine waited for its agent to join the room; its push never went out |
+| `bot_in_room: false` in the ring response | The agent's bot hadn't joined within `RING_BOT_WAIT_SECS` (or it exited): the ring went out anyway. Check the bot's logs; raise the bound if your agent is just slow to start |
 | APNs `200` but no ring | **Most often Focus / Do Not Disturb** — iOS filters the call, so it doesn't ring or alert the lock screen but **is logged in the app's Recents as a missed call** (the status receipt reads `suppressed_by_focus`). Other causes: the app must be on a real device; one call at a time (a ring during an active call is logged as missed, never breaks through); an unknown agent UUID in the app ends the call gracefully |
