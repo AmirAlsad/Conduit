@@ -9,6 +9,12 @@ transport-SDK bump. Internal; not published on the docs site.
 Transports are written out in full (Daily, LiveKit, SmallWebRTC) so they don't
 collide with the row ids (`S1` is Siri, `L1` is links).
 
+Two sheets live here. The **main sheet** (Before/After, rows O, I, S, L, M, B, N)
+is the call-stack regression pass; its recorded run is the November 2026 one under
+Results. The **0.2.0 sheet** (further down: rows K, H, R, P, T, DJ, C, G, X) covers
+what the engine 0.2 adoption added and has **not been run**: every Result cell is
+empty on purpose, and nothing in it may be quoted as verified until it is filled in.
+
 ## How to use this
 
 - **Hold the environment constant across the two runs.** Same phone, same iOS
@@ -66,7 +72,7 @@ Dashboard: service, Logs. Or from a terminal linked to the Railway service:
 ```bash
 mkdir -p /tmp/conduit-verify/before /tmp/conduit-verify/after   # one dir per run
 railway logs 2>&1 | tee /tmp/conduit-verify/before/engine.log \
-  | grep --line-buffered -E 'teardown\.|bot\.|dispatch\.|inbound\.|apns\.|engine\.'
+  | grep --line-buffered -E 'teardown\.|bot\.|dispatch\.|inbound\.|apns\.|engine\.|ring\.|connect\.'
 ```
 
 TODO(verify): `railway logs` is not documented anywhere in this repo; confirm the
@@ -87,7 +93,11 @@ the dispatcher's stdout, so they interleave in one stream):
 | `inbound.registered agent=<id> platform=ios bundle=<id>` | Token registration. |
 | `inbound.unregistered agent=<id>` (preceded by `inbound.token_evicted`) | The app's DELETE was honored. |
 | `apns.push_sent status=200 ...` | APNs accepted a ring. |
-| `inbound.ring_status agent=<id> call_id=<id> status=<s>` | Receipt: `answered`, `declined`, `busy`, `suppressed_by_focus`. |
+| `inbound.ring_status agent=<id> call_id=<id> status=<s>` | Receipt: `answered`, `declined`, `busy`, `suppressed_by_focus`, `unanswered` (ring timed out), `canceled` (withdrawn, or the agent left a pre-connected ring). |
+| `ring.sent`, `ring.canceled`, `ring.cancel_refused`, `ring.cancel_unsupported`, `ring.preconnect_unsupported` | The ring tracker: a ring sent, withdrawn, refused (answered or ended first), or sent without a feature the device does not list. |
+| `connect.ring_over` | A pre-connect `/connect` landed after its ring had ended; refused with 409, no room, no bot. |
+| `bot.call_answered`, `bot.call_held`, `bot.call_resumed`, `bot.call_signal` | A call-control signal reached the agent. |
+| `bot.ring_deadline`, `bot.ring_canceled`, `bot.cancel_refused` | A ring bot gave up waiting for the answer, was ended by a cancel, or refused one because it had seen the answer. |
 
 ### Send a ring
 
@@ -97,6 +107,17 @@ uv run python scripts/ring.py --agent loopback --base-url https://<host>
 uv run python scripts/ring.py --agent live --base-url https://<host>
 # credentials in the push (provisions a room, dispatches the bot before answer):
 uv run python scripts/ring.py --agent live --inline --transport livekit --base-url https://<host>
+```
+
+Ring options for the 0.2.0 sheet (each is sent only to a device that registered the
+matching push feature, and `ring.py` prints what it did):
+
+```bash
+uv run python scripts/ring.py --agent live --ring-timeout 15 --base-url https://<host>      # ring for 15 s (minimum 10)
+uv run python scripts/ring.py --agent live --preconnect credentials --base-url https://<host>
+uv run python scripts/ring.py --agent tone --inline --preconnect media --transport livekit --base-url https://<host>
+uv run python scripts/ring.py --agent live --cancel-after 8 --base-url https://<host>       # ring, wait 8 s, withdraw
+uv run python scripts/ring.py --agent live --cancel <call_id> --base-url https://<host>
 ```
 
 `ring.py` prints the call id and either `Rang as: <name>` or `No caller name: this
@@ -116,24 +137,46 @@ in-process and have no room key.
 
 ### Pulling the call trace (Debug builds)
 
-While the in-call screen is presented, the Debug build appends one line per change
-(`state=... muted=... audioActivated=... selected=... activeRoute=[...] devices=[...]`,
-polled every 250 ms) to `Documents/conduit-call-trace.log` in the app container
-(`Conduit/Debug/CallTrace.swift`, written from `InCallView`). Constraints:
+The Debug build appends timestamped lines (ISO 8601, fractional seconds) to
+`Documents/conduit-call-trace.log` in the app container
+(`Conduit/Debug/CallTrace.swift`, `CallTraceObserver.swift`). It starts at **launch**,
+including the cold launch a VoIP push causes, and is **not truncated per call**:
 
-- **The file is truncated at the start of every call** (and again each time the
-  in-call screen is re-presented after being minimized). Pull it right after each
-  key call, before the next one.
-- A call answered from the lock screen only starts tracing once the in-call screen
-  is presented.
+- `launch: daily ring-join <Off|D1|D2|D3>`, then `transport made: <kind>
+  canConnectWhileRinging=<bool>` (and `daily transport made: ring-join ...`) each time
+  a transport is built.
+- The call host's view: `ring: call=... known=... preconnect=... inline=...
+  transport=...`, `state: <old> -> <new>`, `ring preparation: <old> -> <new>` (every
+  phase, so fast ones are not lost), `cue: ...`, `record: ...` (outcome, failure
+  and missed reason, duration), `voip token: invalidated`.
+- The engine's observable state: `hold: on|off`, `audio activated: true|false` (as the
+  engine counts it; an activation it ignores, such as one during an unanswered ring,
+  does not show), `interruption: began|ended`, `muted: true|false`.
+- Every log event of the engine package, prefixed `engine <category> <level>:`
+  (including CallKit's raw audio activations), which still also reach Console.
+- While the in-call screen is up, one `screen: state=... muted=... onHold=...
+  audioActivated=... selected=... activeRoute=[...] devices=[...]` line per change
+  (polled every 250 ms), and `in-call screen shown`.
+- Cue Lab presses and session snapshots, and `debug setting: daily ring-join -> ...`.
+
+Constraints:
+
+- **The file is kept across launches** and moved to
+  `conduit-call-trace.previous.log` at the next launch once it passes about 2 MB, so
+  pull **both** files when a row's lines may be in the older one. Because rows run
+  into each other, **write down the wall-clock time you start each row**, and pull
+  the file right after the key rows.
+- Nothing is written until the live environment starts, so the trace exists only in
+  Debug builds.
 
 ```bash
 BUNDLE_ID=$(awk -F'= *' '/^APP_BUNDLE_IDENTIFIER/{print $2}' Config/local.xcconfig)
-RUN=/tmp/conduit-verify/before        # or /after
+RUN=/tmp/conduit-verify/before        # or /after, or /v020
 xcrun devicectl device copy from --device "<device name or UDID>" \
   --domain-type appDataContainer --domain-identifier "$BUNDLE_ID" \
   --source Documents/conduit-call-trace.log \
   --destination "$RUN/trace-<row>-<transport>.log"
+# and, if it exists, Documents/conduit-call-trace.previous.log the same way
 ```
 
 `xcrun devicectl list devices` shows the device name and UDID. The same `TRACE`
@@ -214,6 +257,175 @@ Leave Before as `n/a`. These cover behavior fixed or added by the change.
 | N5 | Hang up while "Retrying connection" | Start a call, airplane mode on, wait until you hear "Retrying connection", end the call (in-app, then repeat from the lock screen). Turn airplane mode off, wait 30 s. Pull the trace. | Call stays ended: no further spoken cues, no mic indicator, no call comes back; one Recents row; no new `dispatch.accepted` or `teardown.first_human` for it after you turn the network back on. | n/a | |
 | N6 | Hang up in the first second | Call a pairing agent (Daily, then LiveKit) and tap End within a second of tapping Call. Repeat 3 times. | Engine log shows no `teardown.first_human` or `teardown.human_joined` for that room after the hang-up (no zombie join); no mic indicator at any point. TODO(verify): `dispatch.accepted` may still appear because pairing dispatches the bot before the app joins; the proof is the absence of a join line, and the bot lingers until the pipeline idle timeout. | n/a | |
 
+## Run sheet: engine 0.2.0 (pending, not yet run)
+
+**Status.** Everything this sheet covers (call hold, pre-connect while ringing, ring
+timeouts and cancel pushes, call-control signals, engine-driven spoken cues, the
+join deadline and "Agent didn't join", the explicit microphone request, the Cue Lab,
+the Daily ring-join switch, the rebuilt SmallWebRTC adapter, and the SDK bumps to
+Pipecat 1.3.0, Daily 0.41.0 and LiveKit 2.19.0) is built and unit-tested; **device
+verification pending**. It is built from the package's own device checklist
+(`ConduitCallEngine/Docs/IntegrationGuide.md`, section 13) plus the app-level checks
+the commits since the November run imply. The November record under Results is the
+baseline: **a row that passed there and fails here is a regression**; a row that is
+new has no baseline.
+
+How to use it:
+
+- One **Result** column, left empty: `P`, `F` + a one-line note, `-` (not run) or
+  `n/a`. Rows marked *record* have no pass/fail; write down what happened.
+- Same environment rules as the main sheet (one phone, one iOS version, one backend
+  deployment, Debug build), plus the setup below. Record the build SHA, the package
+  version resolved in `Package.resolved`, and the backend commit in the results block.
+- Ids are new so they do not collide with the main sheet's: **K** build and
+  permissions, **H** hold, **R** missed rings, timeouts and cancels, **P** pre-connect,
+  **T** the tone agent (audio-leak checks), **DJ** the Daily ring-join experiment,
+  **C** cues and the Cue Lab, **G** the join deadline, **X** regression calls on the
+  new SDKs.
+- Pull the call trace (see above) after the key rows; for the rows that are about
+  what is audible, the trace shows what the app did, and you are the microphone.
+
+### Setup for this sheet
+
+| Piece | Notes |
+|---|---|
+| Backend | The reference engine from the commit under test, on pipecat-ai 1.4.0, with the `APNS_*` vars, Daily and LiveKit keys and the registry on a volume. It has the `tone` agent, the ring tracker and the cancel endpoint. |
+| `tone` agent | An app agent on **LiveKit** pointing at `https://<host>/connect/tone`, and one on **Daily** pointing at the same URL, both with "Let this agent call me" on and the registration endpoint `https://<host>/inbound/register/tone`. The registry is keyed by engine agent id and the latest registration wins, so register **one at a time**: re-save the agent you want to ring (this re-registers) before each T and DJ row, and use `--transport` to match it. The tone is 440 Hz from the moment a human joins the room; it ignores client-ready, `call-answered` and hold, which is what makes it a leak detector. |
+| Second phone | Another phone that can call the test phone's number (H rows). |
+| AirPods or a car | For route checks (X rows, C rows). |
+| Registrations | The Daily and LiveKit agents of the main sheet, inbound on, registered by this build (so the engine stores `push_features`). A registration made by the November build has none, and the engine then sends no `ring_timeout`, `preconnect` or cancel push to it: that is itself a check (R1). |
+| Console | Attached to the phone, filtered to the app. The Debug build also routes the engine's log into the trace. |
+
+### K. Build, permissions, SDKs
+
+| # | Check | Steps | Pass when | Result |
+|---|---|---|---|---|
+| K1 | Bundle check on the new SDKs | `scripts/check-bundle.sh <path to the built Conduit.app>`; `ls "$APP/Frameworks"`. | The script passes; no stasel `WebRTC.framework`; no second un-prefixed WebRTC next to Daily's (this is the Pipecat 1.3.0 / Daily 0.41.0 / LiveKit 2.19.0 bundle). | |
+| K2 | Install over the November build | Install this build over the November one without deleting the app (as M1). Launch. | Agents, keys, Recents history, linked contacts and inbound toggles are intact; old Recents rows read as before. | |
+| K3 | Microphone prompt, first call | On an install where the microphone is undecided (delete the app, or reset in Settings), tap Call on an agent. | The system prompt appears **before** a call is placed; Allow places the call and the agent hears you. | |
+| K4 | Microphone denied | With access denied (Settings, Apps, Conduit, Microphone off), tap Call. | No CallKit call appears; an alert "Microphone Access Needed" explains and its Settings button opens Settings; turning it on and calling again works. | |
+| K5 | Microphone and the inbound toggle | On an undecided install, Edit an agent and turn on "Let this agent call me". Then repeat on a denied install, and once via an `--inbound` pairing QR (L1). | Turning it on prompts; after Deny a note under the toggle reads "Microphone access is off, so this agent won't hear you when it calls." and saving still works; the QR's prefilled sheet prompts when it appears. | |
+| K6 | First inbound call, microphone decided | With the microphone allowed, kill the app, lock the phone, ring and answer. | Two-way audio from the lock screen; the agent hears you. | |
+| K7 | Release-like build | Install a Release build (TestFlight or a local Release install) and ring it through production APNs. | Settings has no Debug section; no `conduit-call-trace.log` is written; the ring arrives and the call connects. | |
+| K8 | Registration carries features | Save an inbound agent; read the engine log. | `inbound.registered` appears; then `ring.py --ring-timeout 15 --preconnect media` produces no `ring.preconnect_unsupported` or `ring.ring_timeout_unsupported` in the engine log (those appear only for a registration without the features). | |
+
+### H. Hold
+
+Run each on Daily, LiveKit and SmallWebRTC unless the row says otherwise; the
+SmallWebRTC agent cannot be silenced by the app, so record what you hear there.
+
+| # | Check | Steps | Pass when | Result |
+|---|---|---|---|---|
+| H1 | Hold for a phone call | On a connected call, have the second phone call the test phone; choose Hold & Accept. Talk on the phone call. End it; resume the Conduit call if iOS does not. | The Conduit call is held, not ended: the call screen reads "On Hold", the agent goes quiet, the trace has `hold: on`, the engine log has `bot.call_held`. After resume, two-way audio returns within about a second, `hold: off`, `bot.call_resumed` once. Console: LiveKit `LiveKit detach: audio engine unavailable` then `LiveKit attach: audio engine available`; Daily `Daily agent audio -> unsubscribed (playout stopped)` then `-> subscribed (playout restored)`. *Record* whether iOS resumes the call by itself when the phone call ends. | |
+| H2 | Daily silence while held | On a Daily call to the `tone` agent (ring or call it so the tone plays), hold the call with a phone call. | Nothing of the tone is heard on the phone call or from the device while held; it is back after the resume. *Record* the same on LiveKit; on SmallWebRTC the tone is expected to keep playing (the app cannot stop its playout): record. | |
+| H3 | Phone call placed during a call | From the Phone app, place a call during an engine call. | The engine call is held and comes back when the phone call ends and the call is resumed. | |
+| H4 | The in-app Hold control | On a connected call tap Hold on the call screen, then Resume. Repeat from the native call screen, and while the call is still connecting and while it is ringing back. | The pause button fills and reads "Resume" while held; the status reads "On Hold"; the native call UI agrees; the agent receives `call-held` then `call-resumed`. The control is disabled while dialing and when no call is up, and enabled once the call is connecting, connected or reconnecting. | |
+| H5 | A long hold | Stay on hold for more than a minute. In a second attempt turn airplane mode on for about 20 seconds during the hold, then off, then resume. | The call survives both; after the airplane-mode hold, resume reconnects and audio returns; the agent stayed in the room (no `teardown.end_now`, no `grace_expired`). | |
+| H6 | Hold before the agent is ready | Place a call and hold it within a second or two, before the agent greets. Stay held 40 seconds, then resume. On Daily the agent cannot get ready while held. | The call connects and the agent greets **after** the resume; it does not fail as "Agent didn't join". | |
+| H7 | The signals reach the agent | After H1, read the engine log and the trace. With the network degraded at the moment of the resume, repeat once. | `bot.call_resumed` appears once, after the device's audio is back (Daily: after `Daily agent audio is subscribed` in Console). With a bad network, Console may show `did not leave the device; sending the call's state again`, followed within a few seconds by the signal. *Record* on SmallWebRTC whether the signals appear at all. | |
+| H8 | Car or Bluetooth head unit | If you have one: place, take and end calls, and hold, from the head unit. | Calls place and end; a phone call taken in the car holds the engine call. *Record.* | |
+
+### R. Missed rings, timeouts and cancels
+
+| # | Check | Steps | Pass when | Result |
+|---|---|---|---|---|
+| R1 | Ring times out | App killed, locked. `ring.py --agent <id> --ring-timeout 15`, do not answer. Then ring with no `--ring-timeout` and time it. Then ring a registration made by the November build (no `push_features`). | The first ring stops after about 15 seconds: Recents has a red **Missed** row (no qualifier), a quiet notification arrives, the Phone app's Recents lists the call as missed, the engine logs `status=unanswered`. The second rings for the app's own 60 seconds. For the November registration `ring.py` sends no `ring_timeout` (the engine logs `ring.ring_timeout_unsupported`) and the ring lasts 60 seconds. | |
+| R2 | The sender cancels a ring | `ring.py --agent <id> --cancel-after 8` with the phone locked (pairing mode), then `--cancel <call_id>` against a second ring. | The ring stops at the cancel; **Missed** row, quiet notification, `ring.canceled` in the engine log, `status=canceled`; the app keeps running and the next ring arrives normally. | |
+| R3 | A cancel after the answer | Ring, answer, then `ring.py --agent <id> --cancel <call_id>`. | The engine refuses with 409 (`ring ended` after the receipt, `ring answered` if its ring bot saw the answer first); the call continues and the agent is not ended. | |
+| R4 | Busy and Focus labels | Ring during a call (I5), and ring with a Focus on (I6). | Recents reads **Missed — on another call** and **Missed — Focus**; the notification text names the reason; `status=busy` / `suppressed_by_focus`. *Record* if Focus still does not filter on this iOS version. | |
+| R5 | Declined and unknown rings | Decline a ring (I3); ring an agent deleted offline (I7, N3). | A declined ring reads **Declined**, not Missed; the unknown agent rings under the pushed name, ends gracefully, and the app is not killed. | |
+
+### P. Pre-connect
+
+Pairing mode unless the row says otherwise. Audio-leak checks use the `tone` agent
+(section T); these rows are about what the app and backend do.
+
+| # | Check | Steps | Pass when | Result |
+|---|---|---|---|---|
+| P1 | `credentials` tier | `ring.py --agent <id> --preconnect credentials` on each transport (SmallWebRTC over the LAN). Answer after about 10 seconds. | The engine logs `dispatch.accepted` for a `/connect` made during the ring, before the answer; the trace shows `ring preparation:` phases and no join; on answer the call joins with those credentials and connects, two-way audio. | |
+| P2 | `media` tier per transport | `ring.py --agent <id> --preconnect media` on LiveKit, Daily and SmallWebRTC. | LiveKit joins during the ring (the engine logs the device joining, `teardown.first_human`); Daily and SmallWebRTC do **not** (the trace shows `canConnectWhileRinging=false` and no join before the answer) and still connect on answer. (Daily with a ring-join strategy chosen: see DJ.) | |
+| P3 | Agent never joins | Ring with an agent whose bot never joins the room (a pipeline that crashes on start, or a bot you kill as soon as it is dispatched) with `--preconnect media`, and answer after 10 seconds. | The call stays connecting with the ringback; about 20 seconds later (30 from the device's join) the backend gets an ordinary answered credential request and the call connects to the agent it returns, or fails as "Agent didn't join". *Record* which. | |
+| P4 | Hang up the instant it starts | LiveKit: decline a pre-connected ring the instant it starts ringing, and separately end an outgoing call the instant after placing it. | The engine log shows the device leaving (with `bot.end_call_signal` if it had joined); the device is never left in the room (no zombie `teardown.human_joined` after the hang-up). | |
+| P5 | The ring ends unanswered | Decline a `media` ring; let another time out (`--ring-timeout 15`); cancel a third (`--cancel`). | Each time the agent gets `end-call` or sees the participant leave within a second; the ring bot ends; no audio and no orange microphone indicator remain on the phone. | |
+| P6 | The agent leaves a ready ring | `ring.py --agent <id> --preconnect media` then `--cancel <call_id>` once the device has joined (in-band cancel: the engine ends the bot, no push). | The ring stops, **Missed** row, `canceled` receipt, no flash of a second incoming call. | |
+| P7 | A long ring, locked | `--preconnect media` with no `--ring-timeout`, phone locked, answer at about 50 seconds. | The device stays in the room the whole ring (no `teardown.human_left` for it), and answering connects. | |
+| P8 | Airplane mode during the ring | Start a `media` ring, turn airplane mode on for the ring, then off, then answer. | The ring keeps ringing; answering connects as without pre-connect. | |
+| P9 | Time to first audio | Answer a `credentials` ring and a `media` ring, and a plain ring, each on LiveKit. | *Record* the seconds from answering to the agent's first audio in each case; pre-connect should not be slower. | |
+| P10 | A failed preparation never ends the ring | Edit the agent's pairing key to a wrong value, ring with `--preconnect credentials`, wait 10 seconds, then answer. Restore the key afterwards. | The ring keeps ringing through the failed preparation; answering fails fast as "Authentication failed" (the answered request is refused too). | |
+| P11 | A ring that was over before the request | Decline a `--preconnect credentials` ring the instant it appears. | The engine logs `connect.ring_over` if the request landed late; no room is made and no bot is dispatched. | |
+
+### T. The tone agent: no audio before the answer
+
+Register the `tone` agent for the transport under test (see Setup). Any tone while
+the phone rings is a leak; after you answer it should be audible at once. Do each
+with the app **killed** and the phone **locked**, and once unlocked with the app open.
+
+| # | Check | Steps | Pass when | Result |
+|---|---|---|---|---|
+| T1 | LiveKit `media` ring | `ring.py --agent tone --inline --preconnect media --transport livekit`. Listen during the ring (phone speaker, then AirPods). | Nothing from the app is audible; the ringtone and vibration are unaffected; no orange microphone indicator; Console and the trace show no audio-session activation by the app before CallKit's `didActivate`; the engine logs the device joining the room. | |
+| T2 | Answer the LiveKit ring | Answer T1's ring. | CallKit activates; the tone is heard within a second; `bot.call_answered` follows the activation; the route is right (AirPods when connected, speaker otherwise) and the in-app route picker works; "Connected" is heard (record whether in full). | |
+| T3 | The tone after the ring ends | Decline a tone ring, let one time out, cancel one. | Silence from the phone; no microphone indicator; the tone bot ends. | |
+| T4 | The tone on Daily and SmallWebRTC | Daily: `ring.py --agent tone --inline --preconnect media --transport daily`. SmallWebRTC (pairing only, over the LAN): `ring.py --agent tone --preconnect media`. | No join before the answer on either (the tier is lowered to `credentials`); no tone while ringing; the tone is heard at once after the answer. *Record* what SmallWebRTC does. | |
+
+### DJ. Daily ring join (experiment)
+
+Settings, Debug, "Daily ring join", is Debug-only and chosen **before** the push (it
+is stored, so the cold launch a VoIP push causes uses it). The trace logs `daily
+transport made: ring-join <choice> (strategy ..., canConnectWhileRinging=...)`. Use
+the `tone` agent registered for Daily and `ring.py --agent tone --inline
+--preconnect media --transport daily`, app killed, phone locked. These are *record*
+rows: the outcome decides whether Daily may ever join during a ring.
+
+| # | Check | Steps | Pass when | Result |
+|---|---|---|---|---|
+| DJ1 | Off (the shipping behaviour) | Choose "Off", ring, listen, answer. | `canConnectWhileRinging=false`; no join and no tone before the answer; connects after the answer. | |
+| DJ2 | D1, default subscriptions | Choose D1, ring, listen during the ring, answer. | *Record*: is any tone audible before the answer (a leak), is the microphone indicator on, does the call connect on answer, and the time to the tone. | |
+| DJ3 | D2, agent audio unsubscribed until the answer | Choose D2; same. | *Record* the same four things. | |
+| DJ4 | D3, agent audio staged until the answer | Choose D3; same. | *Record* the same four things. | |
+| DJ5 | The longest ring that holds | For any strategy that did not leak, ring for about 50 seconds before answering. | *Record* whether the device stays in the room and the call still connects. Set the picker back to "Off" afterwards. | |
+
+### C. Cues and the Cue Lab
+
+The spoken cues were inaudible during Daily calls and in the last retry phase of a
+LiveKit outage on the November run, cause unknown. The announcer's audio mechanism
+has not changed; the Cue Lab (Debug builds, the magnifying-glass waveform button on the call screen)
+exists to find out which playback paths are audible.
+
+| # | Check | Steps | Pass when | Result |
+|---|---|---|---|---|
+| C1 | Cues on LiveKit | Outgoing call; then airplane mode on for 10 seconds and off; then for several minutes in a second call. Hang up while "Retrying connection" plays. | *Record* per cue and phase whether it was audible: ringback while connecting, "Connected" once at the activation, "Disconnected" once per outage, "Retrying connection" every 7 seconds, and the last retry phase. The loop stops with the call (no cue after hang-up). | |
+| C2 | Cues on Daily | The same on a Daily agent. | *Record* the same. (Known inaudible in November.) | |
+| C3 | Cues on SmallWebRTC | The same over the LAN. | *Record* the same. | |
+| C4 | Cue Lab, LiveKit call | On a connected LiveKit call open the Cue Lab. Press 1, 2, 3, 4, 5, 6a, 6b, 7a, 7b one at a time, a few seconds apart, on the phone speaker; repeat on AirPods; flip the two ducking switches and press 7a again; tap "Log session now". | *Record* into the grid under Results which numbers were heard and from which output. The call's audio and microphone are unaffected, and the trace's session snapshots before and after each press show no change of category, mode or activation. | |
+| C5 | Cue Lab, Daily call | The same on a Daily call (7a and 7b are disabled there). | *Record* into the grid. | |
+| C6 | Cue Lab in the last retry phase | On a LiveKit call, airplane mode on until "Retrying connection" goes silent (about a minute), then press the candidates. | *Record* which numbers are heard in the phase where the normal cues were not. | |
+| C7 | Cue Lab, SmallWebRTC call | The same on a SmallWebRTC call. | *Record* into the grid. | |
+
+### G. The join deadline
+
+| # | Check | Steps | Pass when | Result |
+|---|---|---|---|---|
+| G1 | Agent never joins | Call an agent whose bot never joins the room (a pipeline that crashes on start, or a bot you kill as soon as it is dispatched) on LiveKit and Daily. | After about 30 seconds of "Connecting" the call fails: the status reads "Agent didn't join" with the hint to check that the server starts the agent; Recents reads "Failed — agent didn't join"; the CallKit call ends; no call is left behind. | |
+| G2 | A slow agent that does join | Call an agent that takes 10 to 20 seconds to become ready. | The call stays connecting and then connects; it does not fail. | |
+
+### X. Regression calls on the new SDKs
+
+Re-run these rows from the main sheet on this build, on all three transports where
+the row says so, and record the result here. Use the November record as the baseline.
+
+| # | Check | Steps | Pass when | Result |
+|---|---|---|---|---|
+| X1 | Outgoing, cold and warm | O1, O2, O3 (Daily, LiveKit, SmallWebRTC). | As the main sheet; two-way audio, mic indicator, mute in sync. Daily survives 60 seconds of talking. | |
+| X2 | Routing and lock | O4, O5. | In-app picker moves audio on both Daily and LiveKit; the native route button moves it on LiveKit; the lock screen shows the name and a matching timer. | |
+| X3 | Reconnection | O6, O7 on Daily and LiveKit; a SmallWebRTC drop (Wi-Fi off briefly). | O6 and O7 as before; after a long outage "Connected" is not announced while still offline and the call ends as "Failed — connection lost"; SmallWebRTC re-pairs to a fresh bot or ends. | |
+| X4 | Hang-up and wrong key | O8, O9. | Immediate teardown on every hang-up (`teardown.end_now`); one Recents row per call; the wrong key fails as "Authentication failed". | |
+| X5 | Inbound | I1 to I5, I8. | As the main sheet, with the new receipt statuses where they apply. | |
+| X6 | Destructive rows last | I7, I9, then re-add the agent with L1. | As the main sheet. | |
+| X7 | Siri, links, diagnostics | S1, S2, S3, L1, L2. | As the main sheet; Test Connection on LiveKit leaves no agent waiting out its grace window (`teardown.end_now` rather than `grace_expired`). | |
+| X8 | Three transports, one launch | B2. | No crash; two-way audio on each; Daily survives past 60 seconds. | |
+| X9 | SmallWebRTC rebuilt adapter | Call, hang up, call again at once; call and hang up within a second, three times; leave a SmallWebRTC call and call again without waiting. | Each call connects and ends cleanly; the engine logs `teardown.end_now` for each, with no stale session or second bot; no crash. | |
+| X10 | Interruption | O10: Siri, then a cellular call. | Siri pauses the mic and it comes back; a cellular call now holds (H1) rather than ending the call. | |
+
 ## Objective artifacts to save per run
 
 Everything under `/tmp/conduit-verify/<before|after>/` (outside the repo).
@@ -242,6 +454,7 @@ confirm after `xcodegen generate` and a package resolve.
 |---|---|---|
 | Engine log | `engine.log` (and `engine-local.log` for SmallWebRTC) | The `teardown.*`, `inbound.*`, `apns.*` lines cited per row; same sequence both runs |
 | Call trace, per key call | `trace-<row>-<transport>.log` (at least O1 both transports, O3, O4, O6, O10, N5) | State sequence and `audioActivated` / `muted` / `activeRoute` transitions |
+| Call trace, 0.2.0 sheet | `trace-<row>-<transport>.log` plus `conduit-call-trace.previous.log` if present (at least H1, H6, P2, T1, T2, DJ rows, C4 to C7, G1) | `ring preparation:` phases, `hold:`, `audio activated:`, `cue:`, the engine's lines, the Cue Lab snapshots |
 | Frameworks listing | `frameworks.txt` | Identical, no `WebRTC.framework` (B1) |
 | Entitlements | `entitlements.txt` | Identical (`aps-environment`, Siri, etc.) |
 | Info.plist | `info-plist.txt` | Identical except version/build; background modes and usage strings unchanged |
@@ -281,6 +494,41 @@ Notes / surprises:
   Open: spoken cues are inaudible during Daily calls and during the last retry phase of a
       LiveKit outage. Ringback is silent when the phone is in silent mode (system sound).
 ```
+
+The engine 0.2.0 session is not yet recorded. Fill this block (and the grid under it)
+when it runs; until then nothing from the 0.2.0 sheet is verified.
+
+```text
+Run:                 Engine 0.2.0 sheet (pending, not yet run)
+Date:
+Build SHA:
+Engine package:      ConduitCallEngine 0.2.x (resolved version and revision from Package.resolved)
+SDK versions:        Pipecat iOS client      Daily      LiveKit      SmallWebRTC fork revision
+Build config:        Debug
+iOS version:
+Phone model:
+Backend deployment:  (host, engine commit, pipecat-ai version, registry volume yes/no)
+Agents used:         Daily=      LiveKit=      SmallWebRTC=      tone=
+Network:             (Wi-Fi / hotspot / cellular)
+Second phone / AirPods / car:
+Artifacts dir:       /tmp/conduit-verify/v020/
+Notes / surprises:
+```
+
+Cue Lab grid (C4 to C7): write `H` for heard, `-` for not heard, `?` for unclear, per
+candidate and output.
+
+| Candidate | Daily, speaker | Daily, AirPods | LiveKit, speaker | LiveKit, AirPods | LiveKit, last retry phase | SmallWebRTC, speaker |
+|---|---|---|---|---|---|---|
+| 1 Synth (app session) | | | | | | |
+| 2 Synth (own session) | | | | | | |
+| 3 Synth file (AVAudioPlayer) | | | | | | |
+| 4 Synth buffer (AVAudioEngine) | | | | | | |
+| 5 Ring (AVAudioPlayer) | | | | | | |
+| 6a Ring (system sound) | | | | | | |
+| 6b Ring (alert sound) | | | | | | |
+| 7a LiveKit SoundPlayer speech | n/a | n/a | | | | n/a |
+| 7b LiveKit SoundPlayer ring | n/a | n/a | | | | n/a |
 
 ```text
 Run:                 Before / After
