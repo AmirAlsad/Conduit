@@ -102,11 +102,17 @@ final class AgentCallHostHarness {
     /// A real-time `sleep`, for a test that ends a timer with `fireTimer(_:)`; the
     /// default `sleep` runs every timer out at once.
     static let realTimeSleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    /// A `sleep` no timer outlasts by itself: every one ends only through
+    /// `fireTimer(_:)` (or when the engine cancels it).
+    static let parkedSleep: (Duration) async throws -> Void = { _ in try await Task.sleep(for: .seconds(24 * 60 * 60)) }
 
     /// `pairingEndpoint` makes the agent pairing-mode: `token` is then its API key
     /// and every connect attempt goes through `pairing`. The default `sleep` returns
     /// at once (instant reconnect backoff), so the ring timeout and the join deadline
     /// are off unless a test sets them, with a sleep it ends by hand.
+    /// `configuration` replaces the harness's own, e.g. with the app's
+    /// (`AppEnvironment.callEngineConfiguration()`); `ringTimeout` and `joinTimeout`
+    /// then do not apply.
     init(
         token: String? = "valid-token",
         pairingEndpoint: URL? = nil,
@@ -114,6 +120,7 @@ final class AgentCallHostHarness {
         now: @escaping () -> Date = { Date() },
         ringTimeout: Duration? = nil,
         joinTimeout: Duration? = nil,
+        configuration: CallEngineConfiguration? = nil,
         sleep: @escaping (Duration) async throws -> Void = { _ in }
     ) throws {
         container = try ModelContainer(
@@ -160,7 +167,7 @@ final class AgentCallHostHarness {
             delay: { delays.schedule($0, $1) }
         )
         engine = CallEngine.simulated(
-            configuration: CallEngineConfiguration(
+            configuration: configuration ?? CallEngineConfiguration(
                 unknownCallerName: "Agent",
                 ringTimeout: ringTimeout,
                 joinTimeout: joinTimeout

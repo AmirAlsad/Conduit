@@ -230,23 +230,23 @@ struct AgentCallHostTests {
     // MARK: - Spoken cues
 
     @Test func outgoingCallCuesConnectingThenConnected() async throws {
-        let h = try AgentCallHostHarness()
+        let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
         #expect(h.announcer.startedRepeating == [.connecting])
         #expect(h.announcer.repeatingPhrase == .connecting)
 
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         #expect(h.announcer.announced == [.connected])
         #expect(h.announcer.repeatingPhrase == nil)
         #expect(h.announcer.stopRepeatingCount == 1)
     }
 
     @Test func connectedBeforeActivationIsAnnouncedAtTheActivation() async throws {
-        let h = try AgentCallHostHarness()
+        let h = try soundsHarness()
         await h.placeCall()
 
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         guard case .connected = h.engine.state else {
             Issue.record("Expected connected, got \(h.engine.state)")
             return
@@ -739,22 +739,53 @@ struct AgentCallHostTests {
 
     // MARK: - The mic during the connect sounds
 
-    /// A harness whose engine timers wait in real time, so the withhold's bound
-    /// runs out only when a test fires it.
+    /// A harness whose engine has the app's own configuration (the 2.6 s outgoing
+    /// minimum included) and whose timers run out only when a test fires them,
+    /// on a clock that does not move.
     private func soundsHarness(transportKind: TransportKind = .daily, token: String? = "valid-token") throws -> AgentCallHostHarness {
-        try AgentCallHostHarness(token: token, transportKind: transportKind, sleep: AgentCallHostHarness.realTimeSleep)
+        let start = Date()
+        return try AgentCallHostHarness(
+            token: token,
+            transportKind: transportKind,
+            now: { start },
+            configuration: AppEnvironment.callEngineConfiguration(),
+            sleep: AgentCallHostHarness.parkedSleep
+        )
+    }
+
+    /// The agent of a placed call is ready: the call stays connecting for the rest
+    /// of the app's outgoing minimum, which then runs out.
+    private func agentIsReady(_ h: AgentCallHostHarness) async {
+        h.system.deliverTransportEvent(.connected)
+        await h.system.awaitPendingWork()
+        #expect(h.engine.state.isConnecting) // the ringback's first tone is still playing
+        #expect(h.system.fireTimer(.minimumOutgoingConnectingDuration))
+        await h.system.awaitPendingWork()
+        #expect(h.engine.state.isConnected)
     }
 
     @Test func anOutgoingCallKeepsTheMicClosedUntilTheConnectSoundsAreDone() async throws {
         let h = try soundsHarness()
+        #expect(AppEnvironment.callEngineConfiguration().minimumOutgoingConnectingDuration == .milliseconds(2600))
         await h.placeCall()
         await h.system.activateAudioSession()
         await h.system.awaitPendingWork()
         #expect(!h.engine.isMicWithheld) // the ringback needs none: the engine keeps the mic closed
         #expect(!h.transport.micEnabledHistory.contains(true))
 
-        h.system.deliverTransportEvent(.connected)
+        h.system.deliverTransportEvent(.connected) // the agent is ready inside the minimum
         await h.system.awaitPendingWork()
+        #expect(h.engine.state.isConnecting)
+        #expect(h.announcer.repeatingPhrase == .connecting) // the ringback plays on
+        #expect(h.announcer.announced.isEmpty)
+        #expect(!h.engine.isMicWithheld)
+        #expect(!h.transport.micEnabledHistory.contains(true))
+        #expect(h.transport.sentSignals.isEmpty)
+
+        #expect(h.system.fireTimer(.minimumOutgoingConnectingDuration)) // the first tone is done
+        await h.system.awaitPendingWork()
+        #expect(h.engine.state.isConnected)
+        #expect(h.announcer.repeatingPhrase == nil)
         #expect(h.announcer.announced == [.connected])
         #expect(h.engine.isMicWithheld)
         #expect(!h.transport.micEnabledHistory.contains(true))
@@ -772,7 +803,7 @@ struct AgentCallHostTests {
     @Test func aCallThatConnectsBeforeTheActivationKeepsTheMicClosedUntilTheSoundsAreDone() async throws {
         let h = try soundsHarness()
         await h.placeCall()
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         await h.system.activateAudioSession() // "Connected" is announced here
         await h.system.awaitPendingWork()
         #expect(h.announcer.announced == [.connected])
@@ -1016,7 +1047,7 @@ struct AgentCallHostTests {
         #expect(!h.engine.isMicWithheld)
         #expect(!h.transport.isMicEnabled) // still connecting
 
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         h.announcer.finishAnnouncements()
         await h.system.awaitPendingWork()
         #expect(h.transport.isMicEnabled)
@@ -1026,7 +1057,7 @@ struct AgentCallHostTests {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         #expect(h.engine.isMicWithheld)
 
         await h.engine.setOnHold(true)
@@ -1048,9 +1079,10 @@ struct AgentCallHostTests {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected) // "Connected", still playing
+        await agentIsReady(h)
         #expect(h.engine.isMicWithheld)
         h.system.deliverTransportEvent(.disconnected(reason: .networkDropped))
+        #expect(h.system.fireTimer(.reconnectBackoff))
         await h.system.awaitPendingReconnect()
         h.system.deliverTransportEvent(.connected) // back
         await h.system.awaitPendingWork()
@@ -1069,7 +1101,7 @@ struct AgentCallHostTests {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         #expect(h.announcer.unfinishedAnnouncementCount == 1)
 
         await h.engine.endCall()
@@ -1086,7 +1118,7 @@ struct AgentCallHostTests {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         h.announcer.finishAnnouncements()
         await h.system.awaitPendingWork()
         #expect(!h.engine.isMicWithheld)
@@ -1110,7 +1142,7 @@ struct AgentCallHostTests {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         #expect(Array(h.announcer.events.suffix(3)) == [.stopRepeating, .cutOff, .announce(.connected)])
         h.announcer.finishAnnouncements()
         await h.system.awaitPendingWork()
@@ -1132,7 +1164,7 @@ struct AgentCallHostTests {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         await h.system.awaitPendingWork()
         #expect(h.engine.isMicWithheld)
 
@@ -1150,7 +1182,7 @@ struct AgentCallHostTests {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         h.announcer.startAnnouncements()
         h.announcer.expireUnstartedAnnouncements()
         await h.system.awaitPendingWork()
@@ -1166,7 +1198,7 @@ struct AgentCallHostTests {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         await h.system.awaitPendingWork()
         #expect(!h.transport.isMicEnabled)
 

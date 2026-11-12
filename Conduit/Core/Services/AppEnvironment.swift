@@ -85,16 +85,23 @@ final class AppEnvironment {
             missedCallNotifier: MissedCallNotifier(),
             transportFactory: transportFactory
         )
-        self.callEngine = makeCallEngine(CallEngineConfiguration(
-            unknownCallerName: "Agent",
-            // A placed call's ringback plays its start delay and first tone in full
-            // before the call shows connected and "Connected" is spoken. Answered
-            // calls have no ringback and are never held connecting.
-            minimumOutgoingConnectingDuration: Ringback.minimumOutgoingConnectingDuration,
-            isPushToTalkEnabled: isPushToTalkEnabled
-        ))
+        self.callEngine = makeCallEngine(Self.callEngineConfiguration(isPushToTalkEnabled: isPushToTalkEnabled))
         callEngine.delegate = callHost
         callHost.engine = callEngine
+    }
+
+    /// The engine configuration the app ships. A placed call's ringback plays its
+    /// start delay and first tone in full before the call shows connected and
+    /// "Connected" is spoken; answered calls have no ringback and are never held
+    /// connecting. Calls start where iOS puts them (no speaker default).
+    static func callEngineConfiguration(
+        isPushToTalkEnabled: @escaping @MainActor () -> Bool = { false }
+    ) -> CallEngineConfiguration {
+        CallEngineConfiguration(
+            unknownCallerName: "Agent",
+            minimumOutgoingConnectingDuration: Ringback.minimumOutgoingConnectingDuration,
+            isPushToTalkEnabled: isPushToTalkEnabled
+        )
     }
 
     /// Asks for the microphone first (prompting on an undecided install), and places
