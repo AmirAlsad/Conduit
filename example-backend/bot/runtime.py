@@ -14,6 +14,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
+from pipecat.frames.frames import ClientConnectedFrame
 from pipecat.workers.runner import WorkerRunner
 
 from app.config import settings
@@ -120,6 +121,18 @@ def _wire_presence(
             # The Conduit LiveKit adapter sends no RTVI client-ready (and it couldn't
             # reach RTVI anyway, see below), so the first join stands in for it.
             if await call.human_joined():
+                await call.client_ready()
+
+        # A human already in the room when the bot connects (the phone can beat a
+        # starting bot into the room) fires only this event: no
+        # on_participant_connected and no ClientConnectedFrame. For a later join it
+        # fires after on_participant_connected, whose handler has already counted
+        # the join, so this one does nothing.
+        @transport.event_handler("on_first_participant_joined")
+        async def _on_first(transport, participant_id):  # noqa: ANN001
+            controller.human_joined(participant_id)
+            if await call.human_joined():
+                await transport.input().push_frame(ClientConnectedFrame())
                 await call.client_ready()
 
         @transport.event_handler("on_participant_left")

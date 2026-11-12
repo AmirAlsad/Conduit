@@ -343,3 +343,52 @@ async def test_audio_gate_in_a_running_pipeline():
         expected_down_frames=[TextFrame],
     )
     assert [type(f) for f in down] == [TextFrame]
+
+
+class FakeLiveKitTransport(FakeEvents):
+    def __init__(self):
+        super().__init__()
+        self.pushed = []
+        outer = self
+
+        class Input:
+            async def push_frame(self, frame):
+                outer.pushed.append(frame)
+
+        self._input = Input()
+
+    def input(self):
+        return self._input
+
+
+async def test_livekit_human_already_in_the_room_counts_as_the_first_join():
+    # The phone beat the starting bot into the room: only on_first_participant_joined fires.
+    from pipecat.frames.frames import ClientConnectedFrame
+
+    call, teardown, _, greet, _ = _make()
+    t = FakeLiveKitTransport()
+    _wire_presence(t, "livekit", teardown, call, _log)
+    await t.handlers["on_first_participant_joined"](t, "user-1")
+    assert greet.count == 1
+    assert [type(f) for f in t.pushed] == [ClientConnectedFrame]  # starts the tone agent too
+    # Its later leave still starts the grace timer (the join was counted).
+    teardown.human_left("user-1")
+    assert teardown._timer is not None
+    teardown._cancel_timer()
+
+
+async def test_livekit_late_join_fires_both_events_but_greets_once():
+    call, teardown, _, greet, _ = _make()
+    t = FakeLiveKitTransport()
+    _wire_presence(t, "livekit", teardown, call, _log)
+    await t.handlers["on_participant_connected"](t, "user-1")
+    await t.handlers["on_first_participant_joined"](t, "user-1")
+    assert greet.count == 1
+    assert t.pushed == []  # Pipecat already pushed its own ClientConnectedFrame
+
+
+async def test_client_ready_answers_a_ring_bot_that_does_not_await():
+    call, _, _, greet, _ = _make(deadline=60)
+    await call.client_ready()
+    assert call.answered
+    assert greet.count == 1

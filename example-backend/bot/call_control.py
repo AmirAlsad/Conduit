@@ -112,6 +112,8 @@ class CallControl:
         """The client can hear the bot: RTVI client-ready (Daily, SmallWebRTC), or
         the first human join on LiveKit, whose app sends no client-ready."""
         if not self._awaiting:
+            # Without await-answer the app connects only after the answer.
+            await self.answer("ready")
             # As before: every client-ready greets.
             await self._run_greet()
             return
