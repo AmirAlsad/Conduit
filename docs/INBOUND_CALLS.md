@@ -404,7 +404,7 @@ same envelope:
 |---|---|
 | `call-connected` | The user is on the line: on every call (placed by the user, or a ring answered, prepared or not), once the call is connected, iOS has activated its audio, it is not held, and the app's own "Connected" has finished; sent again after every reconnect |
 | `call-held` | The call went on hold: the user took or placed a cellular call, or pressed Hold in the app. Any call, incoming or outgoing; sent as soon as the app is in the room, also while the call still shows connecting (so it can come before `call-connected`); sent again after every reconnect of a held call |
-| `call-resumed` | The call came back from hold |
+| `call-resumed` | The call came back from hold and iOS has given it its audio again: the user can hear and speak. Usually a moment after the resume, seconds later when iOS has to be asked again for the audio |
 
 **When your agent should start speaking: on `call-connected`, not when the
 session connects.** The app lists the messages it sends as `call_signals` in every
