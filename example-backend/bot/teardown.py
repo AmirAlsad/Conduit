@@ -13,6 +13,8 @@ Policy:
 - A real hangup and a dropped connection look identical at the transport layer.
   An explicit end signal (RTVI ``end-call`` message, or ``/admin/disconnect``)
   ends the call at once and reserves the grace window for genuine drops.
+- While the call is on hold (``call-held``), a human leaving gets the longer
+  held grace window: a cellular call can take the data path with it.
 """
 
 from __future__ import annotations
@@ -26,9 +28,11 @@ class TeardownController:
     """Tracks human presence and tears the worker down on a real end or after the
     grace window elapses with the room empty of humans."""
 
-    def __init__(self, worker, grace_secs: float, log):
+    def __init__(self, worker, grace_secs: float, log, *, held_grace_secs: float | None = None):
         self._worker = worker
         self._grace = grace_secs
+        self._held_grace = grace_secs if held_grace_secs is None else held_grace_secs
+        self._held = False
         self._log = log
         self._humans: set[str] = set()
         self._timer: asyncio.Task | None = None
@@ -54,6 +58,10 @@ class TeardownController:
         if not self._humans and not self._ended:
             self._start_timer()
 
+    def set_held(self, held: bool) -> None:
+        """Held calls get the held grace window; applies to the next human leave."""
+        self._held = held
+
     # --- explicit end (real hangup / admin) ---
 
     async def end_now(self, reason: str) -> None:
@@ -68,8 +76,9 @@ class TeardownController:
 
     def _start_timer(self) -> None:
         self._cancel_timer()
-        event(self._log, "teardown.grace_started", grace_secs=self._grace)
-        self._timer = asyncio.create_task(self._expire())
+        grace = self._held_grace if self._held else self._grace
+        event(self._log, "teardown.grace_started", grace_secs=grace, held=self._held)
+        self._timer = asyncio.create_task(self._expire(grace))
 
     def _cancel_timer(self) -> None:
         if self._timer and not self._timer.done():
@@ -77,9 +86,9 @@ class TeardownController:
             event(self._log, "teardown.grace_cancelled")
         self._timer = None
 
-    async def _expire(self) -> None:
+    async def _expire(self, grace: float) -> None:
         try:
-            await asyncio.sleep(self._grace)
+            await asyncio.sleep(grace)
         except asyncio.CancelledError:
             return
         if self._humans or self._ended:

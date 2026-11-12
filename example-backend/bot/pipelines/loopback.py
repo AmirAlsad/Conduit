@@ -34,6 +34,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from app.config import settings
 from bot.buildresult import BotBuild
+from bot.call_control import AudioGate
 
 
 def _rms(pcm16: bytes) -> float:
@@ -105,7 +106,9 @@ class AudioEcho(FrameProcessor):
 
 
 def build(transport) -> BotBuild:
-    processors = [transport.input()]
+    # Echo is the only audio this bot makes, so one gate on the way in silences it.
+    gate = AudioGate()
+    processors = [transport.input(), gate]
 
     if settings.loopback_bot_speaking:
         processors.append(SyntheticBotSpeaking(threshold=settings.loopback_rms_threshold))
@@ -118,4 +121,4 @@ def build(transport) -> BotBuild:
         params=PipelineParams(enable_metrics=True),
         idle_timeout_secs=settings.pipeline_idle_timeout_secs,
     )
-    return BotBuild(worker=worker, on_ready=None)
+    return BotBuild(worker=worker, on_ready=None, gates=(gate,))

@@ -1,20 +1,25 @@
 """The launch-agnostic bot core.
 
 ``run_bot`` takes a built transport, an agent id, and the transport type, then:
-builds the pipeline, greets on RTVI client-ready, honors an explicit end-call
-signal, applies the grace-window teardown policy, and runs the worker. It does
-not know or care whether a pairing call, a webhook, or a dev script launched it.
+builds the pipeline, greets when the client is ready, honors the explicit
+end-call signal and the call-control signals (bot/call_control.py), applies the
+grace-window teardown policy, and runs the worker. It does not know or care
+whether a pairing call, a webhook, a ring, or a dev script launched it; a ring
+only adds the await-answer mode and the ring deadline.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import AsyncIterator
 
 from pipecat.workers.runner import WorkerRunner
 
 from app.config import settings
 from app.obs import event, get_logger
-from bot.pipelines import live, loopback
+from bot.call_control import CallControl
+from bot.pipelines import live, loopback, tone
 from bot.teardown import TeardownController
 
 # Agent registry (bot side): id -> pipeline builder. The dispatcher keeps the
@@ -22,7 +27,10 @@ from bot.teardown import TeardownController
 _BUILDERS = {
     "loopback": loopback.build,
     "live": live.build,
+    "tone": tone.build,
 }
+
+END_CALL = "end-call"
 
 
 def _daily_pid(participant: dict) -> str:
@@ -44,9 +52,52 @@ def _client_id(client) -> str:
     return str(id(client))
 
 
-def _wire_presence(transport, transport_type: str, controller: TeardownController, log) -> None:
+async def _client_signal(
+    signal: str | None, controller: TeardownController, call: CallControl, log, via: str
+) -> None:
+    """Apply one client-message ``t`` from the app: end-call or a call-control signal."""
+    if signal == END_CALL:
+        # Explicit end signal disambiguates a real hangup from a dropped
+        # connection (design §2.5). Reserves the grace window for genuine drops.
+        event(log, "bot.end_call_signal", via=via)
+        await controller.end_now("client-end-call")
+    elif signal is not None and await call.handle(signal):
+        event(log, "bot.call_signal", signal=signal, via=via)
+
+
+def _livekit_client_signal(data) -> str | None:
+    """The ``t`` of an RTVI client-message envelope in a raw LiveKit data packet."""
+    try:
+        msg = json.loads(data)
+    except (ValueError, TypeError):
+        return None
+    if (
+        isinstance(msg, dict)
+        and msg.get("label") == "rtvi-ai"
+        and msg.get("type") == "client-message"
+        and isinstance(msg.get("data"), dict)
+    ):
+        return msg["data"].get("t")
+    return None
+
+
+def _wire_rtvi(rtvi, controller: TeardownController, call: CallControl, agent_id: str, log) -> None:
+    @rtvi.event_handler("on_client_ready")
+    async def _on_client_ready(rtvi):  # noqa: ANN001
+        # set_bot_ready() is called automatically by the framework.
+        event(log, "bot.client_ready", agent=agent_id)
+        await call.client_ready()
+
+    @rtvi.event_handler("on_client_message")
+    async def _on_client_message(rtvi, message):  # noqa: ANN001
+        await _client_signal(getattr(message, "type", None), controller, call, log, "rtvi")
+
+
+def _wire_presence(
+    transport, transport_type: str, controller: TeardownController, call: CallControl, log
+) -> None:
     """Funnel transport-specific join/leave (and, where the RTVI input path can't
-    carry it, end-call) events into the neutral controller.
+    carry them, client messages) events into the neutral controller.
 
     The events differ by transport (the seam), but the policy is identical.
     """
@@ -55,6 +106,7 @@ def _wire_presence(transport, transport_type: str, controller: TeardownControlle
         @transport.event_handler("on_participant_joined")
         async def _on_join(transport, participant):  # noqa: ANN001
             controller.human_joined(_daily_pid(participant))
+            await call.human_joined()
 
         @transport.event_handler("on_participant_left")
         async def _on_left(transport, participant, reason):  # noqa: ANN001
@@ -65,6 +117,10 @@ def _wire_presence(transport, transport_type: str, controller: TeardownControlle
         @transport.event_handler("on_participant_connected")
         async def _on_conn(transport, participant_id):  # noqa: ANN001
             controller.human_joined(participant_id)
+            # The Conduit LiveKit adapter sends no RTVI client-ready (and it couldn't
+            # reach RTVI anyway, see below), so the first join stands in for it.
+            if await call.human_joined():
+                await call.client_ready()
 
         @transport.event_handler("on_participant_left")
         async def _on_left(transport, participant_id, reason):  # noqa: ANN001
@@ -72,21 +128,11 @@ def _wire_presence(transport, transport_type: str, controller: TeardownControlle
 
         # Pipecat's LiveKit input path re-wraps incoming data-channel messages as
         # OUTPUT frames, so client RTVI messages never reach the RTVI processor —
-        # parse the explicit end-call signal from the raw data event instead.
+        # parse end-call and the call-control signals from the raw data event.
         @transport.event_handler("on_data_received")
         async def _on_data(transport, data, participant_id):  # noqa: ANN001
-            try:
-                msg = json.loads(data)
-            except (ValueError, TypeError):
-                return
-            if (
-                isinstance(msg, dict)
-                and msg.get("label") == "rtvi-ai"
-                and msg.get("type") == "client-message"
-                and (msg.get("data") or {}).get("t") == "end-call"
-            ):
-                event(log, "bot.end_call_signal", via="livekit-data")
-                await controller.end_now("client-end-call")
+            signal = _livekit_client_signal(data)
+            await _client_signal(signal, controller, call, log, "livekit-data")
 
     else:  # smallwebrtc / webrtc dev runner: client-level events are the signal
         @transport.event_handler("on_client_connected")
@@ -109,7 +155,13 @@ async def run_bot(
     *,
     handle_sigint: bool = True,
     handle_sigterm: bool = True,
+    await_answer: bool = False,
+    ring_deadline_secs: float | None = None,
+    control: AsyncIterator[str] | None = None,
 ) -> None:
+    """``await_answer`` / ``ring_deadline_secs``: see bot/call_control.py.
+    ``control``: lines from the dispatcher (a ring bot's stdin); "answered" is the
+    ring's answered receipt."""
     log = get_logger("bot")
 
     build_fn = _BUILDERS.get(agent_id)
@@ -118,39 +170,60 @@ async def run_bot(
 
     bot_build = build_fn(transport)
     worker = bot_build.worker
-    controller = TeardownController(worker, settings.human_absent_grace_secs, log)
+    controller = TeardownController(
+        worker,
+        settings.human_absent_grace_secs,
+        log,
+        held_grace_secs=settings.held_grace_secs,
+    )
+    call = CallControl(
+        teardown=controller,
+        greet=bot_build.on_ready,
+        gates=bot_build.gates,
+        await_answer=await_answer,
+        ring_deadline_secs=ring_deadline_secs,
+        log=log,
+    )
 
     # worker.rtvi is a property that *raises* (not AttributeError) when RTVI is
-    # disabled, so getattr's default wouldn't catch it — guard explicitly. Both
+    # disabled, so getattr's default wouldn't catch it — guard explicitly. The
     # shipped pipelines enable RTVI; this keeps a future no-RTVI pipeline from crashing.
     try:
         rtvi = worker.rtvi
     except Exception:
         rtvi = None
     if rtvi is not None:
+        _wire_rtvi(rtvi, controller, call, agent_id, log)
 
-        @rtvi.event_handler("on_client_ready")
-        async def _on_client_ready(rtvi):  # noqa: ANN001
-            # set_bot_ready() is called automatically by the framework.
-            event(log, "bot.client_ready", agent=agent_id)
-            if bot_build.on_ready is not None:
-                await bot_build.on_ready()
+    _wire_presence(transport, transport_type, controller, call, log)
 
-        @rtvi.event_handler("on_client_message")
-        async def _on_client_message(rtvi, message):  # noqa: ANN001
-            # Explicit end signal disambiguates a real hangup from a dropped
-            # connection (design §2.5). Reserves the grace window for genuine drops.
-            if getattr(message, "type", None) == "end-call":
-                event(log, "bot.end_call_signal")
-                await controller.end_now("client-end-call")
-
-    _wire_presence(transport, transport_type, controller, log)
-
-    event(log, "bot.starting", agent=agent_id, transport=transport_type)
+    event(
+        log,
+        "bot.starting",
+        agent=agent_id,
+        transport=transport_type,
+        await_answer=await_answer,
+        ring_deadline=ring_deadline_secs,
+    )
+    call.start()
+    control_task = asyncio.create_task(_read_control(control, call, log)) if control else None
     # Subprocess bots take handle_sigterm so the dispatcher's /admin/disconnect
     # (SIGTERM) tears down gracefully. In-process bots (smallwebrtc) must pass
     # False for both — installing handlers there would clobber uvicorn's own.
     runner = WorkerRunner(handle_sigint=handle_sigint, handle_sigterm=handle_sigterm)
-    await runner.add_workers(worker)
-    await runner.run()
+    try:
+        await runner.add_workers(worker)
+        await runner.run()
+    finally:
+        call.stop()
+        if control_task is not None:
+            control_task.cancel()
     event(log, "bot.finished", agent=agent_id, transport=transport_type)
+
+
+async def _read_control(lines: AsyncIterator[str], call: CallControl, log) -> None:
+    async for line in lines:
+        if line == "answered":
+            await call.answer("receipt")
+        else:
+            event(log, "bot.control_ignored", line=line)

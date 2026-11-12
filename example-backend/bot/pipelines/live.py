@@ -2,9 +2,10 @@
 
 à la carte ``input -> STT -> context -> LLM -> TTS -> output`` with RTVI on
 (PipelineWorker default). Reference stack: Deepgram STT · Groq LLM · Cartesia TTS
-— each a one-line swap (design §2.3). Greets on RTVI client-ready so there is
-immediate downlink audio the moment the session activates. Barge-in is on by
-default via VAD.
+— each a one-line swap (design §2.3). Greets when the client is ready (RTVI
+client-ready; the first human join on LiveKit) so there is immediate downlink
+audio the moment the session activates — or, for a ring dispatched with
+``--await-answer``, once the user answers. Barge-in is on by default via VAD.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from pipecat.services.groq.llm import GroqLLMService
 
 from app.config import MissingSettingError, settings
 from bot.buildresult import BotBuild
+from bot.call_control import AudioGate
 
 # Which setting each TTS provider needs (mirrored in app/agents.py for pre-validation).
 TTS_KEY = {
@@ -98,13 +100,19 @@ def build(transport) -> BotBuild:
         ),
     )
 
+    # Closed while a ring awaits its answer and while on hold: no caller audio
+    # reaches STT (so no turns), and no bot audio reaches the room.
+    gate_in, gate_out = AudioGate(), AudioGate()
+
     pipeline = Pipeline(
         [
             transport.input(),
+            gate_in,
             stt,
             user_aggregator,
             llm,
             tts,
+            gate_out,
             transport.output(),
             assistant_aggregator,
         ]
@@ -124,4 +132,4 @@ def build(transport) -> BotBuild:
         )
         await worker.queue_frames([LLMRunFrame()])
 
-    return BotBuild(worker=worker, on_ready=on_ready)
+    return BotBuild(worker=worker, on_ready=on_ready, gates=(gate_in, gate_out))

@@ -96,6 +96,18 @@ class Settings(BaseSettings):
     # grace timer + the explicit end-call signal, not this.
     pipeline_idle_timeout_secs: float = 1800.0
 
+    # Grace window used instead of human_absent_grace_secs when the human leaves
+    # while the call is on hold (a cellular call can take the data path with it,
+    # and a hold lasts longer than a tunnel).
+    held_grace_secs: float = 600.0
+
+    # Ring deadline for bots dispatched for a pre-connected ring (docs/INBOUND_CALLS.md):
+    # a bot that hears no answer within the ring's timeout plus this margin ends.
+    # ring_timeout_secs is the app engine's default ring timeout, assumed when the
+    # ring request doesn't set one; the app clamps a pushed timeout to at least 10 s.
+    ring_timeout_secs: int = 60
+    ring_deadline_margin_secs: float = 15.0
+
     # Token TTLs. Pairing tokens are born per-call (short); direct tokens are pasted
     # into the app once and must outlive many calls (long). Expiry gates only the
     # *initial* connect, never reconnects (design §4).

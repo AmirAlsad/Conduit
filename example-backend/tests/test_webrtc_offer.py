@@ -10,6 +10,7 @@ from app.config import settings
 from app.main import app
 from app.obs import get_logger
 from app.transports.smallwebrtc import SmallWebRTCService
+from bot.call_control import CallControl
 from bot.runtime import _wire_presence
 from tests.test_teardown import FakeEventTransport, FakeWorker
 from bot.teardown import TeardownController
@@ -195,7 +196,8 @@ async def test_client_disconnect_ends_immediately():
     worker = FakeWorker()
     controller = TeardownController(worker, grace_secs=100, log=log)
     transport = FakeEventTransport()
-    _wire_presence(transport, "smallwebrtc", controller, log)
+    call = CallControl(teardown=controller, greet=None, log=log)
+    _wire_presence(transport, "smallwebrtc", controller, call, log)
     controller.human_joined("pc-1")
     await transport.handlers["on_client_disconnected"](transport, object())
     assert worker.cancelled == 1

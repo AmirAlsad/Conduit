@@ -4,10 +4,15 @@ import asyncio
 import json
 
 from app.obs import get_logger
+from bot.call_control import CallControl
 from bot.runtime import _wire_presence
 from bot.teardown import TeardownController
 
 _log = get_logger("test")
+
+
+def _call(controller):
+    return CallControl(teardown=controller, greet=None, log=_log)
 
 
 class FakeWorker:
@@ -83,7 +88,7 @@ async def test_livekit_data_end_call_ends_immediately():
     w = FakeWorker()
     c = TeardownController(w, grace_secs=100, log=_log)
     t = FakeEventTransport()
-    _wire_presence(t, "livekit", c, _log)
+    _wire_presence(t, "livekit", c, _call(c), _log)
     c.human_joined("a")
     await t.handlers["on_data_received"](t, END_CALL_WIRE, "a")
     assert w.cancelled == 1
@@ -93,7 +98,7 @@ async def test_livekit_data_ignores_other_messages():
     w = FakeWorker()
     c = TeardownController(w, grace_secs=100, log=_log)
     t = FakeEventTransport()
-    _wire_presence(t, "livekit", c, _log)
+    _wire_presence(t, "livekit", c, _call(c), _log)
     c.human_joined("a")
     for payload in (
         b"not json",
