@@ -54,7 +54,8 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
   "bundle_id": "<the app's bundle id>",
   "agent_id": "<the agent's UUID in the app>",
   "display_name": "<optional>",          // the caller name the user gave the agent in the app
-  "handle": "<optional>"                 // the CallKit handle the app uses for it
+  "handle": "<optional>",                // the CallKit handle the app uses for it
+  "push_features": ["cancel", "ring_timeout"]   // optional — see below
 }
 ```
 
@@ -64,6 +65,11 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
   your own.
 - The app sends `display_name` cut to at most 120 characters (Unicode code points)
   and a `handle` well under 256; accept at least those lengths.
+- `push_features` lists the optional push features the app's call engine supports
+  (`CallEngine.supportedPushFeatures`): today `ring_timeout` (§2) and `cancel` (§5).
+  Store it with the token and use a feature only with a registration that lists it.
+  Keep names you don't know (later engines add more) and ignore them when ringing.
+  Older builds omit the key: treat that as an empty list, so they get neither.
 
 - The **VoIP token is per-install, app-wide** (not per-agent, not per-transport). The
   same token is registered with every agent the user opted in — each of your servers
@@ -115,7 +121,9 @@ authorization: bearer <APNs JWT signed with your .p8>
 
 All values are strings. `ring_timeout` and `preconnect` need a Conduit build on
 call engine 0.2 or later; older builds ignore them, so a ring that carries them
-still rings exactly as before.
+still rings exactly as before. Send `ring_timeout` only when the registration's
+`push_features` lists `ring_timeout` (§1); otherwise the phone rings for its own
+timeout, so time anything you tie to the ring from that.
 
 **Ring timeout.** The app ends a ring nobody answers after its own timeout
 (60 s by default) and reports `unanswered` (§4). `ring_timeout` shortens one
@@ -209,6 +217,11 @@ One receipt per ring, describing the *ring*: a normal hang-up after an answered 
 sends nothing further. Omit `status_url` and the app sends nothing. Return any 2xx;
 the app never retries.
 
+If you dispatched an agent before the answer (inline credentials, §2), end it when
+the ring's first receipt is anything other than `answered`: nobody is coming. Act on
+the first receipt only, so a stray duplicate can't end an answered call. The
+reference engine does this for every inline ring, pre-connected or not.
+
 **Accept statuses you don't know.** Newer app builds may add statuses; answer them
 with a 2xx like any other (a 4xx only loses the receipt). Treat any status other
 than `answered` as "the ring is over and nobody picked up".
@@ -261,7 +274,8 @@ To withdraw a ring that is still ringing:
   in the room, make your agent leave the room. The app takes the agent leaving a
   ringing call as the cancel, ends the ring and reports `canceled`. No push, so
   nothing flashes.
-- **Cancel push.** Otherwise send a second VoIP push:
+- **Cancel push.** Otherwise, and only if the registration's `push_features`
+  lists `cancel` (§1), send a second VoIP push:
 
   ```
   { "action": "cancel", "call_id": "<the ring's call_id>", "display_name": "<optional>" }
@@ -274,6 +288,10 @@ To withdraw a ring that is still ringing:
   of that flash, prefer the in-band cancel, and only push a cancel for a ring that
   has not ended yet. `action` absent or `"ring"` is a normal ring; any other value
   is treated as malformed.
+- **Neither.** A registration without `cancel` can't take a cancel push, so don't
+  send one: let the ring time out or be declined. The reference engine's cancel
+  endpoint then refuses with `409` and `reason` `"cancel unsupported by device"`,
+  and leaves the ring and its agent running.
 
 A cancel that arrives after the ring was answered changes nothing on the phone.
 

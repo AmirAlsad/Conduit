@@ -19,6 +19,9 @@ from app.config import settings
 _TTL_SECS = 60 * 60
 # The app clamps a pushed ring_timeout to at least this many seconds.
 _MIN_RING_TIMEOUT_SECS = 10
+# The cancel endpoint's 409 reason when the device doesn't list the "cancel"
+# push feature and the ring can't be withdrawn in band.
+CANCEL_UNSUPPORTED = "cancel unsupported by device"
 
 
 @dataclass

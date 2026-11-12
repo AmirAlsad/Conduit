@@ -68,3 +68,21 @@ def test_cancel_conflict_exits_nonzero(monkeypatch, capsys):
 def test_cancel_and_cancel_after_are_exclusive(monkeypatch):
     with pytest.raises(SystemExit):
         _run(monkeypatch, ["--cancel", "c-9", "--cancel-after", "3"], [])
+
+
+def test_cancel_refused_for_an_unsupporting_device_explains_why(monkeypatch, capsys):
+    refused = (409, {"detail": {"call_id": "c-9", "status": None,
+                                "reason": ring.CANCEL_UNSUPPORTED}})
+    with pytest.raises(SystemExit) as exc:
+        _run(monkeypatch, ["--cancel", "c-9"], [refused])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "push feature" in out and "already over" not in out
+
+
+def test_ring_notes_a_ring_timeout_the_device_could_not_take(monkeypatch, capsys):
+    rang = (200, {**_RANG[1], "ring_timeout": None})
+    _run(monkeypatch, ["--agent", "live", "--ring-timeout", "20"], [rang])
+    assert "Ring timeout not sent" in capsys.readouterr().out
+    _run(monkeypatch, ["--agent", "live", "--ring-timeout", "20"], [(200, {**_RANG[1], "ring_timeout": 20})])
+    assert "Ring timeout not sent" not in capsys.readouterr().out

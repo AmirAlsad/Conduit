@@ -37,6 +37,18 @@ async def test_voip_roundtrip_with_display_name_and_handle():
     assert (stored.display_name, stored.handle) == ("Ada", "ada@conduit.example")
 
 
+async def test_voip_roundtrip_with_push_features():
+    reg = SQLiteRegistry(":memory:")
+    featured = VoipRegistration(
+        **{**_reg().__dict__, "push_features": ("cancel", "ring_timeout", "teleport")}
+    )
+    await reg.register_voip(featured)
+    assert await reg.get_voip("live") == featured
+    # A later registration without features replaces them with none.
+    await reg.register_voip(_reg())
+    assert (await reg.get_voip("live")).push_features == ()
+
+
 async def test_opens_old_six_column_voip_table_and_migrates(tmp_path):
     path = str(tmp_path / "old.db")
     old = sqlite3.connect(path)
@@ -59,22 +71,65 @@ async def test_opens_old_six_column_voip_table_and_migrates(tmp_path):
     old.close()
 
     reg = SQLiteRegistry(path)
+    columns = {row[1] for row in reg._conn.execute("PRAGMA table_info(voip_tokens)")}
+    assert {"display_name", "handle", "push_features"} <= columns
     legacy = await reg.get_voip("live")
     assert legacy == _reg()
     assert legacy.display_name is None and legacy.handle is None
+    assert legacy.push_features == ()
 
     await reg.register_voip(
         VoipRegistration(
-            **{**_reg().__dict__, "display_name": "Ada", "handle": "ada@conduit.example"}
+            **{
+                **_reg().__dict__,
+                "display_name": "Ada",
+                "handle": "ada@conduit.example",
+                "push_features": ("cancel",),
+            }
         )
     )
     updated = await reg.get_voip("live")
     assert updated is not None
     assert (updated.display_name, updated.handle) == ("Ada", "ada@conduit.example")
+    assert updated.push_features == ("cancel",)
     reg.close()
 
     # Reopening an already-migrated database must not try to add the columns again.
-    SQLiteRegistry(path).close()
+    reopened = SQLiteRegistry(path)
+    assert (await reopened.get_voip("live")).push_features == ("cancel",)
+    reopened.close()
+
+
+async def test_migrates_a_table_that_already_has_names_but_not_features(tmp_path):
+    # A database from the build that added display_name/handle but predates
+    # push_features: its rows read back with no features.
+    path = str(tmp_path / "named.db")
+    old = sqlite3.connect(path)
+    old.execute(
+        """CREATE TABLE voip_tokens (
+            backend_agent_id TEXT PRIMARY KEY,
+            app_agent_id     TEXT NOT NULL,
+            voip_token       TEXT NOT NULL,
+            platform         TEXT NOT NULL,
+            bundle_id        TEXT NOT NULL,
+            updated_at       TEXT NOT NULL,
+            display_name     TEXT,
+            handle           TEXT
+        )"""
+    )
+    old.execute(
+        "INSERT INTO voip_tokens VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("live", "11111111-1111-1111-1111-111111111111", "aabbcc", "ios",
+         "com.example.Conduit", "2026-06-01T00:00:00+00:00", "Ada", None),
+    )
+    old.commit()
+    old.close()
+
+    reg = SQLiteRegistry(path)
+    stored = await reg.get_voip("live")
+    assert stored.display_name == "Ada"
+    assert stored.push_features == ()
+    reg.close()
 
 
 async def test_latest_registration_wins():

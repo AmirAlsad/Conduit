@@ -11,10 +11,13 @@ in the push (the bot is dispatched before the answer). The push also carries the
 caller ``display_name`` (and ``handle``) the app registered, when it sent them;
 the script prints the name it rang as.
 
-``--ring-timeout N`` shortens the ring (the app clamps it to at least 10 s).
-``--preconnect credentials|media`` asks the app to prepare during the ring.
-``--cancel CALL_ID`` withdraws a ring that is still ringing (no new ring);
-``--cancel-after SECONDS`` rings, waits, then cancels that ring.
+``--ring-timeout N`` shortens the ring (the app clamps it to at least 10 s); the
+engine sends it only to a device that registered the ``ring_timeout`` push
+feature. ``--preconnect credentials|media`` asks the app to prepare during the
+ring. ``--cancel CALL_ID`` withdraws a ring that is still ringing (no new ring);
+``--cancel-after SECONDS`` rings, waits, then cancels that ring. A cancel push
+goes only to a device that registered the ``cancel`` push feature; otherwise the
+engine refuses it (409) unless the agent can leave a pre-connected room instead.
 
 Usage:
   uv run python scripts/ring.py --agent live
@@ -43,6 +46,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings  # noqa: E402
+from app.rings import CANCEL_UNSUPPORTED  # noqa: E402
 
 # Verify TLS against certifi's CA bundle — same rationale as scripts/provision.py.
 try:
@@ -115,6 +119,12 @@ _CANCEL_HINTS = {
     409: "The ring is already over (its receipt arrived) or was already canceled.",
 }
 
+_CANCEL_UNSUPPORTED_HINT = (
+    "The device's app doesn't list the `cancel` push feature (an older build), so "
+    "a cancel push would flash a call there. The ring was left ringing; it ends "
+    "when it times out or the user declines."
+)
+
 
 def _fail(status: int, body, hints: dict) -> None:
     print(f"HTTP {status}")
@@ -127,6 +137,9 @@ def _fail(status: int, body, hints: dict) -> None:
 def _cancel(base_url: str, agent: str, call_id: str, as_json: bool) -> None:
     status, body = _post(base_url, f"/admin/ring/{agent}/cancel", {"call_id": call_id})
     if status != 200:
+        detail = body.get("detail") if isinstance(body, dict) else None
+        if isinstance(detail, dict) and detail.get("reason") == CANCEL_UNSUPPORTED:
+            _fail(status, body, {status: _CANCEL_UNSUPPORTED_HINT})
         _fail(status, body, _CANCEL_HINTS)
     if as_json:
         print(json.dumps(body, indent=2))
@@ -213,13 +226,15 @@ def main() -> None:
     print("APNs accepted the push — the device should be ringing now.")
     if args.preconnect:
         print(f"Pre-connect requested: {args.preconnect}.")
+    if args.ring_timeout is not None and "ring_timeout" in body and body["ring_timeout"] is None:
+        print("Ring timeout not sent: the device's app doesn't list the ring_timeout")
+        print("push feature, so it rings for its own default.")
     if body["mode"] == "inline":
+        print("NOTE: inline mode already dispatched the bot; it ends on a decline")
         if args.preconnect:
-            print("NOTE: inline mode already dispatched the bot; it ends on a decline")
             print("(or any receipt but answered) and when the ring deadline passes.")
         else:
-            print("NOTE: inline mode already dispatched the bot; a decline leaves it")
-            print("running until the pipeline timeouts reap it.")
+            print("(or any receipt but answered).")
     if args.cancel_after is not None:
         print(f"Canceling in {args.cancel_after:g} s…")
         time.sleep(args.cancel_after)

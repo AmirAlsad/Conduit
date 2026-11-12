@@ -105,8 +105,12 @@ The app POSTs its token immediately and on every launch; you should see
 `display_name` and `handle` (the caller name and CallKit handle); the engine stores
 them with the token and echoes them in every ring push. Older builds omit them, and
 the push then omits the keys too — the app rings under its own name for the agent.
-`scripts/ring.py` prints the name it rang as. Existing registry databases pick up
-the two new columns automatically on the next start.
+`scripts/ring.py` prints the name it rang as. Newer builds also send
+`push_features`, the optional push features their call engine supports (today
+`cancel` and `ring_timeout`); the engine stores the list, keeping names it
+doesn't know, and uses a feature only with a registration that lists it. Older
+builds omit it, which the engine stores as an empty list. Existing registry
+databases pick up the new columns automatically on the next start.
 
 Deleting the agent in the app sends a best-effort `DELETE` to the same endpoint — the engine drops the registration
 (`inbound.unregistered`) and `/admin/ring` returns 404 from then on.
@@ -132,9 +136,11 @@ Two modes:
   **answers**. Nothing sensitive rides the push, and **a declined ring costs nothing** (no room, no bot).
 - **Inline (`--inline` / `{"inline": true}`)** — the engine provisions a room and
   embeds `room_url` + `token` in the push. The bot is **dispatched before the user
-  answers**, so the agent is already in the room on pickup — but a declined ring
-  leaves it running (billing) until `PIPELINE_IDLE_TIMEOUT_SECS` reaps it. Prefer
-  pairing unless you need the agent mid-sentence-ready at pickup.
+  answers**, so the agent is already in the room on pickup. The engine ends that
+  bot when the ring's first receipt is anything but `answered` (a decline, busy,
+  Focus, a timeout, a cancel); with no receipt at all it runs (billing) until
+  `PIPELINE_IDLE_TIMEOUT_SECS` reaps it. Prefer pairing unless you need the agent
+  mid-sentence-ready at pickup.
 
     !!! warning "Inline must match the app's transport"
         The app joins inline credentials over the transport **configured for that
@@ -155,7 +161,10 @@ uv run python scripts/ring.py --agent live --ring-timeout 30 --preconnect media
 
 - **`ring_timeout`** shortens this ring (the app clamps it to at least 10 s and
   to its own timeout, 60 s by default). An unanswered ring then reports
-  `unanswered`.
+  `unanswered`. The engine puts it in the push only when the registration lists
+  the `ring_timeout` push feature; otherwise the phone rings for its own
+  default, the ring bot's deadline assumes that default, and the ring response's
+  `ring_timeout` is `null`.
 - **`preconnect`** asks the app to prepare while the phone rings:
   `credentials` fetches `/connect/{agent_id}` during the ring; `media` also
   joins the room before the answer (only where the transport supports it; Daily
@@ -171,9 +180,9 @@ A ring bot differs from a normal bot in three ways:
 - For `media` it is dispatched with `--await-answer`: no audio and no greeting
   until the app's `call-answered` message, or the ring's `answered` receipt
   (relayed to the bot by the engine; that covers an app without engine 0.2).
-- The ring's receipt steers it: `answered` releases it, any other status ends
-  it. (A plain inline ring without `preconnect` still leaves its bot running on
-  a decline, as before.)
+- The ring's first receipt steers it: `answered` releases it, any other status
+  ends it. (A plain inline ring's bot is ended the same way, but has no deadline
+  and no control pipe.)
 
 The engine tracks rings in memory (`app/rings.py`), so a dispatcher restart
 forgets them; ring bots still end through their deadline.
@@ -187,14 +196,21 @@ uv run python scripts/ring.py --agent live --cancel-after 8        # ring, wait 
 ```
 
 - `404` if the engine doesn't know that `call_id` for this agent; `409` once
-  the ring's receipt arrived (it was answered, declined, …) or after a cancel.
+  the ring's receipt arrived (it was answered, declined, …), after a cancel, or
+  when the device can't take a cancel push (below).
 - A `media` ring whose phone is in the room (Daily presence API / LiveKit
   `ListParticipants`) is canceled **in band**: the engine ends the bot, the app
   takes the agent leaving as the cancel and reports `canceled`. No push.
-- Otherwise the engine sends a cancel push, `{"action": "cancel", "call_id": …}`
-  without `agent_id`, and ends the ring's bot if it has one. A Conduit build
-  without engine 0.2 shows a brief incoming-call flash for it and reports
-  nothing, so cancel only rings you expect to be ringing.
+- Otherwise, if the registration lists the `cancel` push feature, the engine
+  sends a cancel push, `{"action": "cancel", "call_id": …}` without `agent_id`,
+  and ends the ring's bot if it has one. Cancel only rings you expect to be
+  ringing.
+- If it doesn't (an app build that sent no `push_features`, or one without
+  `cancel`), the engine sends nothing, since that app would show the push as a
+  brief incoming-call flash. It returns `409` with
+  `{"call_id": …, "status": null, "reason": "cancel unsupported by device"}` and
+  leaves the ring and its bot alone: the ring ends when it times out or the user
+  declines.
 
 ### Hold
 
@@ -232,8 +248,8 @@ inbound.ring_status agent=live call_id=… status=suppressed_by_focus
 That last one is the valuable signal: APNs said `200`, the engine did everything
 right, and the phone still didn't ring. If your agent escalates (retry later, fall
 back to a text channel), this receipt is the hook. The receipt is fire-and-forget
-from the app. The engine logs it, and for a ring bot (pre-connect above) uses it to
-release or end the bot — extend the `/inbound/status` route if your agent should
+from the app. The engine logs it, and uses a ring's first receipt to release or
+end the bot dispatched for it (inline and pre-connect rings above) — extend the `/inbound/status` route if your agent should
 react further.
 
 The engine derives `status_url` from the ring request's own URL, which behind a

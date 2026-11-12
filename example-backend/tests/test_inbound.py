@@ -24,6 +24,8 @@ REGISTER_BODY = {
 
 
 NAMED_BODY = {**REGISTER_BODY, "display_name": "Ada", "handle": "ada@conduit.example"}
+# What an app on call engine 0.2+ sends: the optional push features it supports.
+FEATURES = ["cancel", "ring_timeout"]
 
 
 class FakeApns:
@@ -67,6 +69,46 @@ def test_register_rejects_overlong_display_name_and_handle():
         assert c.post("/inbound/register/loopback", json=long_name, headers=AUTH).status_code == 422
         long_handle = {**REGISTER_BODY, "handle": "x" * 257}
         assert c.post("/inbound/register/loopback", json=long_handle, headers=AUTH).status_code == 422
+
+
+def test_register_without_push_features_stores_none():
+    # An older app build sends no push_features: it supports none of them.
+    with TestClient(app) as c:
+        _register(c)
+        assert app.state.registry._get_voip("loopback").push_features == ()
+
+
+def test_register_stores_push_features_keeping_unknown_names():
+    with TestClient(app) as c:
+        body = {**REGISTER_BODY, "push_features": [*FEATURES, "teleport"]}
+        r = c.post("/inbound/register/loopback", json=body, headers=AUTH)
+        assert r.status_code == 200, r.text
+        stored = app.state.registry._get_voip("loopback")
+        assert stored.push_features == ("cancel", "ring_timeout", "teleport")
+        # Re-registering without the key (a downgraded app) clears them.
+        _register(c)
+        assert app.state.registry._get_voip("loopback").push_features == ()
+
+
+def test_register_rejects_malformed_push_features():
+    with TestClient(app) as c:
+        for features in (
+            [1],
+            ["cancel", None],
+            [["cancel"]],
+            [""],
+            ["x" * 65],
+            ["f"] * 33,
+            "cancel",
+            None,
+        ):
+            body = {**REGISTER_BODY, "push_features": features}
+            r = c.post("/inbound/register/loopback", json=body, headers=AUTH)
+            assert r.status_code == 422, (features, r.text)
+        assert app.state.registry._get_voip("loopback") is None
+        # The bounds themselves are accepted.
+        body = {**REGISTER_BODY, "push_features": ["x" * 64] * 32}
+        assert c.post("/inbound/register/loopback", json=body, headers=AUTH).status_code == 200
 
 
 def test_register_unknown_agent_404s():

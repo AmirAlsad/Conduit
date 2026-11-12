@@ -17,6 +17,7 @@ loop). Keep one replica.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -48,6 +49,10 @@ class VoipRegistration:
     # Sent by newer app builds; None for registrations from older builds.
     display_name: str | None = None
     handle: str | None = None
+    # The optional push features the app's engine supports ("cancel",
+    # "ring_timeout", and names added later). Empty for older builds, which send
+    # none: a server must then use none of them.
+    push_features: tuple[str, ...] = ()
 
 
 @runtime_checkable
@@ -104,7 +109,7 @@ class SQLiteRegistry:
         # CREATE TABLE IF NOT EXISTS leaves a database created by an older build
         # untouched, so add any columns it predates. Caller holds the lock.
         existing = {row[1] for row in self._conn.execute("PRAGMA table_info(voip_tokens)")}
-        for column in ("display_name", "handle"):
+        for column in ("display_name", "handle", "push_features"):
             if column not in existing:
                 self._conn.execute(f"ALTER TABLE voip_tokens ADD COLUMN {column} TEXT")
 
@@ -153,7 +158,7 @@ class SQLiteRegistry:
         with self._lock:
             row = self._conn.execute(
                 """SELECT backend_agent_id, app_agent_id, voip_token, platform, bundle_id,
-                          display_name, handle
+                          display_name, handle, push_features
                    FROM voip_tokens WHERE backend_agent_id = ?""",
                 (backend_agent_id,),
             ).fetchone()
@@ -167,6 +172,7 @@ class SQLiteRegistry:
             bundle_id=row[4],
             display_name=row[5],
             handle=row[6],
+            push_features=tuple(json.loads(row[7])) if row[7] else (),
         )
 
     async def register_voip(self, registration: VoipRegistration) -> None:
@@ -176,8 +182,8 @@ class SQLiteRegistry:
             self._conn.execute(
                 """INSERT OR REPLACE INTO voip_tokens
                        (backend_agent_id, app_agent_id, voip_token, platform, bundle_id,
-                        display_name, handle, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        display_name, handle, push_features, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     registration.backend_agent_id,
                     registration.app_agent_id,
@@ -186,6 +192,7 @@ class SQLiteRegistry:
                     registration.bundle_id,
                     registration.display_name,
                     registration.handle,
+                    json.dumps(list(registration.push_features)),
                     _now(),
                 ),
             )
@@ -196,6 +203,7 @@ class SQLiteRegistry:
             agent=registration.backend_agent_id,
             platform=registration.platform,
             bundle=registration.bundle_id,
+            push_features=",".join(registration.push_features),
         )
 
     async def get_voip(self, backend_agent_id: str) -> VoipRegistration | None:

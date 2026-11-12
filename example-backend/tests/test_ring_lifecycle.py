@@ -10,12 +10,15 @@ from fastapi.testclient import TestClient
 from app.apns import ApnsResult
 from app.config import settings
 from app.main import app
-from app.rings import RingTracker, TrackedRing, ring_deadline_secs
+from app.rings import CANCEL_UNSUPPORTED, RingTracker, TrackedRing, ring_deadline_secs
 
 from test_connect_flow import FakeDaily, FakeDispatcher, FakeLiveKit
-from test_inbound import AUTH, NAMED_BODY, REGISTER_BODY, FakeApns
+from test_inbound import AUTH, FEATURES, NAMED_BODY, REGISTER_BODY, FakeApns
 
 _BASE_KEYS = {"agent_id", "call_id", "status_url"}
+# An app on call engine 0.2+, which lists the push features; REGISTER_BODY is
+# an older app, which lists none.
+FEATURED_BODY = {**REGISTER_BODY, "push_features": FEATURES}
 
 
 class PresenceDaily(FakeDaily):
@@ -39,7 +42,7 @@ class PresenceLiveKit(FakeLiveKit):
         return self.present
 
 
-def _setup(c, body=REGISTER_BODY, daily=None, livekit=None):
+def _setup(c, body=FEATURED_BODY, daily=None, livekit=None):
     app.state.daily = daily or FakeDaily()
     app.state.livekit = livekit or FakeLiveKit()
     app.state.dispatcher = FakeDispatcher()
@@ -87,6 +90,49 @@ def test_ring_timeout_and_preconnect_ride_the_push_as_strings():
         assert "action" not in payload
         # Pairing mode: nothing is dispatched until the app pairs.
         assert app.state.dispatcher.calls == []
+
+
+def test_ring_timeout_is_left_out_for_a_device_without_the_feature():
+    for body in (REGISTER_BODY, {**REGISTER_BODY, "push_features": ["cancel"]}):
+        with TestClient(app) as c:
+            _setup(c, body=body)
+            r = c.post("/admin/ring/loopback", json={"ring_timeout": 30}, headers=AUTH)
+            assert r.status_code == 200, r.text
+            assert r.json()["ring_timeout"] is None
+            payload = app.state.apns.sends[-1][2]
+            assert set(payload) == _BASE_KEYS
+            assert app.state.rings.get(payload["call_id"]).ring_timeout is None
+
+
+def test_ring_response_reports_the_ring_timeout_sent():
+    with TestClient(app) as c:
+        _setup(c)
+        r = c.post("/admin/ring/loopback", json={"ring_timeout": 30}, headers=AUTH)
+        assert r.json()["ring_timeout"] == 30
+        r = c.post("/admin/ring/loopback", json={}, headers=AUTH)
+        assert r.json()["ring_timeout"] is None
+
+
+def test_ring_bot_deadline_assumes_the_default_when_ring_timeout_is_not_sent():
+    # The device rings for its own default, so the bot must not give up at 30 s.
+    with TestClient(app) as c:
+        _setup(c, body=REGISTER_BODY)
+        _, payload = _ring(c, inline=True, preconnect="credentials", ring_timeout=30)
+        assert "ring_timeout" not in payload
+        assert _deadline(_argv()) == settings.ring_timeout_secs + settings.ring_deadline_margin_secs
+
+
+def test_pairing_ring_bot_deadline_assumes_the_default_when_ring_timeout_is_not_sent():
+    with TestClient(app) as c:
+        _setup(c, body=REGISTER_BODY)
+        call_id, _ = _ring(c, preconnect="media", ring_timeout=20)
+        r = c.post(
+            "/connect/loopback",
+            json={"transport": "daily", "ring": {"call_id": call_id, "await_answer": True}},
+            headers=AUTH,
+        )
+        assert r.status_code == 200, r.text
+        assert _deadline(_argv()) == settings.ring_timeout_secs + settings.ring_deadline_margin_secs
 
 
 def test_ring_rejects_bad_new_keys():
@@ -213,10 +259,47 @@ def test_non_answered_receipts_end_the_ring_bot():
             assert app.state.dispatcher.disconnected == ["room-abc"], status
 
 
-def test_receipts_leave_a_plain_inline_bot_alone():
+def test_non_answered_receipts_end_a_plain_inline_bot():
+    for status in ("declined", "busy", "suppressed_by_focus", "unanswered", "canceled", "exploded"):
+        with TestClient(app) as c:
+            _setup(c)
+            call_id, _ = _ring(c, inline=True)
+            _receipt(c, call_id, status)
+            assert app.state.dispatcher.disconnected == ["room-abc"], status
+            # It has no control pipe to write to.
+            assert app.state.dispatcher.sent == [], status
+            assert app.state.rings.get(call_id).status == status
+
+
+def test_answered_receipt_leaves_a_plain_inline_bot_running():
     with TestClient(app) as c:
         _setup(c)
         call_id, _ = _ring(c, inline=True)
+        _receipt(c, call_id, "answered")
+        assert app.state.dispatcher.disconnected == []
+        assert app.state.dispatcher.sent == []
+        # Only the first receipt counts: a stray decline can't end the answered call.
+        _receipt(c, call_id, "declined")
+        assert app.state.dispatcher.disconnected == []
+        assert app.state.rings.get(call_id).status == "answered"
+
+
+def test_only_the_first_receipt_ends_a_plain_inline_bot():
+    with TestClient(app) as c:
+        _setup(c)
+        call_id, _ = _ring(c, inline=True)
+        _receipt(c, call_id, "declined")
+        _receipt(c, call_id, "answered")
+        _receipt(c, call_id, "busy")
+        assert app.state.dispatcher.disconnected == ["room-abc"]
+        assert app.state.dispatcher.sent == []
+        assert app.state.rings.get(call_id).status == "declined"
+
+
+def test_receipts_for_a_pairing_ring_without_a_bot_end_nothing():
+    with TestClient(app) as c:
+        _setup(c)
+        call_id, _ = _ring(c)
         _receipt(c, call_id, "declined")
         assert app.state.dispatcher.disconnected == []
         assert app.state.dispatcher.sent == []
@@ -244,7 +327,7 @@ def _cancel(c, call_id, agent="loopback"):
 
 def test_cancel_push_omits_the_target_and_carries_the_name():
     with TestClient(app) as c:
-        _setup(c, body=NAMED_BODY)
+        _setup(c, body={**NAMED_BODY, "push_features": FEATURES})
         call_id, _ = _ring(c)
         r = _cancel(c, call_id)
         assert r.status_code == 200, r.text
@@ -321,6 +404,71 @@ def test_cancel_credentials_ring_never_checks_presence():
         call_id, _ = _ring(c, inline=True, preconnect="credentials")
         assert _cancel(c, call_id).json()["method"] == "push"
         assert daily.asked == []
+
+
+def test_cancel_without_the_feature_is_refused_and_leaves_the_ring_alone():
+    for body in (REGISTER_BODY, {**REGISTER_BODY, "push_features": ["ring_timeout"]}):
+        with TestClient(app) as c:
+            _setup(c, body=body)
+            call_id, _ = _ring(c, inline=True)
+            r = _cancel(c, call_id)
+            assert r.status_code == 409, r.text
+            assert r.json()["detail"] == {
+                "call_id": call_id, "status": None, "reason": CANCEL_UNSUPPORTED,
+            }
+            assert len(app.state.apns.sends) == 1  # only the ring, no cancel push
+            # Nothing was withdrawn: the ring and its bot are untouched...
+            assert app.state.dispatcher.disconnected == []
+            ring = app.state.rings.get(call_id)
+            assert ring.canceled is False and ring.status is None
+            # ...so the ring's receipt still steers its bot.
+            _receipt(c, call_id, "declined")
+            assert app.state.dispatcher.disconnected == ["room-abc"]
+
+
+def test_cancel_refusal_can_be_retried_after_the_app_upgrades():
+    with TestClient(app) as c:
+        _setup(c, body=REGISTER_BODY)
+        call_id, _ = _ring(c)
+        assert _cancel(c, call_id).status_code == 409
+        r = c.post("/inbound/register/loopback", json=FEATURED_BODY, headers=AUTH)
+        assert r.status_code == 200
+        r = _cancel(c, call_id)
+        assert r.status_code == 200, r.text
+        assert r.json()["method"] == "push"
+        assert app.state.apns.sends[-1][2] == {"action": "cancel", "call_id": call_id}
+
+
+def test_cancel_in_band_needs_no_feature():
+    for transport, kwargs in (
+        ("daily", {"daily": PresenceDaily(present=True)}),
+        ("livekit", {"livekit": PresenceLiveKit(present=True)}),
+    ):
+        with TestClient(app) as c:
+            _setup(c, body=REGISTER_BODY, **kwargs)
+            call_id, _ = _ring(c, inline=True, preconnect="media", transport=transport)
+            r = _cancel(c, call_id)
+            assert r.status_code == 200, r.text
+            assert r.json()["method"] == "in_band", transport
+            assert r.json()["bot_ended"] is True
+            ring = app.state.rings.get(call_id)
+            assert app.state.dispatcher.disconnected == [ring.room_key]
+            assert len(app.state.apns.sends) == 1
+            assert ring.canceled is True
+
+
+def test_cancel_pre_connected_ring_without_the_human_or_the_feature_is_refused():
+    with TestClient(app) as c:
+        daily = PresenceDaily(present=False)
+        _setup(c, body=REGISTER_BODY, daily=daily)
+        call_id, _ = _ring(c, inline=True, preconnect="media")
+        r = _cancel(c, call_id)
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["reason"] == CANCEL_UNSUPPORTED
+        assert daily.asked == ["room-abc"]
+        assert app.state.dispatcher.disconnected == []
+        assert len(app.state.apns.sends) == 1
+        assert app.state.rings.get(call_id).canceled is False
 
 
 def test_cancel_push_on_a_dead_token_502s_and_evicts():

@@ -4,15 +4,17 @@ The Conduit app POSTs its device VoIP token here when the user enables "Let this
 agent call me" (and on every app launch thereafter). The stored token is what
 /admin/ring sends the push to. Latest registration per agent wins — the token is
 per-install, app-wide. Newer app builds also send the caller's display name and
-CallKit handle, which are stored and echoed in the ring push.
+CallKit handle, which are stored and echoed in the ring push, and the push
+features the device supports, which gate cancel pushes and ring_timeout.
 
 /inbound/status is the receipt channel: each ring's push carries a status_url
 pointing here, and the app reports how the ring ended (answered / declined /
 busy / suppressed_by_focus / unanswered / canceled, and any status a newer app
 adds) — so an agent that really needed to reach the user knows whether the ring
-landed. The engine logs every receipt and records it on the ring tracker. For a
-ring bot (one dispatched with the ring flags), "answered" tells the bot through
-its control pipe, and any other status ends it.
+landed. The engine logs every receipt and records it on the ring tracker. Only
+a ring's first receipt steers its bot (an inline ring's, or one dispatched when
+the app paired during the ring): any status but "answered" ends the bot, and
+"answered" tells a ring bot (one with the ring flags) through its control pipe.
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ async def register(agent_id: str, req: VoipRegisterRequest, request: Request):
             bundle_id=req.bundle_id,
             display_name=req.display_name,
             handle=req.handle,
+            push_features=tuple(req.push_features),
         )
     )
     return {"ok": True}
@@ -80,11 +83,12 @@ async def ring_status(agent_id: str, req: RingStatusRequest, request: Request):
     if ring is None or ring.agent_id != agent_id or ring.status is not None:
         return {"ok": True}
     ring.status = req.status
-    if ring.ring_bot and ring.room_key:
+    if ring.room_key:
         if req.status == "answered":
-            # Releases a bot awaiting the answer even if the app never sends
-            # call-answered (a 0.1 app ignores preconnect), and stops its deadline.
-            await state.dispatcher.send_control(ring.room_key, "answered")
+            if ring.ring_bot:
+                # Releases a bot awaiting the answer even if the app never sends
+                # call-answered (a 0.1 app ignores preconnect), and stops its deadline.
+                await state.dispatcher.send_control(ring.room_key, "answered")
         else:
             ended = await state.dispatcher.disconnect(ring.room_key)
             event(

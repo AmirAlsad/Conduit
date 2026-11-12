@@ -7,12 +7,13 @@ Both pairing and direct return the same shape; they differ only in token lifetim
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
 Transport = Literal["daily", "livekit", "smallwebrtc"]
 Preconnect = Literal["credentials", "media"]
+PushFeature = Annotated[str, Field(min_length=1, max_length=64)]
 
 # The receipt statuses the app sends today (docs/INBOUND_CALLS.md §4). Receipts are
 # not validated against this set: a server must accept statuses it doesn't know.
@@ -61,7 +62,12 @@ class VoipRegisterRequest(BaseModel):
 
     ``display_name`` and ``handle`` (the caller's name and CallKit handle) are sent
     by newer app builds and omitted by older ones; they are stored and echoed in
-    the push only when present."""
+    the push only when present.
+
+    ``push_features`` lists the optional push features the app's engine supports
+    (``CallEngine.supportedPushFeatures``: "cancel", "ring_timeout", and names
+    added later, kept as sent). Older builds omit it: an empty list, meaning the
+    engine uses none of them with this device."""
 
     voip_token: str = Field(..., min_length=1)
     platform: str = "ios"
@@ -69,6 +75,7 @@ class VoipRegisterRequest(BaseModel):
     agent_id: str = Field(..., min_length=1)
     display_name: str | None = Field(default=None, max_length=128)
     handle: str | None = Field(default=None, max_length=256)
+    push_features: list[PushFeature] = Field(default_factory=list, max_length=32)
 
 
 class RingRequest(BaseModel):
@@ -77,8 +84,11 @@ class RingRequest(BaseModel):
     Default (pairing) mode sends a credential-free push; the app resolves
     /connect/{agent_id} after the user answers, so a declined ring costs nothing.
     ``inline`` provisions a room + token NOW and embeds them in the push — the bot
-    is dispatched before the user answers and idles on a decline until the
-    pipeline timeouts reap it."""
+    is dispatched before the user answers, and ended when the ring's first receipt
+    is anything but "answered".
+
+    ``ring_timeout`` rides the push only to a device whose registration lists the
+    "ring_timeout" push feature; any other device rings for its own default."""
 
     inline: bool = False
     transport: Transport | None = None
@@ -110,6 +120,10 @@ class RingResponse(BaseModel):
     agent_id: str  # the app-side UUID the push was addressed to
     display_name: str | None = None  # the caller name the app registered, if any
     mode: Literal["pairing", "inline"]
+    # The ring_timeout the push carried: None when the request set none or the
+    # device doesn't list the "ring_timeout" push feature (it then rings for its
+    # own default).
+    ring_timeout: int | None = None
     apns_status: int
     apns_id: str | None = None
 

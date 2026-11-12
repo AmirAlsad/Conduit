@@ -7,6 +7,10 @@
   to the device that registered via /inbound/register (docs/INBOUND_CALLS.md §2).
 - POST /admin/ring/{agent_id}/cancel — withdraw a ring that is still ringing:
   in-band (the agent leaves the pre-connected room) or with a cancel push.
+
+Optional push keys go only to devices whose registration lists the matching
+push feature ("ring_timeout", "cancel"): an older app would ignore a
+ring_timeout, and would show a cancel push as a brief incoming call.
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ from app.models import (
 )
 from app.obs import event, get_logger
 from app.provisioning import TransportUnavailable, provision_pairing
-from app.rings import TrackedRing, ring_bot_flags
+from app.rings import CANCEL_UNSUPPORTED, TrackedRing, ring_bot_flags
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_engine_key)])
 _log = get_logger("admin")
@@ -74,9 +78,13 @@ async def ring(
         payload["display_name"] = reg.display_name
     if reg.handle is not None:
         payload["handle"] = reg.handle
-    # Push values are strings, like every other key.
-    if req.ring_timeout is not None:
-        payload["ring_timeout"] = str(req.ring_timeout)
+    # Push values are strings, like every other key. A device that doesn't list
+    # the feature rings for its own default, which the ring bot's deadline assumes.
+    ring_timeout = req.ring_timeout if "ring_timeout" in reg.push_features else None
+    if req.ring_timeout is not None and ring_timeout is None:
+        event(_log, "ring.ring_timeout_unsupported", agent=agent_id)
+    if ring_timeout is not None:
+        payload["ring_timeout"] = str(ring_timeout)
     if req.preconnect is not None:
         payload["preconnect"] = req.preconnect
     ring = TrackedRing(
@@ -84,19 +92,19 @@ async def ring(
         agent_id=agent_id,
         mode="inline" if req.inline else "pairing",
         preconnect=req.preconnect,
-        ring_timeout=req.ring_timeout,
+        ring_timeout=ring_timeout,
     )
     if req.inline:
         # Provision NOW and ride the creds in the push: the bot is dispatched
         # before the user answers. Pairing mode instead defers everything to the
-        # app's /connect on answer (or during the ring, with preconnect). A plain
-        # inline bot idles on a decline until timeouts reap it; with preconnect it
-        # is a ring bot, ended by its deadline or a non-answered receipt.
+        # app's /connect on answer (or during the ring, with preconnect). Any
+        # inline bot ends on a non-answered first receipt; with preconnect it is
+        # also a ring bot, with a deadline and a control pipe.
         transport = resolve_transport(agent, req.transport)
         ring_flags = None
         if req.preconnect is not None:
             ring_flags = ring_bot_flags(
-                ring_timeout=req.ring_timeout, await_answer=req.preconnect == "media"
+                ring_timeout=ring_timeout, await_answer=req.preconnect == "media"
             )
         try:
             settings.require(*agent.required_settings)
@@ -135,6 +143,7 @@ async def ring(
         agent_id=reg.app_agent_id,
         display_name=reg.display_name,
         mode=ring.mode,
+        ring_timeout=ring.ring_timeout,
         apns_status=result.status,
         apns_id=result.apns_id,
     )
@@ -174,6 +183,19 @@ async def cancel_ring(
     if reg is None:
         raise HTTPException(
             status_code=404, detail=f"No VoIP registration for agent {agent_id!r}."
+        )
+    if "cancel" not in reg.push_features:
+        # An app that doesn't list "cancel" would show the push as a brief
+        # incoming call while the ring keeps ringing. Nothing is withdrawn, so the
+        # ring and its bot are left as they are.
+        event(_log, "ring.cancel_unsupported", call_id=ring.call_id, agent=agent_id)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "call_id": ring.call_id,
+                "status": None,
+                "reason": CANCEL_UNSUPPORTED,
+            },
         )
     # A cancel push carries no target_id/agent_id: a 0.1 app then takes it as
     # malformed (a brief flash, then ended) instead of ringing it as a new call.

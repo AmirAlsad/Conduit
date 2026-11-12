@@ -193,11 +193,11 @@ to join and hear the agent. `uv run pytest` runs the suite.
 | PATCH | `/webrtc/{agent_id}/offer` | bearer or offer token | SmallWebRTC trickle-ICE candidates |
 | POST | `/webhooks/daily` | signature | Daily participant.joined → idempotent dispatch |
 | POST | `/webhooks/livekit` | signature | LiveKit participant_joined → idempotent dispatch |
-| POST | `/inbound/register/{agent_id}` | bearer | The app registers its VoIP push token, plus (newer builds) the caller `display_name` and `handle` (inbound calls) |
+| POST | `/inbound/register/{agent_id}` | bearer | The app registers its VoIP push token, plus (newer builds) the caller `display_name` and `handle` and the device's `push_features` (inbound calls) |
 | DELETE | `/inbound/register/{agent_id}` | bearer | The app deleted the agent — drop its registration |
-| POST | `/inbound/status/{agent_id}` | bearer | The app reports how a ring ended (answered / declined / busy / suppressed_by_focus / unanswered / canceled; unknown statuses are accepted). Releases or ends a ring bot |
-| POST | `/admin/ring/{agent_id}` | bearer | Ring the registered device — agent-initiated inbound call (push echoes the registered `display_name`/`handle`, when present; optional `ring_timeout`, `preconnect`) |
-| POST | `/admin/ring/{agent_id}/cancel` | bearer | Withdraw a ring still ringing: in band (the bot leaves a pre-connected room) or a cancel push. 404 unknown ring, 409 once it ended |
+| POST | `/inbound/status/{agent_id}` | bearer | The app reports how a ring ended (answered / declined / busy / suppressed_by_focus / unanswered / canceled; unknown statuses are accepted). The first one releases or ends the ring's bot |
+| POST | `/admin/ring/{agent_id}` | bearer | Ring the registered device — agent-initiated inbound call (push echoes the registered `display_name`/`handle`, when present; optional `ring_timeout` (sent only if the device lists it), `preconnect`) |
+| POST | `/admin/ring/{agent_id}/cancel` | bearer | Withdraw a ring still ringing: in band (the bot leaves a pre-connected room) or a cancel push (only if the device lists `cancel`). 404 unknown ring, 409 once it ended or when the device can't take a cancel push |
 | POST | `/admin/disconnect` | bearer | Force-end an agent in a room (drop test) |
 | GET  | `/health` | none | Liveness / keep-warm |
 
