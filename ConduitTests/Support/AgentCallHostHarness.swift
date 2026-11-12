@@ -76,6 +76,10 @@ final class AgentCallHostHarness {
     let agent: Agent
     private(set) var pushCompletions = 0
 
+    /// A real-time `sleep`, for a test that ends a timer with `fireTimer(_:)`; the
+    /// default `sleep` runs every timer out at once.
+    static let realTimeSleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+
     /// `pairingEndpoint` makes the agent pairing-mode: `token` is then its API key
     /// and every connect attempt goes through `pairing`. The default `sleep` returns
     /// at once (instant reconnect backoff), so the ring timeout and the join deadline

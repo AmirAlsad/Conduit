@@ -3,7 +3,7 @@
 //  ConduitTests
 //
 //  Small helpers the host-side call tests share: a hand-advanced clock, a
-//  tick-bounded wait, a hand-fired sleep, a source of fresh fake transports, and
+//  tick-bounded wait, a source of fresh fake transports, and
 //  date-free `CallState` matchers.
 //
 
@@ -20,8 +20,9 @@ final class MutableClock {
     func advance(_ seconds: TimeInterval) { current = current.addingTimeInterval(seconds) }
 }
 
-/// Yield the main actor until `condition` holds or the tick budget runs out, so a
-/// test can await an event delivered through an async path without a fixed sleep.
+/// Yield the main actor until `condition` holds or the tick budget runs out. Only
+/// for work no `SimulatedCallSystem` call can wait for: a Task the test or the
+/// code under test starts itself, or a transport used outside an engine.
 @MainActor
 func waitUntil(ticks: Int = 500, _ condition: () -> Bool) async {
     for _ in 0..<ticks {
@@ -45,25 +46,6 @@ final class FakeTransportPool {
         made.append(transport)
         next = FakeTransport()
         return transport
-    }
-}
-
-/// A `sleep` for the engine that returns only when the test says so, so a ring
-/// timeout fires at a moment the test picks. Every sleeper is resumed by `fireAll()`.
-@MainActor
-final class ManualSleeper {
-    private var pending: [CheckedContinuation<Void, Never>] = []
-
-    var pendingCount: Int { pending.count }
-
-    func sleep(_ duration: Duration) async throws {
-        await withCheckedContinuation { pending.append($0) }
-    }
-
-    func fireAll() {
-        let waiting = pending
-        pending = []
-        waiting.forEach { $0.resume() }
     }
 }
 

@@ -160,14 +160,12 @@ struct AgentCallHostTests {
     }
 
     @Test func ringThatRingsOutWritesMissedRowAndNotifies() async throws {
-        let sleeper = ManualSleeper()
-        let h = try AgentCallHostHarness(ringTimeout: .seconds(60), sleep: { try await sleeper.sleep($0) })
+        let h = try AgentCallHostHarness(ringTimeout: .seconds(60), sleep: AgentCallHostHarness.realTimeSleep)
         h.ring()
         #expect(h.engine.state == .incomingRinging)
 
-        await waitUntil { sleeper.pendingCount == 1 }
-        sleeper.fireAll()
-        await waitUntil { h.engine.state == .idle }
+        #expect(h.system.fireTimer(.ringTimeout))
+        await h.system.awaitPendingWork()
 
         #expect(h.engine.state == .idle)
         let entry = try #require(try h.loggedEntries().first)
@@ -375,6 +373,8 @@ struct AgentCallHostTests {
         h.system.suspendsOutgoingStarts = true
         h.transport.suspendConnect = true // the transport this call will get
 
+        // A poll, not awaitPendingWork: the engine is blocked inside the held start,
+        // work the test's own Task began, which the package cannot wait for.
         let place = Task { await h.placeCall() }
         await waitUntil { h.system.pendingOutgoingStartCount == 1 }
         #expect(h.system.pendingOutgoingStartCount == 1)
@@ -578,14 +578,12 @@ struct AgentCallHostTests {
     // MARK: - Join deadline
 
     @Test func anAgentThatNeverJoinsWritesAgentUnreachableRow() async throws {
-        let sleeper = ManualSleeper()
-        let h = try AgentCallHostHarness(joinTimeout: .seconds(30), sleep: sleeper.sleep)
+        let h = try AgentCallHostHarness(joinTimeout: .seconds(30), sleep: AgentCallHostHarness.realTimeSleep)
         await h.placeCall()
         #expect(h.engine.state.isConnecting)
 
-        await waitUntil { sleeper.pendingCount > 0 }
-        sleeper.fireAll()
-        await waitUntil { h.engine.state.isTerminal }
+        #expect(h.system.fireTimer(.joinTimeout))
+        await h.system.awaitPendingWork()
 
         #expect(h.engine.state.failureReason == .agentUnreachable)
         let entry = try #require(try h.loggedEntries().first)
@@ -607,10 +605,10 @@ struct AgentCallHostTests {
         let stops = h.announcer.stopRepeatingCount
 
         await h.engine.setOnHold(true)
-        await waitUntil { h.engine.isOnHold }
+        await h.system.awaitPendingWork()
         #expect(h.engine.isOnHold)
         await h.engine.setOnHold(false)
-        await waitUntil { !h.engine.isOnHold }
+        await h.system.awaitPendingWork()
         #expect(!h.engine.isOnHold)
 
         #expect(h.announcer.announced == announced)
@@ -628,13 +626,15 @@ struct AgentCallHostTests {
         #expect(h.system.reportedSupportsHolding(callID) == true)
 
         await h.engine.setOnHold(true)
-        await waitUntil { h.transport.sentSignals.contains(.held) }
+        await h.system.awaitPendingWork()
+        #expect(h.transport.sentSignals.contains(.held))
         #expect(h.system.holdRequests.map(\.onHold) == [true])
         #expect(!h.transport.isMicEnabled)
         #expect(!h.transport.isAudioAttached)
 
         await h.engine.setOnHold(false)
-        await waitUntil { h.transport.sentSignals.contains(.resumed) }
+        await h.system.awaitPendingWork()
+        #expect(h.transport.sentSignals.contains(.resumed))
         #expect(h.system.holdRequests.map(\.onHold) == [true, false])
         #expect(h.transport.isAudioAttached)
         #expect(h.transport.isMicEnabled)
@@ -663,7 +663,7 @@ struct AgentCallHostTests {
         let h = try AgentCallHostHarness(pairingEndpoint: endpoint)
         h.ring()
         #expect(await h.system.awaitRingPreparation() == .idle)
-        await waitUntil(ticks: 50) { !h.pairing.requests.isEmpty }
+        await h.system.awaitPendingWork()
         #expect(h.pairing.requests.isEmpty)
 
         await h.system.answerIncomingCall()
@@ -707,7 +707,8 @@ struct AgentCallHostTests {
 
         await h.system.answerIncomingCall()
         await h.system.activateAudioSession()
-        await waitUntil { h.transport.sentSignals.contains(.answered) }
+        await h.system.awaitPendingWork()
+        #expect(h.transport.sentSignals.contains(.answered))
 
         if case .connected = h.engine.state {} else {
             Issue.record("Expected connected at the answer, got \(h.engine.state)")
@@ -799,7 +800,6 @@ struct AgentCallHostTests {
         #expect(try requests.first.map(body)?["voip_token"] as? String == "0fa0")
     }
 
-    @Test func registrationBodyCarriesAllSevenKeys() async throws {
     @Test func aTokenPushKitInvalidatesIsNoLongerRegistered() async throws {
         let h = try AgentCallHostHarness()
         let nova = try inboundAgent(named: "Nova", in: h, apiKey: "nova-key")
@@ -815,6 +815,7 @@ struct AgentCallHostTests {
         #expect(RecordingURLProtocol.requests(host: host).count == 1)
     }
 
+    @Test func registrationBodyCarriesAllSevenKeys() async throws {
         let endpoint = RecordingURLProtocol.uniqueEndpoint()
         let agentID = UUID()
         await PushTokenRegistrar.register(
