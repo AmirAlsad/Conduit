@@ -180,9 +180,13 @@ uv run python scripts/ring.py --agent live --ring-timeout 30 --preconnect media
 
 A ring bot differs from a normal bot in three ways:
 
-- It ends by itself if nobody answers within the ring's timeout (at least 10 s;
-  `RING_TIMEOUT_SECS`, default 60, when the ring didn't set one) plus
-  `RING_DEADLINE_MARGIN_SECS` (15).
+- It ends by itself if nobody answers within the ring's timeout (at least 10 s)
+  plus `RING_DEADLINE_MARGIN_SECS` (15). When the push carried no `ring_timeout`
+  the engine cannot know how long the phone will ring, since the app's timeout is
+  configurable (60 s by default, longer or unlimited if the user changed it), so it
+  assumes `RING_TIMEOUT_SECS` (default 60, must be above 0): set it to match your
+  app, or a bot ends mid-ring on a phone still ringing. A sender that wants a firm
+  bound should always send `ring_timeout`.
 - For `media` it is dispatched with `--await-answer`: no audio and no greeting
   until the app's `call-answered` message, or, as a fallback, the ring's
   `answered` receipt (relayed to the bot by the engine; that covers an app that

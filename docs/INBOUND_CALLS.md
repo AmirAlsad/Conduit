@@ -262,7 +262,10 @@ Your agent must:
 2. End at once on `end-call`, as for any call. A decline, a timeout or a cancel
    while the phone is in the room all send it.
 3. End by itself if no `call-answered` arrives within the ring timeout plus 15 s
-   of being dispatched.
+   of being dispatched. Use the `ring_timeout` you sent; if the push carried none,
+   the phone rings for the app's own configured timeout (60 s by default, but it
+   can be longer or unlimited), which you can only assume. Send `ring_timeout`
+   when you want a firm bound.
 4. Fall back on receipts: `answered` may release the greeting (an app without
    engine 0.2 joins only after the answer and never sends `call-answered`), but
    only after a short grace (a few seconds) in which `call-answered` has not

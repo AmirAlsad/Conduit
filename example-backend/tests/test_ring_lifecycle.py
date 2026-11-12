@@ -212,6 +212,26 @@ def test_ring_response_reports_the_preconnect_sent():
         assert r.json()["preconnect"] is None
 
 
+def test_the_assumed_ring_length_is_a_setting_that_only_a_push_without_ring_timeout_uses(monkeypatch):
+    # The app can be configured for a longer ring (or none), so the length assumed
+    # for a push that carried no ring_timeout is the operator's to set.
+    monkeypatch.setattr(settings, "ring_timeout_secs", 300)
+    assert ring_deadline_secs(None) == 300 + settings.ring_deadline_margin_secs
+    assert ring_deadline_secs(30) == 30 + settings.ring_deadline_margin_secs
+
+
+def test_the_assumed_ring_length_must_be_positive():
+    import pytest
+    from pydantic import ValidationError
+
+    from app.config import Settings
+
+    for bad in (0, -5):
+        with pytest.raises(ValidationError):
+            Settings(ring_timeout_secs=bad)
+    assert Settings(ring_timeout_secs=600).ring_timeout_secs == 600
+
+
 # --- pairing during the ring ---
 
 

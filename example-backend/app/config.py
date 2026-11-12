@@ -16,6 +16,7 @@ import os
 from functools import lru_cache
 
 import certifi
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Make TLS verification work regardless of the OS trust store. The python.org / uv
@@ -103,9 +104,12 @@ class Settings(BaseSettings):
 
     # Ring deadline for bots dispatched for a pre-connected ring (docs/INBOUND_CALLS.md):
     # a bot that hears no answer within the ring's timeout plus this margin ends.
-    # ring_timeout_secs is the app engine's default ring timeout, assumed when the
-    # ring request doesn't set one; the app clamps a pushed timeout to at least 10 s.
-    ring_timeout_secs: int = 60
+    # ring_timeout_secs is the ring length ASSUMED when the push carried no
+    # ring_timeout (the request set none, or the device doesn't list the feature):
+    # the phone then rings for its own configured timeout, 60 s by default, which
+    # an app can change or turn off. Set this to match your app's, or always send
+    # ring_timeout (a firm bound: the app clamps it to [10 s, its own timeout]).
+    ring_timeout_secs: int = Field(default=60, gt=0)
     ring_deadline_margin_secs: float = 15.0
     # The app sends the ring's "answered" receipt at the moment of answer, before
     # its audio is up, and the call-answered message once it is. A ring bot given

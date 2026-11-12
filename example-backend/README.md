@@ -279,9 +279,13 @@ return them as `BotBuild(gates=…)` — see `bot/pipelines/live.py`.
   provider's key. The agent's required-keys check follows it.
 - **`HUMAN_ABSENT_GRACE_SECS`** — see above. **`HELD_GRACE_SECS`** (default `600`)
   replaces it while the call is on hold.
-- **`RING_TIMEOUT_SECS`** (default `60`, the app's default ring timeout) and
+- **`RING_TIMEOUT_SECS`** (default `60`, must be > 0) and
   **`RING_DEADLINE_MARGIN_SECS`** (default `15`) — a ring bot ends when the ring's
-  timeout plus the margin passes without an answer.
+  timeout plus the margin passes without an answer. `RING_TIMEOUT_SECS` is only
+  the ring length *assumed* for a push that carried no `ring_timeout`: the phone
+  then rings for its own configured timeout (60 s by default, but the app can make
+  it longer or unlimited), so match it to your app's. A sender that wants a firm
+  bound should always send `ring_timeout` (to devices that list the feature).
 - **`ANSWERED_RECEIPT_GRACE_SECS`** (default `4`) — how long a ring bot that got
   the ring's `answered` receipt waits for the app's `call-answered` before it
   treats the receipt as the answer.
