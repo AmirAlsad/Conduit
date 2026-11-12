@@ -10,7 +10,9 @@ a room to join and runs your agent in it.
 You already have a voice agent (or will build one). **This repo is not a tutorial
 on building one** — it's the reference for **connecting yours to Conduit**: the
 small contract your agent must satisfy, and a working engine that satisfies it.
-`loopback` and `live` are reference agents you replace with your own.
+`loopback` and `live` are reference agents you replace with your own; `tone` is
+a test agent for on-device checks (a continuous tone from the moment the human
+joins, no keys).
 
 > New here? Read **[Bring your own agent](./docs/bring-your-own-agent.md)** — the
 > 3-step integration plus the contracts, with code pointers. The rest of this
@@ -114,7 +116,7 @@ public spec yet):
     // livekit: { "room_url": "wss://...", "url": "wss://...", "token": "...", "room_name": "..." }
     //          (`room_url` is canonical — what the app reads; `url` is a deprecated alias)
   },
-  "agent_id": "loopback" | "live" | "<yours>",
+  "agent_id": "loopback" | "live" | "tone" | "<yours>",
   "expires_at": "<ISO8601 | null>"   // short for pairing, long/null for direct
 }
 ```
@@ -193,8 +195,9 @@ to join and hear the agent. `uv run pytest` runs the suite.
 | POST | `/webhooks/livekit` | signature | LiveKit participant_joined → idempotent dispatch |
 | POST | `/inbound/register/{agent_id}` | bearer | The app registers its VoIP push token, plus (newer builds) the caller `display_name` and `handle` (inbound calls) |
 | DELETE | `/inbound/register/{agent_id}` | bearer | The app deleted the agent — drop its registration |
-| POST | `/inbound/status/{agent_id}` | bearer | The app reports how a ring ended (answered / declined / busy / suppressed_by_focus) |
-| POST | `/admin/ring/{agent_id}` | bearer | Ring the registered device — agent-initiated inbound call (push echoes the registered `display_name`/`handle`, when present) |
+| POST | `/inbound/status/{agent_id}` | bearer | The app reports how a ring ended (answered / declined / busy / suppressed_by_focus / unanswered / canceled; unknown statuses are accepted). Releases or ends a ring bot |
+| POST | `/admin/ring/{agent_id}` | bearer | Ring the registered device — agent-initiated inbound call (push echoes the registered `display_name`/`handle`, when present; optional `ring_timeout`, `preconnect`) |
+| POST | `/admin/ring/{agent_id}/cancel` | bearer | Withdraw a ring still ringing: in band (the bot leaves a pre-connected room) or a cancel push. 404 unknown ring, 409 once it ended |
 | POST | `/admin/disconnect` | bearer | Force-end an agent in a room (drop test) |
 | GET  | `/health` | none | Liveness / keep-warm |
 
@@ -213,6 +216,11 @@ directly over UDP — LAN / self-hosted, not Railway.
 Body for `/admin/disconnect`: `{"room_key": "<room>"}` (the room name from the
 payload). `/admin/ring` rings via APNs VoIP push (`scripts/ring.py` wraps it;
 needs the `APNS_*` vars) — full setup in the docs site's **Inbound calls** guide.
+Body for `/admin/ring/{agent_id}` (all optional): `{"inline": bool, "transport":
+…, "ring_timeout": <seconds>, "preconnect": "credentials"|"media"}`; for its
+`/cancel`: `{"call_id": "<from the ring response>"}`. A pairing `/connect` made
+during a pre-connected ring carries `"ring": {"call_id", "await_answer"}` and
+dispatches a **ring bot** (`--ring-deadline`, plus `--await-answer` for media).
 
 ---
 
@@ -238,6 +246,28 @@ and reconnects with backoff while CallKit still shows the call up. So:
 > be ≥ the client's total reconnect-with-backoff budget, and no longer (your agent
 > is a billed participant during the window).
 
+### Call-control signals: answer and hold
+
+The app also sends `call-answered`, `call-held` and `call-resumed` client
+messages (same RTVI envelope as `end-call`; same per-transport delivery). The
+entrypoint handles them for you (`bot/call_control.py`):
+
+- **Await-answer.** A bot dispatched with `--await-answer` (the app joined while
+  the phone still rang) keeps the pipeline's audio gates closed and doesn't greet
+  until `call-answered` or the ring's `answered` receipt. With `--ring-deadline`
+  it ends if no answer comes in time.
+- **Hold.** `call-held` interrupts the bot and closes its audio gates (no turns,
+  no speech) until `call-resumed`; a human who drops while held gets
+  `HELD_GRACE_SECS` instead of `HUMAN_ABSENT_GRACE_SECS`.
+- **Greeting.** `on_ready` runs on RTVI client-ready (Daily, SmallWebRTC) and on
+  the first human join on LiveKit, whose app sends no client-ready (and whose
+  client messages never reach Pipecat's RTVI processor). An awaiting bot greets
+  once, when it is both ready and answered.
+
+For your own pipeline to honour await-answer and hold, put an
+`AudioGate` after `transport.input()` and one before `transport.output()`, and
+return them as `BotBuild(gates=…)` — see `bot/pipelines/live.py`.
+
 ## Tuning knobs (for the reference `live` agent)
 
 - **`VAD_STOP_SECS`** (default `0.2`) — endpointing delay. Turn-end uses Pipecat's
@@ -245,7 +275,11 @@ and reconnects with backoff while CallKit still shows the call up. So:
   to give a thinking-partner more silence tolerance, at some latency cost.
 - **`TTS_PROVIDER`** — `cartesia` (default) | `deepgram` | `groq`; each reuses that
   provider's key. The agent's required-keys check follows it.
-- **`HUMAN_ABSENT_GRACE_SECS`** — see above.
+- **`HUMAN_ABSENT_GRACE_SECS`** — see above. **`HELD_GRACE_SECS`** (default `600`)
+  replaces it while the call is on hold.
+- **`RING_TIMEOUT_SECS`** (default `60`, the app's default ring timeout) and
+  **`RING_DEADLINE_MARGIN_SECS`** (default `15`) — a ring bot ends when the ring's
+  timeout plus the margin passes without an answer.
 
 See `.env.example` for the full list and which feature needs which key.
 

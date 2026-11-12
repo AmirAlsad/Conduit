@@ -143,12 +143,87 @@ Two modes:
         fails at answer time. Pairing mode can't mismatch: the app negotiates the
         transport in its `/connect` call.
 
+### Ring timeout and pre-connect
+
+Two optional ring options (Conduit builds on call engine 0.2+; older builds
+ignore them and ring as before):
+
+```bash
+uv run python scripts/ring.py --agent live --ring-timeout 30 --preconnect media
+# raw: -d '{"ring_timeout": 30, "preconnect": "media"}'
+```
+
+- **`ring_timeout`** shortens this ring (the app clamps it to at least 10 s and
+  to its own timeout, 60 s by default). An unanswered ring then reports
+  `unanswered`.
+- **`preconnect`** asks the app to prepare while the phone rings:
+  `credentials` fetches `/connect/{agent_id}` during the ring; `media` also
+  joins the room before the answer (only where the transport supports it; Daily
+  stays at `credentials`). In pairing mode the app's `/connect` then carries
+  `"ring": {"call_id", "await_answer"}`, and the engine dispatches a **ring bot**
+  for it. With `--inline` the ring bot is dispatched at ring time.
+
+A ring bot differs from a normal bot in three ways:
+
+- It ends by itself if nobody answers within the ring's timeout (at least 10 s;
+  `RING_TIMEOUT_SECS`, default 60, when the ring didn't set one) plus
+  `RING_DEADLINE_MARGIN_SECS` (15).
+- For `media` it is dispatched with `--await-answer`: no audio and no greeting
+  until the app's `call-answered` message, or the ring's `answered` receipt
+  (relayed to the bot by the engine; that covers an app without engine 0.2).
+- The ring's receipt steers it: `answered` releases it, any other status ends
+  it. (A plain inline ring without `preconnect` still leaves its bot running on
+  a decline, as before.)
+
+The engine tracks rings in memory (`app/rings.py`), so a dispatcher restart
+forgets them; ring bots still end through their deadline.
+
+### Canceling a ring
+
+```bash
+uv run python scripts/ring.py --agent live --cancel <call_id>      # withdraw a ring
+uv run python scripts/ring.py --agent live --cancel-after 8        # ring, wait 8 s, withdraw it
+# raw: POST /admin/ring/{agent_id}/cancel  {"call_id": "<call_id>"}
+```
+
+- `404` if the engine doesn't know that `call_id` for this agent; `409` once
+  the ring's receipt arrived (it was answered, declined, …) or after a cancel.
+- A `media` ring whose phone is in the room (Daily presence API / LiveKit
+  `ListParticipants`) is canceled **in band**: the engine ends the bot, the app
+  takes the agent leaving as the cancel and reports `canceled`. No push.
+- Otherwise the engine sends a cancel push, `{"action": "cancel", "call_id": …}`
+  without `agent_id`, and ends the ring's bot if it has one. A Conduit build
+  without engine 0.2 shows a brief incoming-call flash for it and reports
+  nothing, so cancel only rings you expect to be ringing.
+
+### Hold
+
+When the user puts the call on hold (e.g. to take a cellular call), the app
+sends `call-held` and, later, `call-resumed`. The bot stops talking and hears
+nothing while held, and if the phone drops out of the room while held it waits
+`HELD_GRACE_SECS` (default 600) instead of `HUMAN_ABSENT_GRACE_SECS`.
+
+### The `tone` test agent
+
+`tone` plays a continuous 440 Hz tone from the moment a human joins the room
+and ignores client-ready and `call-answered`. It needs no model keys. Ring it
+pre-connected to hear whether a ringing phone lets any audio out:
+
+```bash
+uv run python scripts/ring.py --agent tone --inline --preconnect media --transport livekit
+```
+
+Register the app's inbound toggle against `/inbound/register/tone` first. Any
+tone before you answer is a leak; after you answer you should hear it at once.
+
 ## Ring-status receipts
 
 Every ring's push carries a `status_url` pointing back at the engine, and the app
 reports how the ring ended — so you can tell from the engine logs whether the user
-**answered**, **declined**, was **busy** in another call, or never saw the ring
-because **Focus/DND suppressed it**:
+**answered**, **declined**, was **busy** in another call, never saw the ring
+because **Focus/DND suppressed it**, let it time out (**unanswered**), or you
+**canceled** it. The engine accepts any status string (newer apps may add more)
+and logs unknown ones with `known=False`:
 
 ```
 inbound.ring_status agent=live call_id=… status=suppressed_by_focus
@@ -157,8 +232,9 @@ inbound.ring_status agent=live call_id=… status=suppressed_by_focus
 That last one is the valuable signal: APNs said `200`, the engine did everything
 right, and the phone still didn't ring. If your agent escalates (retry later, fall
 back to a text channel), this receipt is the hook. The receipt is fire-and-forget
-from the app and the engine just logs it — extend the `/inbound/status` route if
-your agent should react.
+from the app. The engine logs it, and for a ring bot (pre-connect above) uses it to
+release or end the bot — extend the `/inbound/status` route if your agent should
+react further.
 
 The engine derives `status_url` from the ring request's own URL, which behind a
 TLS-terminating proxy (any hosted platform) requires uvicorn's

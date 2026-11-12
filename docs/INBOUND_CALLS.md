@@ -107,9 +107,20 @@ authorization: bearer <APNs JWT signed with your .p8>
   "handle":   "<optional>",              // the CallKit handle stored at registration
   "room_url": "<optional>",              // inline credentials (see hybrid below)
   "token":    "<optional>",
-  "status_url": "<optional>"             // ring-status receipts (see §4)
+  "status_url": "<optional>",            // ring-status receipts (see §4)
+  "ring_timeout": "<optional>",          // whole seconds, as a string (see below)
+  "preconnect": "<optional>"             // "credentials" | "media" (see §5)
 }
 ```
+
+All values are strings. `ring_timeout` and `preconnect` need a Conduit build on
+call engine 0.2 or later; older builds ignore them, so a ring that carries them
+still rings exactly as before.
+
+**Ring timeout.** The app ends a ring nobody answers after its own timeout
+(60 s by default) and reports `unanswered` (§4). `ring_timeout` shortens one
+ring: the app clamps it to at least 10 s and to at most its own timeout, so it
+can never lengthen a ring.
 
 The app also accepts `target_id` in place of `agent_id` (if both are present,
 `target_id` wins). `display_name` and `handle` are the values the app sent when it
@@ -131,6 +142,17 @@ On answer, Conduit needs a room + token to join. You choose how it gets them:
 `room_url` is Daily's `https://…` room or LiveKit's `wss://…` URL, matching the
 agent's transport — same shapes as the pairing response.
 
+When a ring asks for `preconnect` (§5), the app may call the pairing endpoint
+**while the phone is still ringing**, and then adds the ring to the usual body:
+
+```
+{ "transport": "<…>", "ring": { "call_id": "<the push's call_id>", "await_answer": true } }
+```
+
+`await_answer` is `true` when the app will also join the room before the user
+answers (the `media` tier): the agent you dispatch must then stay silent until it
+hears `call-answered` (§6). Without `ring` the request is an ordinary pairing call.
+
 ---
 
 ## 3. What the app does
@@ -141,13 +163,16 @@ agent's transport — same shapes as the pairing response.
    else a handle derived from the id. Right after reporting it matches `agent_id` to a
    local agent and rings (`incomingRinging`). Once CallKit accepts the report, if the
    agent's name or handle differ from what rang, it updates the ring to show them.
-   PushKit's completion is called after that, on every path. Credentials are used later.
+   PushKit's completion is called after that, on every path. Credentials are used
+   later (or during the ring, with `preconnect` — §5).
    A push it can't parse (no valid `agent_id`) is still reported, then ended at once.
 2. **User answers** → Conduit connects the transport (inline creds, else pairing
    resolve), transitions to `connecting` → `connected`, and the call behaves exactly
    like an outgoing one (mute, routing, reconnection, interruptions).
 3. **User declines** (or the call is never answered) → logged in Recents as a declined
-   **incoming** call.
+   **incoming** call. On engine 0.2+ an unanswered ring ends after the ring timeout
+   (§2, receipt `unanswered`), and a withdrawn ring ends on your cancel (§5, receipt
+   `canceled`).
 4. **Unknown `agent_id`** (not configured in the app) → Conduit still reports the call
    to satisfy PushKit, then ends it gracefully.
 5. **Already on a call** → the new call is reported (corrected to the agent's identity
@@ -177,14 +202,108 @@ Authorization: Bearer <API key>
 | `declined` | The user declined the ring |
 | `busy` | The push arrived during another Conduit call (logged as missed) |
 | `suppressed_by_focus` | Focus/DND filtered the ring — the phone never rang (the call is still logged in the app's Recents as missed) |
+| `unanswered` | The ring timed out with nobody answering (engine 0.2+) |
+| `canceled` | You withdrew the ring before it was answered (§5; engine 0.2+) |
 
 One receipt per ring, describing the *ring*: a normal hang-up after an answered call
 sends nothing further. Omit `status_url` and the app sends nothing. Return any 2xx;
 the app never retries.
 
+**Accept statuses you don't know.** Newer app builds may add statuses; answer them
+with a 2xx like any other (a 4xx only loses the receipt). Treat any status other
+than `answered` as "the ring is over and nobody picked up".
+
 **Privacy note.** Receipts reveal the user's busy/Focus state to the server that rang
 them. That server is the user's own (they opted into inbound for it), but if you're
 adapting this contract, don't forward receipts anywhere else.
+
+---
+
+## 5. Pre-connect and canceling a ring (engine 0.2+)
+
+### Pre-connect
+
+`preconnect` in the ring push lets the app prepare while the phone rings, so the
+call starts faster on answer:
+
+| `preconnect` | During the ring | At answer |
+|---|---|---|
+| absent | nothing (as before) | fetch credentials, join |
+| `"credentials"` | call the pairing endpoint with `ring` (§2) and keep the result | join with it |
+| `"media"` | also join the room, with no audio either way | audio starts once iOS activates the call |
+
+The app uses the lower of what you ask for, what it is configured to allow, and
+what the agent's transport supports (not every transport can join during a ring:
+Daily and SmallWebRTC stay at `credentials`), so you may see `credentials`
+behaviour for a `media` ring. Anything missing means today's behaviour.
+
+`"media"` is your promise that the agent holds its audio until the user answers.
+Your agent must:
+
+1. Produce no audio until it receives `call-answered` (§6).
+2. End at once on `end-call`, as for any call. A decline, a timeout or a cancel
+   while the phone is in the room all send it.
+3. End by itself if no `call-answered` arrives within the ring timeout plus 15 s
+   of being dispatched.
+4. Fall back on receipts: `answered` may release the greeting (an app without
+   engine 0.2 joins only after the answer and never sends `call-answered`);
+   `declined`, `unanswered`, `canceled`, `busy` or `suppressed_by_focus` mean end
+   the agent. So send `status_url` with every pre-connected inline ring.
+
+With `"credentials"` the app joins only after the answer, so the human joining
+already means "answered"; the app still sends `call-answered`.
+
+### Canceling a ring
+
+To withdraw a ring that is still ringing:
+
+- **In band (preferred).** If the ring is pre-connected (`media`) and the phone is
+  in the room, make your agent leave the room. The app takes the agent leaving a
+  ringing call as the cancel, ends the ring and reports `canceled`. No push, so
+  nothing flashes.
+- **Cancel push.** Otherwise send a second VoIP push:
+
+  ```
+  { "action": "cancel", "call_id": "<the ring's call_id>", "display_name": "<optional>" }
+  ```
+
+  Leave out `agent_id` and `target_id`. A 0.2 app ends the ring and reports
+  `canceled` to the ring's `status_url`. An older app sees a push without a target
+  and treats it as malformed: a brief flash of an incoming call, then ended, with
+  no record and no receipt (iOS requires every VoIP push to show a call). Because
+  of that flash, prefer the in-band cancel, and only push a cancel for a ring that
+  has not ended yet. `action` absent or `"ring"` is a normal ring; any other value
+  is treated as malformed.
+
+A cancel that arrives after the ring was answered changes nothing on the phone.
+
+---
+
+## 6. Call-control messages to your agent (engine 0.2+)
+
+Besides `end-call`, the app sends these RTVI client messages to the agent, in the
+same envelope:
+
+```json
+{ "id": "<…>", "label": "rtvi-ai", "type": "client-message", "data": { "t": "call-answered" } }
+```
+
+| `t` | When |
+|---|---|
+| `call-answered` | The user answered a ring whose push carried `preconnect` (any value), once iOS has activated the call's audio and the transport is connected; sent again after every reconnect of that call |
+| `call-held` | The call went on hold (e.g. the user took a cellular call) |
+| `call-resumed` | The call came back from hold |
+
+On hold the app's mic is off. A reasonable agent stops talking, takes no turns,
+and gives a human who drops while held a longer grace window than a normal drop.
+
+Delivery: on Daily (and SmallWebRTC) the messages reach Pipecat's RTVI processor
+(`on_client_message`). On LiveKit they arrive as raw data packets: Pipecat's
+LiveKit input does not route them to RTVI, so parse the envelope from the
+transport's `on_data_received` event. The app sends no RTVI `client-ready` on
+LiveKit, so greet on the first human join there instead.
+
+Agents that don't know these messages can ignore them.
 
 ---
 
