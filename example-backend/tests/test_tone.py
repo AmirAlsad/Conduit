@@ -71,3 +71,14 @@ def test_tone_agent_needs_no_keys_and_ignores_answer_and_ready():
     build = tone.build(FakeTransport())
     assert build.on_ready is None  # client-ready does nothing
     assert build.gates == ()  # nothing for call-answered or hold to open or close
+
+
+async def test_tone_source_in_a_running_pipeline():
+    from pipecat.tests.utils import SleepFrame, run_test
+
+    down, _ = await run_test(
+        tone.ToneSource(),
+        frames_to_send=[ClientConnectedFrame(), SleepFrame(sleep=0.1)],
+    )
+    audio = [f for f in down if isinstance(f, OutputAudioRawFrame)]
+    assert len(audio) >= 3

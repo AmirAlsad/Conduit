@@ -307,3 +307,39 @@ async def test_control_line_answered_is_the_receipt():
     assert call.answered
     assert greet.count == 1
     call.stop()
+
+
+def test_shipped_pipelines_gate_their_audio():
+    from pipecat.processors.frame_processor import FrameProcessor
+
+    from bot.pipelines import live, loopback
+
+    class FakeTransport:
+        def __init__(self):
+            self._in, self._out = FrameProcessor(), FrameProcessor()
+
+        def input(self):
+            return self._in
+
+        def output(self):
+            return self._out
+
+    lb = loopback.build(FakeTransport())
+    assert len(lb.gates) == 1 and all(isinstance(g, AudioGate) for g in lb.gates)
+    lv = live.build(FakeTransport())  # conftest provides offline model keys
+    assert len(lv.gates) == 2 and all(isinstance(g, AudioGate) for g in lv.gates)
+    assert lv.on_ready is not None
+
+
+async def test_audio_gate_in_a_running_pipeline():
+    from pipecat.tests.utils import run_test
+
+    gate = AudioGate()
+    gate.close()
+    audio = dict(audio=b"\x00\x00" * 160, sample_rate=16000, num_channels=1)
+    down, _ = await run_test(
+        gate,
+        frames_to_send=[InputAudioRawFrame(**audio), OutputAudioRawFrame(**audio), TextFrame(text="hi")],
+        expected_down_frames=[TextFrame],
+    )
+    assert [type(f) for f in down] == [TextFrame]
