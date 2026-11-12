@@ -3,10 +3,11 @@
 //  Conduit
 //
 //  Resolves a bring-your-own pairing endpoint into a fresh room + token for one
-//  call: POST the endpoint with the API key as a bearer and `{transport}` (plus
-//  `ring` when the call is still ringing, see `PairingRing`), then read the
-//  credentials. A backend that predates `ring` ignores it and dispatches as for
-//  any call. The endpoint itself identifies the agent (one endpoint
+//  call: POST the endpoint with the API key as a bearer and `{transport,
+//  call_signals}` (plus `ring` when the call is still ringing, see `PairingRing`),
+//  then read the credentials. `call_signals` tells the backend that this app sends
+//  `call-connected`, so its agent waits for it before greeting. A backend that
+//  predates `call_signals` or `ring` ignores them and dispatches as for any call. The endpoint itself identifies the agent (one endpoint
 //  per agent), so no agent id is sent. The reference engine nests credentials
 //  under `connection` (which is why the SDK's built-in pairing decoder choked); a
 //  flat shape is also accepted, and `url` is read as a fallback key because
@@ -14,6 +15,7 @@
 //  USER's own server — there is no backend of ours.
 //
 
+import ConduitCallEngine
 import Foundation
 
 enum PairingClient {
@@ -41,8 +43,12 @@ enum PairingClient {
         return try parse(data)
     }
 
+    /// The call-control signals every call of this app carries (all three
+    /// transports deliver them), as the backend sees them on the wire.
+    static let callSignals = CallSignal.allCases.map(\.rawValue)
+
     static func body(transport: TransportKind, ring: PairingRing?) -> [String: Any] {
-        var body: [String: Any] = ["transport": transport.rawValue]
+        var body: [String: Any] = ["transport": transport.rawValue, "call_signals": callSignals]
         body["ring"] = ring?.body
         return body
     }

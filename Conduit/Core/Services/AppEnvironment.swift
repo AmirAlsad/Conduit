@@ -87,6 +87,9 @@ final class AppEnvironment {
         )
         self.callEngine = makeCallEngine(CallEngineConfiguration(
             unknownCallerName: "Agent",
+            // The ringback's start delay and first tone play in full before the
+            // call shows connected and "Connected" is spoken.
+            minimumConnectingDuration: Ringback.minimumConnectingDuration,
             isPushToTalkEnabled: isPushToTalkEnabled
         ))
         callEngine.delegate = callHost

@@ -5,7 +5,7 @@
 //  In-app fake conforming to `SpokenStateAnnouncing`. Records what was spoken so
 //  tests can assert the right phrases fire at the right transitions. Nothing it
 //  announces finishes by itself: a test finishes the phrases with
-//  `finishAnnouncements()`.
+//  `finishAnnouncements()`, and `stopNow()` cuts them off, as the real one does.
 //
 
 import Foundation
@@ -37,6 +37,12 @@ final class FakeSpokenStateAnnouncer: SpokenStateAnnouncing {
         completions.forEach { $0() }
     }
 
+    /// The oldest phrase still playing has finished: run its completion only.
+    func finishOldestAnnouncement() {
+        guard !pendingCompletions.isEmpty else { return }
+        pendingCompletions.removeFirst()()
+    }
+
     func startRepeating(_ phrase: SpokenPhrase) {
         startedRepeating.append(phrase)
         repeatingPhrase = phrase
@@ -50,5 +56,6 @@ final class FakeSpokenStateAnnouncer: SpokenStateAnnouncing {
     func stopNow() {
         repeatingPhrase = nil
         stopNowCount += 1
+        finishAnnouncements() // cut off, as the real one does
     }
 }

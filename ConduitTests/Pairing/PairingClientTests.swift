@@ -99,20 +99,22 @@ struct PairingClientTests {
         return try #require(json as? [String: Any])
     }
 
-    @Test func anOrdinaryRequestSendsOnlyTheTransport() async throws {
+    @Test func anOrdinaryRequestSendsTheTransportAndTheCallSignals() async throws {
         let body = try await sentBody(ring: nil)
-        #expect(body.keys.sorted() == ["transport"])
+        #expect(body.keys.sorted() == ["call_signals", "transport"])
         #expect(body["transport"] as? String == "livekit")
+        // The backend's agent waits for call-connected only from an app that lists it.
+        #expect(body["call_signals"] as? [String] == ["call-connected", "call-held", "call-resumed"])
     }
 
     @Test(arguments: [false, true])
-    func aRingingRequestAddsTheRing(awaitAnswer: Bool) async throws {
-        let body = try await sentBody(ring: PairingRing(callID: Self.callID, awaitAnswer: awaitAnswer))
-        #expect(body.keys.sorted() == ["ring", "transport"])
+    func aRingingRequestAddsTheRing(joinsBeforeAnswer: Bool) async throws {
+        let body = try await sentBody(ring: PairingRing(callID: Self.callID, joinsBeforeAnswer: joinsBeforeAnswer))
+        #expect(body.keys.sorted() == ["call_signals", "ring", "transport"])
         #expect(body["transport"] as? String == "livekit")
         let ring = try #require(body["ring"] as? [String: Any])
-        #expect(ring.keys.sorted() == ["await_answer", "call_id"])
+        #expect(ring.keys.sorted() == ["call_id", "joins_before_answer"])
         #expect(ring["call_id"] as? String == "6f9619ff-8b86-d011-b42d-00c04fc964ff")
-        #expect(ring["await_answer"] as? Bool == awaitAnswer)
+        #expect(ring["joins_before_answer"] as? Bool == joinsBeforeAnswer)
     }
 }

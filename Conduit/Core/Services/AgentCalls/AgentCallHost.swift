@@ -5,7 +5,8 @@
 //  Conduit's side of the call engine: turns agents into call targets (allowing
 //  the ring preparation each push asks for) and reacts to what the engine
 //  reports — writing the call log, speaking the engine's cues (with the mic
-//  withheld until a connect's ringback and "Connected" are done), donating outgoing
+//  withheld while "Connected" plays, after which the engine tells the agent the
+//  user is on the line), donating outgoing
 //  calls to Siri, posting missed-call notifications, supplying the API key that
 //  authenticates ring-status receipts, and registering the device's VoIP token
 //  with every agent that lets itself call the user. The
@@ -29,9 +30,9 @@ final class AgentCallHost: CallEngineDelegate {
     /// The engine whose VoIP token `registerInbound(for:)` sends.
     weak var engine: CallEngine?
     private var registrationTask: Task<Void, Never>?
-    /// The connect whose sounds the mic is withheld for, while it is. Only the
-    /// completion of that connect's "Connected" releases it, so one from an
-    /// earlier connect or call changes nothing.
+    /// The connection whose "Connected" the mic is withheld for, while it is. Only
+    /// the completion of that phrase releases it, so one from an earlier connection
+    /// or call changes nothing.
     private var connectSoundsID: UUID?
     #if DEBUG
     /// DEBUG: where the delegate's view of each ring and call goes (the call trace,
@@ -121,14 +122,14 @@ final class AgentCallHost: CallEngineDelegate {
     func callEngine(_ engine: CallEngine, cue: CallCue) {
         trace("cue: \(cue)")
         switch cue {
-        case .start(.connecting):
-            withholdMicForConnectSounds(engine)
-            announcer.startRepeating(.connecting)
+        // The engine keeps the mic closed while connecting, so the ringback needs
+        // no withhold, and holds the call connecting until its first tone is done.
+        case .start(.connecting): announcer.startRepeating(.connecting)
         case .start(.retrying): announcer.startRepeating(.retrying)
         case .stop: announcer.stopRepeating()
         case .moment(.connected), .moment(.reconnected):
-            // Also the first withhold for a pre-connected answer, which has no
-            // connecting cue; synchronous, so it precedes the engine's mic command.
+            // Synchronous, so it precedes the engine's mic command for this moment;
+            // the release opens the mic and tells the agent to start speaking.
             let id = withholdMicForConnectSounds(engine)
             announcer.announce(.connected) { [weak self, weak engine] in
                 guard let self, let engine, self.connectSoundsID == id else { return }
@@ -142,8 +143,7 @@ final class AgentCallHost: CallEngineDelegate {
         }
     }
 
-    /// Keep the agent from hearing the ringback and "Connected" through the mic.
-    @discardableResult
+    /// Keep the agent from hearing "Connected" through the mic.
     private func withholdMicForConnectSounds(_ engine: CallEngine) -> UUID {
         let id = UUID()
         connectSoundsID = id

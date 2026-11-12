@@ -6,7 +6,9 @@
 //  endpoint (bearer = the agent's API key), so that server can later ring the user.
 //  The token only ever travels to the user's own servers — there is no backend of
 //  ours. It travels with the push features this build's engine understands, so the
-//  server sends a cancel push or a `ring_timeout` only to an app that handles them.
+//  server sends a cancel push or a `ring_timeout` only to an app that handles them,
+//  and the call-control signals its calls carry, so an agent the server starts for a
+//  ring waits for `call-connected` before it greets.
 //  See `docs/INBOUND_CALLS.md` for the contract.
 //
 
@@ -28,6 +30,7 @@ enum PushTokenRegistrar {
         apiKey: String,
         bundleID: String = Bundle.main.bundleIdentifier ?? "",
         pushFeatures: [String] = CallEngine.supportedPushFeatures.sorted(),
+        callSignals: [String] = PairingClient.callSignals,
         session: URLSession = .shared
     ) async {
         var request = URLRequest(url: endpoint)
@@ -44,6 +47,7 @@ enum PushTokenRegistrar {
             "display_name": String(String.UnicodeScalarView(displayName.unicodeScalars.prefix(maxDisplayNameLength))),
             "handle": handle,
             "push_features": pushFeatures,
+            "call_signals": callSignals,
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 

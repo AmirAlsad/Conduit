@@ -350,7 +350,7 @@ struct AgentCallHostTests {
         #expect(try h.loggedEntries().map(\.outcome) == [.failed])
     }
 
-    @Test func connectingLetsTheRingbackFinishButAnEndedCallSilencesItAtOnce() async throws {
+    @Test func connectingStopsTheRingbackAndAnEndedCallSilencesEverything() async throws {
         let h = try AgentCallHostHarness()
         await h.placeCall()
         #expect(h.announcer.repeatingPhrase == .connecting)
@@ -677,21 +677,25 @@ struct AgentCallHostTests {
     @Test func anOutgoingCallKeepsTheMicClosedUntilTheConnectSoundsAreDone() async throws {
         let h = try soundsHarness()
         await h.placeCall()
-        #expect(h.engine.isMicWithheld) // from the connecting cue
-
         await h.system.activateAudioSession()
+        await h.system.awaitPendingWork()
+        #expect(!h.engine.isMicWithheld) // the ringback needs none: the engine keeps the mic closed
+        #expect(!h.transport.micEnabledHistory.contains(true))
+
         h.system.deliverTransportEvent(.connected)
         await h.system.awaitPendingWork()
         #expect(h.announcer.announced == [.connected])
         #expect(h.engine.isMicWithheld)
         #expect(!h.transport.micEnabledHistory.contains(true))
         #expect(!h.engine.isMuted) // not mute: CallKit and the call screen show it unmuted
+        #expect(h.transport.sentSignals.isEmpty) // the agent waits for "Connected" too
 
-        h.announcer.finishAnnouncements() // the ringback has stopped and "Connected" has played
+        h.announcer.finishAnnouncements() // "Connected" has played
         await h.system.awaitPendingWork()
 
         #expect(!h.engine.isMicWithheld)
         #expect(h.transport.isMicEnabled)
+        #expect(h.transport.sentSignals == [.connected]) // now the agent greets
     }
 
     @Test func aCallThatConnectsBeforeTheActivationKeepsTheMicClosedUntilTheSoundsAreDone() async throws {
@@ -714,7 +718,7 @@ struct AgentCallHostTests {
         h.ring()
         #expect(!h.engine.isMicWithheld) // a ring plays nothing of ours
         await h.system.answerIncomingCall()
-        #expect(h.engine.isMicWithheld)
+        #expect(!h.engine.isMicWithheld) // nor does the ringback need a withhold
 
         await h.system.activateAudioSession()
         h.system.deliverTransportEvent(.connected)
@@ -756,10 +760,12 @@ struct AgentCallHostTests {
     }
 
     @Test(arguments: EndWhileConnecting.allCases)
-    func aCallThatEndsWhileConnectingReleasesTheMic(_ ending: EndWhileConnecting) async throws {
+    func aCallThatEndsWhileConnectingLeavesNoWithhold(_ ending: EndWhileConnecting) async throws {
         let h = try soundsHarness()
         await h.placeCall()
-        #expect(h.engine.isMicWithheld)
+        await h.system.activateAudioSession()
+        #expect(!h.engine.isMicWithheld)
+        #expect(!h.transport.micEnabledHistory.contains(true))
 
         switch ending {
         case .byTheUser: await h.engine.endCall()
@@ -780,7 +786,7 @@ struct AgentCallHostTests {
         #expect(!h.engine.isMicWithheld)
     }
 
-    @Test func aHoldWhileConnectingReleasesTheMicAndTheResumeWithholdsItAgain() async throws {
+    @Test func aHoldWhileConnectingNeedsNoWithholdAndTheResumeRingsAgain() async throws {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
@@ -792,8 +798,9 @@ struct AgentCallHostTests {
 
         await h.engine.setOnHold(false)
         await h.system.awaitPendingWork()
-        #expect(h.engine.isMicWithheld) // the ringback plays again
-        #expect(!h.transport.isMicEnabled)
+        #expect(h.announcer.startedRepeating == [.connecting, .connecting]) // the ringback plays again
+        #expect(!h.engine.isMicWithheld)
+        #expect(!h.transport.isMicEnabled) // still connecting
 
         h.system.deliverTransportEvent(.connected)
         h.announcer.finishAnnouncements()
@@ -821,19 +828,40 @@ struct AgentCallHostTests {
         #expect(h.transport.isMicEnabled)
     }
 
-    @Test func connectedFromAnEarlierCallDoesNotReleaseTheNextCallsMic() async throws {
+    /// A call that ends cuts its "Connected" off, so its completion cannot reach the
+    /// next call; within a call, a connection's "Connected" that finishes after the
+    /// next connection's started must not release that one's withhold.
+    @Test func connectedFromAnEarlierConnectionDoesNotReleaseTheNextOnesMic() async throws {
+        let h = try soundsHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected) // "Connected", still playing
+        h.system.deliverTransportEvent(.disconnected(reason: .networkDropped))
+        await h.system.awaitPendingReconnect()
+        h.system.deliverTransportEvent(.connected) // back: "Connected" again
+        #expect(h.engine.isMicWithheld)
+
+        h.announcer.finishOldestAnnouncement() // the first connection's phrase ends now
+        await h.system.awaitPendingWork()
+        #expect(h.engine.isMicWithheld)
+
+        h.announcer.finishAnnouncements()
+        await h.system.awaitPendingWork()
+        #expect(!h.engine.isMicWithheld)
+    }
+
+    @Test func endingTheCallCutsItsConnectedOff() async throws {
         let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
         h.system.deliverTransportEvent(.connected)
-        await h.engine.endCall() // before "Connected" finished
-        h.engine.reset()
+        #expect(h.announcer.unfinishedAnnouncementCount == 1)
 
-        await h.placeCall()
-        #expect(h.engine.isMicWithheld)
-        h.announcer.finishAnnouncements() // the first call's "Connected" ends now
+        await h.engine.endCall()
 
-        #expect(h.engine.isMicWithheld)
+        #expect(h.announcer.stopNowCount >= 1)
+        #expect(h.announcer.unfinishedAnnouncementCount == 0)
+        #expect(!h.engine.isMicWithheld)
     }
 
     @Test func aReconnectWithholdsTheMicOnlyForConnected() async throws {
@@ -918,7 +946,7 @@ struct AgentCallHostTests {
         #expect(h.engine.state == .incomingRinging)
         #expect(h.pairing.requests == [FakePairingResolver.Request(
             endpoint: endpoint, apiKey: "valid-token", kind: .daily,
-            ring: PairingRing(callID: callID, awaitAnswer: false)
+            ring: PairingRing(callID: callID, joinsBeforeAnswer: false)
         )])
         #expect(h.transports.made.allSatisfy { $0.connectCount == 0 })
 
@@ -937,7 +965,7 @@ struct AgentCallHostTests {
         #expect(await h.system.awaitRingPreparation() == .connecting)
 
         #expect(h.transport.connectCount == 1)
-        #expect(h.pairing.requests.map(\.ring) == [PairingRing(callID: callID, awaitAnswer: true)])
+        #expect(h.pairing.requests.map(\.ring) == [PairingRing(callID: callID, joinsBeforeAnswer: true)])
         #expect(!h.transport.isAudioAttached)
         h.system.deliverTransportEvent(.connected)
         #expect(h.engine.ringPreparationPhase == .ready)
@@ -946,8 +974,8 @@ struct AgentCallHostTests {
 
         await h.system.answerIncomingCall()
         await h.system.activateAudioSession()
+        h.announcer.finishAnnouncements() // "Connected" has played
         await h.system.awaitPendingWork()
-        #expect(h.transport.sentSignals.contains(.answered))
 
         if case .connected = h.engine.state {} else {
             Issue.record("Expected connected at the answer, got \(h.engine.state)")
@@ -956,7 +984,7 @@ struct AgentCallHostTests {
         #expect(h.transport.connectCount == 1)
         #expect(h.announcer.startedRepeating.isEmpty) // no ringback
         #expect(h.announcer.announced == [.connected])
-        #expect(h.transport.sentSignals == [.answered])
+        #expect(h.transport.sentSignals == [.connected])
     }
 
     @Test func aMediaRingOnATransportThatCannotJoinWhileRingingOnlyPairs() async throws {
@@ -965,7 +993,7 @@ struct AgentCallHostTests {
         h.ring(callID: callID, preconnect: "media")
         #expect(await h.system.awaitRingPreparation() == .credentialsReady)
 
-        #expect(h.pairing.requests.map(\.ring) == [PairingRing(callID: callID, awaitAnswer: false)])
+        #expect(h.pairing.requests.map(\.ring) == [PairingRing(callID: callID, joinsBeforeAnswer: false)])
         #expect(h.transports.made.allSatisfy { $0.connectCount == 0 })
     }
 
@@ -1054,7 +1082,7 @@ struct AgentCallHostTests {
         #expect(RecordingURLProtocol.requests(host: host).count == 1)
     }
 
-    @Test func registrationBodyCarriesAllSevenKeys() async throws {
+    @Test func registrationBodyCarriesAllEightKeys() async throws {
         let endpoint = RecordingURLProtocol.uniqueEndpoint()
         let agentID = UUID()
         await PushTokenRegistrar.register(
@@ -1072,7 +1100,10 @@ struct AgentCallHostTests {
         let host = try #require(endpoint.host())
         let request = try #require(RecordingURLProtocol.requests(host: host).first)
         let fields = try body(request)
-        #expect(fields.count == 7)
+        #expect(fields.count == 8)
+        // An agent the server starts for a ring waits for call-connected only from a
+        // registration that lists it.
+        #expect(fields["call_signals"] as? [String] == ["call-connected", "call-held", "call-resumed"])
         #expect(fields["voip_token"] as? String == "ab01")
         #expect(fields["platform"] as? String == "ios")
         #expect(fields["bundle_id"] as? String == "com.example.conduit")

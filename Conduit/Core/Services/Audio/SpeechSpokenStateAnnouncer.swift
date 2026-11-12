@@ -11,69 +11,76 @@
 //  the app's session was inaudible throughout a Daily call, while speech in the
 //  system's session was heard and left the call's session unchanged.
 //
-//  The `.connecting` state plays a phone ringback tone instead of speaking. iOS
-//  suppresses ordinary app audio (`AVAudioPlayer`) inside a CallKit VoIP session,
-//  so the tone rides the privileged system-sound server (`AudioServices`) — the
-//  same class of path that lets the spoken cues through during a call. No
-//  `AVAudioSession` is touched (CallKit owns it).
+//  The `.connecting` state plays a phone ringback (`Ringback`) instead of speaking,
+//  starting `Ringback.startDelay` after the cue. The call engine keeps the call
+//  connecting long enough for the first tone (`Ringback.minimumConnectingDuration`),
+//  so a stop always comes after it and stops the ringback at once.
 //
 //  An announcement's completion runs when the synthesizer reports its utterance
-//  finished or cancelled, so the host knows when the call's mic can open without
-//  the agent hearing the cue.
+//  finished or cancelled, or when `stopNow()` cuts it off, so the host knows when
+//  the call's mic can open without the agent hearing the cue.
 //
 
-import AudioToolbox
 import AVFoundation
 import Foundation
 
 @MainActor
 final class SpeechSpokenStateAnnouncer: NSObject, SpokenStateAnnouncing, AVSpeechSynthesizerDelegate {
-    private let synthesizer = AVSpeechSynthesizer()
+    private let synthesizer: AVSpeechSynthesizer
+    private let ringback: RingbackPlaying
     private let repeatInterval: Duration
-    /// The audible part of one `phone-ring.caf` cycle, so a ringback is never cut
-    /// off mid-tone by a call that connects faster than one ring.
-    private let minimumRingback: Duration
-    private let clock = ContinuousClock()
+    private let ringbackDelay: Duration
+    private let sleep: @Sendable (Duration) async throws -> Void
     private var repeatTask: Task<Void, Never>?
-    private var ringSoundID: SystemSoundID = 0
-    private var isRinging = false
-    private var ringStartedAt: ContinuousClock.Instant?
-    private var ringFinishTask: Task<Void, Never>?
-    private var phraseAfterRingback: (phrase: SpokenPhrase, completion: (@MainActor () -> Void)?)?
+    /// The wait before the ringback starts; cancelling it means it never starts.
+    private var ringbackStart: Task<Void, Never>?
     /// The utterances whose end someone is waiting for. Each entry keeps its
     /// utterance alive, so its identifier is not reused before the entry goes.
     private var utteranceCompletions: [ObjectIdentifier: (utterance: AVSpeechUtterance, completion: @MainActor () -> Void)] = [:]
 
-    init(repeatInterval: Duration = .seconds(7), minimumRingback: Duration = .milliseconds(2100)) {
+    init(
+        repeatInterval: Duration = .seconds(7),
+        ringbackDelay: Duration = Ringback.startDelay,
+        synthesizer: AVSpeechSynthesizer = AVSpeechSynthesizer(),
+        ringback: RingbackPlaying? = nil,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) {
         self.repeatInterval = repeatInterval
-        self.minimumRingback = minimumRingback
+        self.ringbackDelay = ringbackDelay
+        self.synthesizer = synthesizer
+        self.ringback = ringback ?? SystemRingback()
+        self.sleep = sleep
         super.init()
         synthesizer.usesApplicationAudioSession = false
         synthesizer.delegate = self
     }
 
     func announce(_ phrase: SpokenPhrase, completion: (@MainActor () -> Void)?) {
-        guard ringFinishTask == nil else {
-            let replaced = phraseAfterRingback?.completion
-            phraseAfterRingback = (phrase, completion)
-            replaced?()
-            return
-        }
         speak(phrase, completion: completion)
     }
 
     func startRepeating(_ phrase: SpokenPhrase) {
-        stopNow()
+        // Not `stopNow()`: a phrase already announced (a "Disconnected" before the
+        // retrying loop) still plays, and the loop's first phrase follows it.
+        stopRepeating()
         // A dialing call should sound like a call: ring (looped) for `.connecting`
         // instead of speaking it. Other states stay spoken.
         if phrase == .connecting {
-            startRingback()
+            let sleep = sleep
+            let delay = ringbackDelay
+            ringbackStart = Task { [weak self] in
+                try? await sleep(delay)
+                guard !Task.isCancelled, let self else { return }
+                self.ringbackStart = nil
+                self.ringback.start()
+            }
             return
         }
         speak(phrase)
+        let sleep = sleep
         repeatTask = Task { [weak self, repeatInterval] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: repeatInterval)
+                try? await sleep(repeatInterval)
                 guard !Task.isCancelled else { return }
                 self?.speak(phrase)
             }
@@ -83,33 +90,19 @@ final class SpeechSpokenStateAnnouncer: NSObject, SpokenStateAnnouncing, AVSpeec
     func stopRepeating() {
         repeatTask?.cancel()
         repeatTask = nil
-        guard isRinging, ringFinishTask == nil else { return }
-        let remaining = ringStartedAt.map { minimumRingback - $0.duration(to: clock.now) } ?? .zero
-        guard remaining > .zero else {
-            stopRingback()
-            return
-        }
-        ringFinishTask = Task { [weak self] in
-            try? await Task.sleep(for: remaining)
-            guard !Task.isCancelled, let self else { return }
-            self.ringFinishTask = nil
-            self.stopRingback()
-            if let pending = self.phraseAfterRingback {
-                self.phraseAfterRingback = nil
-                self.speak(pending.phrase, completion: pending.completion)
-            }
-        }
+        ringbackStart?.cancel()
+        ringbackStart = nil
+        ringback.stop()
     }
 
     func stopNow() {
-        ringFinishTask?.cancel()
-        ringFinishTask = nil
-        let dropped = phraseAfterRingback?.completion
-        phraseAfterRingback = nil
-        repeatTask?.cancel()
-        repeatTask = nil
-        stopRingback()
-        dropped?()
+        stopRepeating()
+        // Every phrase is cut off, so every completion is due now; the
+        // synthesizer's late cancel callbacks then find nothing left to run.
+        let cutOff = utteranceCompletions.values.map(\.completion)
+        utteranceCompletions = [:]
+        synthesizer.stopSpeaking(at: .immediate)
+        cutOff.forEach { $0() }
     }
 
     private func speak(_ phrase: SpokenPhrase, completion: (@MainActor () -> Void)? = nil) {
@@ -137,44 +130,5 @@ final class SpeechSpokenStateAnnouncer: NSObject, SpokenStateAnnouncing, AVSpeec
             guard let entry = self?.utteranceCompletions.removeValue(forKey: id) else { return }
             entry.completion()
         }
-    }
-
-    // MARK: - Ringback (system sound)
-
-    private func startRingback() {
-        guard ringSoundID == 0 else { return }
-        guard let url = Bundle.main.url(forResource: "phone-ring", withExtension: "caf") else {
-            Log.error(.audio, "phone-ring.caf missing from bundle")
-            return
-        }
-        var id: SystemSoundID = 0
-        let status = AudioServicesCreateSystemSoundID(url as CFURL, &id)
-        guard status == noErr else {
-            Log.error(.audio, "Ringback system sound create failed: \(status)")
-            return
-        }
-        ringSoundID = id
-        isRinging = true
-        ringStartedAt = clock.now
-        playRingCycle()
-        Log.info(.audio, "Playing ringback for call state: connecting")
-    }
-
-    /// Loop the ring by replaying each time the cycle finishes, until stopped.
-    private func playRingCycle() {
-        guard isRinging, ringSoundID != 0 else { return }
-        AudioServicesPlaySystemSoundWithCompletion(ringSoundID) { [weak self] in
-            Task { @MainActor in self?.playRingCycle() }
-        }
-    }
-
-    private func stopRingback() {
-        isRinging = false
-        ringStartedAt = nil
-        guard ringSoundID != 0 else { return }
-        // Disposing halts an in-flight play immediately, so the tone never overlaps
-        // the spoken "Connected" cue.
-        AudioServicesDisposeSystemSoundID(ringSoundID)
-        ringSoundID = 0
     }
 }

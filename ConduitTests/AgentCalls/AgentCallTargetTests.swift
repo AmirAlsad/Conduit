@@ -186,9 +186,9 @@ struct AgentCallTargetTests {
         (ConnectRequest.outgoing, PairingRing?.none),
         (ConnectRequest(purpose: .answered, callID: callID), nil),
         (ConnectRequest(purpose: .ringing(joinsBeforeAnswer: false), callID: callID),
-         PairingRing(callID: callID, awaitAnswer: false)),
+         PairingRing(callID: callID, joinsBeforeAnswer: false)),
         (ConnectRequest(purpose: .ringing(joinsBeforeAnswer: true), callID: callID),
-         PairingRing(callID: callID, awaitAnswer: true)),
+         PairingRing(callID: callID, joinsBeforeAnswer: true)),
         (ConnectRequest(purpose: .reconnect(attempt: 1), callID: callID), nil),
         (ConnectRequest(purpose: .reconnect(attempt: 2), callID: nil), nil),
     ])

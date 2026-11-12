@@ -296,7 +296,7 @@ final class PipecatSmallWebRTCTransport: CallTransport {
 
     /// The SDK owns its AVAudioSession configuration and its playout never stopped,
     /// so attaching starts nothing and returns at once: the agent is already audible,
-    /// so the `call-answered` or `call-resumed` the engine sends next reaches an agent
+    /// so the `call-connected` or `call-resumed` the engine sends next reaches an agent
     /// the user can hear. The engine's `setMicEnabled` that follows reopens capture. If a device pass shows CallKit contention, the upgrade is
     /// RTCAudioSession manual-audio gating with the unordered-edges pattern
     /// (potential_skills/callkit.md).

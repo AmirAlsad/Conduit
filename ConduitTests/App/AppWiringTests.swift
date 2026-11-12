@@ -8,9 +8,12 @@
 //  doing nothing while every other test passed.
 //
 
+import Foundation
+import SwiftData
 import Testing
 @testable import Conduit
 import ConduitCallEngine
+import ConduitCallEngineTesting
 
 @MainActor
 struct AppWiringTests {
@@ -21,6 +24,35 @@ struct AppWiringTests {
         #expect(environment.callEngine.delegate === environment.callHost)
         // The host reads its VoIP token from this engine for save-time registration.
         #expect(environment.callHost.engine === environment.callEngine)
+    }
+
+    /// The engine holds a call connecting for the ringback's start delay and first
+    /// tone, so the tone is never cut and "Connected" follows it.
+    @Test func theEngineConnectsNoSoonerThanTheRingbacksFirstTone() throws {
+        let system = SimulatedCallSystem()
+        var configuration: CallEngineConfiguration?
+        let container = try ModelContainer(
+            for: Agent.self, CallLogEntry.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        _ = AppEnvironment(
+            modelContainer: container,
+            keychain: InMemoryKeychain(),
+            contactSync: FakeContactSync(),
+            agentRepository: SwiftDataAgentRepository(context: container.mainContext),
+            announcer: FakeSpokenStateAnnouncer(),
+            microphone: FakeMicrophonePermission(),
+            transportFactory: { _ in FakeTransport() },
+            simulatedCallSystem: system,
+            makeCallEngine: {
+                configuration = $0
+                return CallEngine.simulated(configuration: $0, system: system)
+            }
+        )
+
+        #expect(Ringback.startDelay == .milliseconds(500))
+        #expect(Ringback.toneLength == .milliseconds(2100))
+        #expect(configuration?.minimumConnectingDuration == Ringback.startDelay + Ringback.toneLength)
     }
 
     @Test func launchWiresSaveTimeRegistrationToTheHost() {
