@@ -207,8 +207,10 @@ struct InCallView: View {
     @ViewBuilder
     private func statusLine(state: CallState) -> some View {
         Group {
-            if coordinator.isInterrupted {
-                Text("Paused")
+            if let paused = InCallStatus.pausedText(
+                for: state, isOnHold: coordinator.isOnHold, isInterrupted: coordinator.isInterrupted
+            ) {
+                Text(paused)
             } else if case .connected(let since) = state {
                 HStack(spacing: 4) {
                     if let transport = environment.activeCallAgent?.transportKind.displayName {
@@ -257,12 +259,13 @@ struct InCallView: View {
 
     private var activeControls: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 24) {
+            HStack(spacing: 16) {
                 micControl
                 routeButton
+                holdButton
                 endButton
             }
-            .padding(.horizontal, 22)
+            .padding(.horizontal, 18)
             .padding(.vertical, 12)
             .background(.ultraThinMaterial, in: .capsule)
 
@@ -385,6 +388,23 @@ struct InCallView: View {
         AVAudioSession.sharedInstance().availableInputs?
             .first { AudioRouteKind(portType: $0.portType) == .bluetooth }?
             .portName
+    }
+
+    // MARK: - Hold
+
+    // Holds through CallKit, as the system call screen does, so `isOnHold` follows
+    // once CallKit has performed the hold.
+    private var holdButton: some View {
+        let isOnHold = coordinator.isOnHold
+        return Button {
+            Task { await coordinator.setOnHold(!coordinator.isOnHold) }
+        } label: {
+            controlCircle(systemImage: "pause.fill", filled: isOnHold)
+        }
+        .buttonStyle(.plain)
+        .disabled(!InCallStatus.canHold(coordinator.state))
+        .accessibilityLabel(isOnHold ? "Resume" : "Hold")
+        .accessibilityIdentifier(AccessibilityID.InCall.holdButton)
     }
 
     // MARK: - End button

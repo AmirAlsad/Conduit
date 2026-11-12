@@ -3,7 +3,8 @@
 //  ConduitTests
 //
 //  The in-call status-line copy mapping. `.connected` and `.idle` carry no static
-//  text (the view shows a live timer / no surface).
+//  text (the view shows a live timer / no surface). A held or interrupted call
+//  shows that instead, and the hold control applies only to a call that is up.
 //
 
 import Foundation
@@ -62,5 +63,40 @@ struct InCallStatusTests {
     @Test func agentUnreachableHintPointsAtTheAgentNotTheNetwork() {
         #expect(CallFailureReason.agentUnreachable.hint
             == "Conduit reached the call, but your agent never joined it. Check that your server starts the agent for each call.")
+    }
+
+    // MARK: - Held and paused
+
+    @Test(arguments: [
+        CallState.connecting, .connected(since: Date(timeIntervalSince1970: 0)), .reconnecting(attempt: 0),
+    ])
+    func holdWinsOverTheStateAndAnInterruption(state: CallState) {
+        #expect(InCallStatus.pausedText(for: state, isOnHold: true, isInterrupted: false) == "On Hold")
+        #expect(InCallStatus.pausedText(for: state, isOnHold: true, isInterrupted: true) == "On Hold")
+    }
+
+    @Test func anInterruptionWithoutHoldIsPaused() {
+        let state = CallState.connected(since: Date(timeIntervalSince1970: 0))
+        #expect(InCallStatus.pausedText(for: state, isOnHold: false, isInterrupted: true) == "Paused")
+        #expect(InCallStatus.pausedText(for: state, isOnHold: false, isInterrupted: false) == nil)
+    }
+
+    @Test(arguments: [CallState.ended(.completed), .failed(.lostConnection)])
+    func anEndedCallIsNeverShownHeld(state: CallState) {
+        #expect(InCallStatus.pausedText(for: state, isOnHold: true, isInterrupted: true) == nil)
+    }
+
+    @Test(arguments: [
+        (CallState.idle, false),
+        (.incomingRinging, false),
+        (.dialing, false),
+        (.connecting, true),
+        (.connected(since: Date(timeIntervalSince1970: 0)), true),
+        (.reconnecting(attempt: 2), true),
+        (.ended(.completed), false),
+        (.failed(.agentUnreachable), false),
+    ])
+    func holdAppliesWhileTheCallIsUp(state: CallState, expected: Bool) {
+        #expect(InCallStatus.canHold(state) == expected)
     }
 }

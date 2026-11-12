@@ -4,7 +4,7 @@
 //
 //  Conduit's side of the call engine, driven by the real engine against
 //  fakes: the call-log rows it writes from each record, the engine's cues it
-//  speaks, Siri donation, missed-call
+//  speaks (and the hold moments it keeps silent), Siri donation, missed-call
 //  notifications, the receipt bearer, the agent targets it hands the engine
 //  (direct, pairing, inline push, and the ring preparation it allows), and VoIP
 //  token registration.
@@ -571,6 +571,51 @@ struct AgentCallHostTests {
         #expect(entry.failureReason == .agentUnreachable)
         #expect(entry.failureReasonRaw == CallFailureReason.agentUnreachable.rawValue)
         #expect(entry.outcomeDisplayLabel == "Failed — agent didn't join")
+    }
+
+    // MARK: - Hold
+
+    @Test func holdAndResumeAreSilent() async throws {
+        let h = try AgentCallHostHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        let announced = h.announcer.announced
+        let started = h.announcer.startedRepeating
+        let stops = h.announcer.stopRepeatingCount
+
+        await h.engine.setOnHold(true)
+        await waitUntil { h.engine.isOnHold }
+        #expect(h.engine.isOnHold)
+        await h.engine.setOnHold(false)
+        await waitUntil { !h.engine.isOnHold }
+        #expect(!h.engine.isOnHold)
+
+        #expect(h.announcer.announced == announced)
+        #expect(h.announcer.startedRepeating == started)
+        #expect(h.announcer.stopRepeatingCount == stops)
+        #expect(h.announcer.repeatingPhrase == nil)
+    }
+
+    @Test func holdIsReportedToCallKitAndToTheAgent() async throws {
+        let h = try AgentCallHostHarness()
+        await h.placeCall()
+        await h.system.activateAudioSession()
+        h.system.deliverTransportEvent(.connected)
+        let callID = try #require(h.system.startedCallIDs.first)
+        #expect(h.system.reportedSupportsHolding(callID) == true)
+
+        await h.engine.setOnHold(true)
+        await waitUntil { h.transport.sentSignals.contains(.held) }
+        #expect(h.system.holdRequests.map(\.onHold) == [true])
+        #expect(!h.transport.isMicEnabled)
+        #expect(!h.transport.isAudioAttached)
+
+        await h.engine.setOnHold(false)
+        await waitUntil { h.transport.sentSignals.contains(.resumed) }
+        #expect(h.system.holdRequests.map(\.onHold) == [true, false])
+        #expect(h.transport.isAudioAttached)
+        #expect(h.transport.isMicEnabled)
     }
 
     // MARK: - Pre-connect

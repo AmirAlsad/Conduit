@@ -14,6 +14,7 @@ extension AccessibilityID {
         static let statusLabel = "InCall_StatusLabel"
         static let failureHint = "InCall_FailureHint"
         static let muteButton = "InCall_MuteButton"
+        static let holdButton = "InCall_HoldButton"
         static let endButton = "InCall_EndButton"
         static let pushToTalkButton = "InCall_PushToTalkButton"
         static let routePicker = "InCall_RoutePicker"
