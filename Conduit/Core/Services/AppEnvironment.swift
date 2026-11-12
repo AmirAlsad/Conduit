@@ -157,15 +157,19 @@ final class AppEnvironment {
         simulatedCallSystem = nil
         makeCallEngine = { CallEngine(configuration: $0) }
         transportFactory = { kind in
-            switch kind {
-            case .daily: PipecatDailyTransport()
+            let transport: CallTransport = switch kind {
+            case .daily: makeDailyTransport()
             case .livekit: LiveKitTransport()
             case .smallwebrtc: PipecatSmallWebRTCTransport()
             }
+            #if DEBUG
+            CallTrace.record("transport made: \(kind.rawValue) canConnectWhileRinging=\(transport.canConnectWhileRinging)")
+            #endif
+            return transport
         }
         #endif
 
-        return AppEnvironment(
+        let environment = AppEnvironment(
             modelContainer: container,
             keychain: KeychainService(),
             contactSync: ContactSyncService(),
@@ -177,6 +181,21 @@ final class AppEnvironment {
             simulatedCallSystem: simulatedCallSystem,
             makeCallEngine: makeCallEngine
         )
+        #if DEBUG
+        CallTrace.startSession("launch: daily ring-join \(DebugDailyRingJoin.current().rawValue)")
+        environment.callHost.trace = { CallTrace.record($0) }
+        CallTraceObserver.start(engine: environment.callEngine)
+        #endif
+        return environment
+    }
+
+    /// The Daily transport; in DEBUG, with the ring-join strategy chosen in Settings.
+    private static func makeDailyTransport() -> CallTransport {
+        #if DEBUG
+        DebugDailyRingJoin.makeTransport()
+        #else
+        PipecatDailyTransport()
+        #endif
     }
 
     /// The process-wide live environment. The SwiftUI `App` and the UIKit

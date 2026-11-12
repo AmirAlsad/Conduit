@@ -28,6 +28,11 @@ final class AgentCallHost: CallEngineDelegate {
     /// The engine whose VoIP token `registerInbound(for:)` sends.
     weak var engine: CallEngine?
     private var registrationTask: Task<Void, Never>?
+    #if DEBUG
+    /// DEBUG: where the delegate's view of each ring and call goes (the call trace,
+    /// for the live environment's engine only).
+    var trace: ((String) -> Void)?
+    #endif
 
     init(
         repository: AgentRepository,
@@ -74,12 +79,18 @@ final class AgentCallHost: CallEngineDelegate {
     /// engine still lowers `.media` to `.credentials` for a transport that cannot
     /// join while ringing.
     func callEngine(_ engine: CallEngine, targetForIncomingCall call: IncomingCall) -> CallTarget? {
-        agent(id: call.targetID).map {
+        let agent = agent(id: call.targetID)
+        trace("""
+        ring: call=\(call.callID) known=\(agent != nil) preconnect=\(call.requestedPreparation) \
+        inline=\(call.connection != nil) transport=\(agent?.transportKind.rawValue ?? "-")
+        """)
+        return agent.map {
             target(for: $0, inlineConnection: call.connection, ringPreparation: call.requestedPreparation)
         }
     }
 
     func callEngine(_ engine: CallEngine, didChangeStateFrom old: CallState, to new: CallState) {
+        trace("state: \(old) -> \(new)")
         guard old == .dialing, case .connecting = new,
               let id = engine.activeCall?.targetID, let agent = agent(id: id) else { return }
         // Teach Siri's calling domain that this contact is called via Conduit —
@@ -89,6 +100,7 @@ final class AgentCallHost: CallEngineDelegate {
     }
 
     func callEngine(_ engine: CallEngine, cue: CallCue) {
+        trace("cue: \(cue)")
         switch cue {
         case .start(.connecting): announcer.startRepeating(.connecting)
         case .start(.retrying): announcer.startRepeating(.retrying)
@@ -100,6 +112,11 @@ final class AgentCallHost: CallEngineDelegate {
     }
 
     func callEngine(_ engine: CallEngine, didFinish record: CallRecord) {
+        trace("""
+        record: \(record.direction) outcome=\(record.outcome) \
+        failure=\(record.failureReason.map { "\($0)" } ?? "-") \
+        missed=\(record.missedReason.map { "\($0)" } ?? "-") duration=\(record.duration)
+        """)
         guard let agent = agent(id: record.targetID) else { return }
         repository.addCallLogEntry(CallLogEntry(
             agent: agent,
@@ -125,6 +142,12 @@ final class AgentCallHost: CallEngineDelegate {
 
     func callEngine(_ engine: CallEngine, didUpdateVoIPPushToken token: Data) {
         registrationTask = Task { [weak self] in await self?.registerToken(token) }
+    }
+
+    private func trace(_ line: @autoclosure () -> String) {
+        #if DEBUG
+        trace?(line())
+        #endif
     }
 
     // MARK: - VoIP token registration

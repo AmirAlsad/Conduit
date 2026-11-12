@@ -80,10 +80,10 @@ struct InCallView: View {
 
     #if DEBUG
     /// Poll the coordinator and log every change for the duration this screen is up
-    /// (i.e. the call). Pulled off-device to diagnose mute/state behavior.
+    /// (i.e. the call), with the route the session reports. Pulled off-device to
+    /// diagnose mute/state/route behavior.
     private func traceCall() async {
-        CallTrace.reset()
-        CallTrace.record("trace start")
+        CallTrace.record("in-call screen shown")
         var last = ""
         while !Task.isCancelled {
             let c = coordinator
@@ -92,7 +92,7 @@ struct InCallView: View {
                 .map { "\($0.portType.rawValue):\($0.portName)" }
                 .joined(separator: ",")
             let snapshot = """
-            state=\(c.state) muted=\(c.isMuted) audioActivated=\(c.isAudioActivated) \
+            screen: state=\(c.state) muted=\(c.isMuted) onHold=\(c.isOnHold) audioActivated=\(c.isAudioActivated) \
             selected=\(c.selectedAudioDeviceID ?? "nil") activeRoute=[\(route)] devices=[\(devices)]
             """
             if snapshot != last {
@@ -101,7 +101,7 @@ struct InCallView: View {
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        CallTrace.record("trace end")
+        CallTrace.record("in-call screen hidden")
     }
     #endif
 

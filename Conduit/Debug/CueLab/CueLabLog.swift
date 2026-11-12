@@ -2,7 +2,7 @@
 //  CueLabLog.swift
 //  Conduit
 //
-//  Timestamped Cue Lab lines in the call trace file (`conduit-call-trace.log`),
+//  Cue Lab lines in the call trace file (`conduit-call-trace.log`),
 //  plus the read-only AVAudioSession snapshots they carry. Nothing here sets
 //  session state.
 //
@@ -13,8 +13,7 @@ import Foundation
 
 enum CueLabLog {
     static func record(_ line: String) {
-        let stamp = Date.now.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
-        CallTrace.record("\(stamp) CUELAB \(line)")
+        CallTrace.record("CUELAB \(line)")
     }
 
     static func sessionSummary() -> String {
