@@ -425,10 +425,8 @@ said into a live session), except `.moment(.connected)` of a call answered with 
 agent already there, which says nothing, and
 `.moment(.connectionLost)` says "Disconnected" (once per outage);
 `.moment(.held)` and `.moment(.resumed)` play nothing. The ringback is
-`SystemRingback` (a looped system sound, at the ringer volume); DEBUG builds can
-pick an `AVAudioPlayer` in the app's session instead (Settings > Debug > Ringback,
-`DebugSwitchableRingback`, read at each ringing), which plays only once CallKit has
-activated the session, so that it never activates the session itself. The engine
+`RouteAwareRingback` (`Core/Services/Audio/`), which picks each ring's method from
+the audio route (see the announcer below). The engine
 guarantees every loop is stopped by the time the call ends, a provider reset
 included, and no cues for a ring that is never answered. **The connect sequence**
 of a call the user placed: the engine holds the call in `.connecting` for at least
@@ -685,11 +683,38 @@ single client calling one agent, so there is no thundering-herd to spread.
 deliberately robotic built-in voice, distinct from the agent's, since the agent is
 exactly what's unreachable: "Retrying connection" repeats on a ~7 s cadence,
 "Connected"/"Disconnected" once, and `.connecting` plays a looped phone ringback
-tone (`Ringback`, `SystemRingback`) instead of speaking, starting 0.5 s after the cue,
+tone (`Ringback`) instead of speaking, starting 0.5 s after the cue,
 for calls the user placed only; announced once, `.connecting` is spoken ("Connecting",
 an answered call still connecting after a second). A stop silences the tone at once
-(the engine's outgoing minimum connecting time covers the first tone), and `stopNow()` also cuts off speech in progress. A phrase the synthesizer has not started (its `didStart`) within 1.5 s of the request is stale: everything queued or speaking is cut off and its completions run, so a late phrase is never heard after its moment and the first "Connected"'s withhold cannot outlast that bound by much. The retrying loop never queues a repeat while its previous one has not finished; that repeat is skipped and the next tick speaks. In DEBUG builds each phrase's request, `didStart`, `didFinish`, `didCancel` and cut-off go to the call trace (`speech: ...` lines). The real `SpeechSpokenStateAnnouncer` uses
-`AVSpeechSynthesizer` and the system-sound server for the tone; it must mix with
+(the engine's outgoing minimum connecting time covers the first tone), and `stopNow()` also cuts off speech in progress.
+**The ringback's method follows the route** (`RouteAwareRingback`), because neither
+way of playing it works everywhere (device test, iPhone 17, iOS 27.0): the system
+sound (`SystemRingback`, the system-sound server, at the ringer volume) is quiet but
+fine at the ear and far too loud in AirPods, where on LiveKit it also jumps in level
+mid-ring; an `AVAudioPlayer` in the app's session (`AudioPlayerRingback`, `phone-ring.caf`
+looped at half the call volume) is steady in AirPods and inaudible on the earpiece even
+at full volume. `RingbackMethod.forOutput(_:)` maps every `AVAudioSession.Port`:
+Bluetooth HFP, A2DP and LE, wired headphones, car audio and USB audio take the audio
+player; the earpiece and the speaker, every other output type (line out, HDMI,
+AirPlay, DisplayPort, Thunderbolt, FireWire, PCI, AVB, virtual), the input-only types
+and any type it does not know take the system sound, which has been heard on every
+route tried, whereas the player's failure is silence. The route's first output
+decides. A route is the call's only once CallKit has activated the session, so a ring
+waits for the engine's `isAudioActivated` before it chooses (on a fast activation the
+choice is still at the 0.5 s start; on a slow one the first tone starts later and the
+outgoing minimum may cut it short); a ring stopped before the activation never plays, a
+deactivation silences it and the next activation plays it again, and the method chosen
+is kept for the whole ring, even if AirPods connect mid-ring. The announcer calls
+`prepare()` at the connecting cue: the player is made from the file then (that
+touches no session), and once the session is activated on a headset-type route it is
+readied with `prepareToPlay()`, so the ring's `play()` does not do either. Neither the
+player nor anything else here activates, deactivates or configures `AVAudioSession`
+(a player that prepares or plays in an inactive session activates it, hence the
+waits); the route is only read. In DEBUG builds the choice, the route, the waits,
+the player's make / `prepareToPlay()` / `play()` results with their times, the
+silencing and the stop go to the call trace (`ringback:` and `ringback (audio player):`
+lines); Release builds compile none of it. A phrase the synthesizer has not started (its `didStart`) within 1.5 s of the request is stale: everything queued or speaking is cut off and its completions run, so a late phrase is never heard after its moment and the first "Connected"'s withhold cannot outlast that bound by much. The retrying loop never queues a repeat while its previous one has not finished; that repeat is skipped and the next tick speaks. In DEBUG builds each phrase's request, `didStart`, `didFinish`, `didCancel` and cut-off go to the call trace (`speech: ...` lines). The real `SpeechSpokenStateAnnouncer` uses
+`AVSpeechSynthesizer`, and the tone as above; it must mix with
 (never deactivate) the CallKit-owned session — that ducking/session wiring is
 finalized in WS-3. `AgentCallHost` drives it from the engine's cue events (see
 above), not from state transitions, so a loop stops by the time the call ends.

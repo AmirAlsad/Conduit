@@ -7,6 +7,26 @@ promote it to `potential_skills/<domain>.md`. Format/lifecycle:
 
 ---
 
+### The ringback was inaudible on the earpiece or far too loud in AirPods, depending on how it was played
+First seen: 2026-11-12 (device A/B, iPhone 17, iOS 27.0, Daily and LiveKit)
+
+**Pattern:** The looped system sound (`AudioServicesPlaySystemSound`) plays at the
+ringer volume: fine at the ear, far too loud in AirPods, and on LiveKit it jumped in
+level mid-ring. An `AVAudioPlayer` in the app's session plays at the call volume:
+right in AirPods, inaudible on the earpiece even at full volume although `play()`
+returned true on the Receiver route. Made and played at the ring's start, its
+`AVAudioPlayer(contentsOf:)` + `play()` blocked the main actor 0.3 to 1.6 s.
+
+**Rule:** Choose the ringback's method by the route at CallKit's activation
+(`RouteAwareRingback`, `RingbackMethod.forOutput`) and keep it for the ring. Make
+the player when the call is placed and `prepareToPlay()` it once the session is
+activated (never before: preparing or playing in an inactive session activates it).
+
+**Why it's missed:** The simulator has no CallKit session and one route; only a
+listen on each route shows it.
+
+---
+
 ### SmallWebRTC calls moved to the loudspeaker while connecting
 First seen: 2026-11-12 (device run with the engine's speaker default off; the package's Daily adapter had the same bug, fixed the same day)
 

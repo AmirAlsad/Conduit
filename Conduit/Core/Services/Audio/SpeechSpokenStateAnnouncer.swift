@@ -13,10 +13,11 @@
 //
 //  Repeating `.connecting` plays a phone ringback (`Ringback`) instead of speaking,
 //  starting `Ringback.startDelay` after the cue; the host repeats it only for a call
-//  the user placed. The call engine keeps such a call connecting long enough for
-//  the first tone (`Ringback.minimumOutgoingConnectingDuration`), so a stop always
-//  comes after it and stops the ringback at once. Announced once, `.connecting` is
-//  spoken ("Connecting").
+//  the user placed, and the ringback is told to prepare at the cue itself. The call
+//  engine keeps such a call connecting long enough for the first tone
+//  (`Ringback.minimumOutgoingConnectingDuration`), so a stop always comes after it
+//  and stops the ringback at once. Announced once, `.connecting` is spoken
+//  ("Connecting").
 //
 //  An announcement's completion runs when the synthesizer reports its utterance
 //  finished or cancelled, or when it is cut off, so the host knows when the call's
@@ -93,6 +94,7 @@ final class SpeechSpokenStateAnnouncer: NSObject, SpokenStateAnnouncing, AVSpeec
         // A dialing call should sound like a call: ring (looped) for `.connecting`
         // instead of speaking it. Other states stay spoken.
         if phrase == .connecting {
+            ringback.prepare()
             let sleep = sleep
             let delay = ringbackDelay
             ringbackStart = Task { [weak self] in

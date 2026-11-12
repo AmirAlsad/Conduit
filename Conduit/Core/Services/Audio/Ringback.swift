@@ -6,10 +6,10 @@
 //  and its timing, which the call engine's outgoing minimum connecting time is set
 //  from. An answered call gets no ringback.
 //
-//  iOS suppresses ordinary app audio (`AVAudioPlayer`) inside a CallKit VoIP
-//  session, so the tone rides the privileged system-sound server
-//  (`AudioServices`), the same class of path that lets the spoken cues through
-//  during a call. No `AVAudioSession` is touched (CallKit owns it).
+//  The app plays it with `RouteAwareRingback`, which picks per ring between the
+//  system-sound server (`SystemRingback`, below) and an `AVAudioPlayer` in the
+//  app's session (`AudioPlayerRingback`) by the audio route. No `AVAudioSession` is
+//  activated, deactivated or configured (CallKit owns it).
 //
 
 import AudioToolbox
@@ -31,12 +31,15 @@ enum Ringback {
 /// Plays the ringback on a loop until stopped.
 @MainActor
 protocol RingbackPlaying: AnyObject {
+    /// The call was placed and a ring may follow: get ready without touching the
+    /// audio session. A `stop()` undoes it.
+    func prepare()
     func start()
     /// Stop at once, mid-tone if need be. Does nothing when not ringing.
     func stop()
 }
 
-/// The ringback as a looped system sound.
+/// The ringback as a looped system sound, at the ringer volume, whatever the route.
 @MainActor
 final class SystemRingback: RingbackPlaying {
     private var soundID: SystemSoundID = 0
@@ -44,6 +47,8 @@ final class SystemRingback: RingbackPlaying {
     #if DEBUG
     var trace: ((String) -> Void)?
     #endif
+
+    func prepare() {}
 
     func start() {
         guard soundID == 0 else { return }

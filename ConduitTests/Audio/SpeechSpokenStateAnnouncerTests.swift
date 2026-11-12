@@ -3,9 +3,10 @@
 //  ConduitTests
 //
 //  The real announcer's timing, with its ringback, synthesizer and sleep replaced:
-//  the ringback starts a moment after the connecting cue (never, for a call that
-//  stops or ends first), a stop silences it at once (the engine holds the call
-//  connecting until its first tone is done), and an ended call cuts speech off in
+//  the ringback is prepared at the connecting cue and starts a moment after it
+//  (never, for a call that stops or ends first), a stop silences it at once (the
+//  engine holds the call connecting until its first tone is done), and an ended
+//  call cuts speech off in
 //  the middle and runs the phrase's completion. A phrase the synthesizer does not
 //  start within the start bound is cut off with everything queued; a repeat never
 //  queues behind an unfinished one. The synthesizer's callbacks are driven by hand.
@@ -18,8 +19,10 @@ import Testing
 
 @MainActor
 private final class RecordingRingback: RingbackPlaying {
+    private(set) var prepares = 0
     private(set) var starts = 0
     private(set) var stops = 0
+    func prepare() { prepares += 1 }
     func start() { starts += 1 }
     func stop() { stops += 1 }
 }
@@ -101,6 +104,7 @@ struct SpeechSpokenStateAnnouncerTests {
         let announcer = announcer()
         announcer.startRepeating(.connecting)
         await settle()
+        #expect(ringback.prepares == 1) // at the cue, ahead of the ring
         #expect(ringback.starts == 0)
         #expect(sleeper.requested == [Ringback.startDelay])
 
