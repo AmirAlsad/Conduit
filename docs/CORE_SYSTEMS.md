@@ -488,7 +488,11 @@ Key behaviors:
   detaches the transport's audio (on resume it attaches again once CallKit has
   re-activated the session), plays no cues, spends no reconnect retries and
   suspends the first connect's join deadline, and sends the agent `call-held`
-  (`call-resumed` after). Held time counts toward the call's duration. The
+  (`call-resumed` after). Held time counts toward the call's duration. A resume
+  that CallKit does not follow with an audio activation within 2 s (seen after a
+  phone call on iOS 27) is asked for again: the engine holds and resumes the call
+  through CallKit, silently, up to 3 times per resume, stopping at the activation,
+  a hold or the call's end, and never overriding a hold asked for meanwhile. The
   transport must stop and restart playout there: LiveKit and Daily do (Daily by
   unsubscribing from the agent's audio), SmallWebRTC cannot, so a held SmallWebRTC
   call is silent only if the agent honours `call-held`.
