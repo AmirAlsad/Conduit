@@ -19,6 +19,15 @@
 //  engine calls after CallKit activation. `attachAudioSession`/
 //  `detachAudioSession` are no-ops pending the on-device audio verdict.
 //
+//  Attempts: `SmallWebRTCConnectionGate` decides what each connect attempt reports
+//  and what a connect does with a session that is still up. `disconnect()` takes
+//  the session away and releases its client, so a later connect builds a new one.
+//
+//  Errors: every connect error is `.connectionFailed`. The SDK's HTTP error for a
+//  rejected offer carries only a message, no status code, so a 401 cannot be told
+//  apart without matching text, and a wrong guess now ends a reconnecting call as a
+//  bad token. A rejected API key is caught exactly one step earlier, by pairing.
+//
 
 import ConduitCallEngine
 import Foundation
@@ -26,35 +35,60 @@ import PipecatClientIOS
 import PipecatClientIOSSmallWebrtc
 
 @MainActor
-final class PipecatSmallWebRTCTransport: CallTransport, PipecatClientDelegate {
+final class PipecatSmallWebRTCTransport: CallTransport {
     nonisolated let events: AsyncStream<TransportEvent>
     private nonisolated let continuation: AsyncStream<TransportEvent>.Continuation
 
-    private let client: PipecatClient
-    private var didReportConnected = false
-    private var userRequestedDisconnect = false
+    /// A Pipecat client and the mapper that is its delegate (`PipecatClient.delegate`
+    /// is weak, so the session keeps the mapper alive).
+    private struct Session {
+        let client: PipecatClient
+        let events: SmallWebRTCEventMapper
+    }
+
+    private var session: Session?
 
     init() {
         let (stream, continuation) = AsyncStream.makeStream(of: TransportEvent.self)
         self.events = stream
         self.continuation = continuation
+    }
+
+    private func makeSession() -> Session {
         // Join with the mic disabled; capture is enabled only on CallKit activation
         // (via setMicEnabled), preserving the audio-session-ownership invariant.
-        self.client = PipecatClient(
+        let client = PipecatClient(
             options: PipecatClientOptions(
                 transport: PipecatClientIOSSmallWebrtc.SmallWebRTCTransport(),
                 enableMic: false,
                 enableCam: false
             )
         )
-        self.client.delegate = self
+        let events = SmallWebRTCEventMapper(continuation: continuation)
+        client.delegate = events
+        return Session(client: client, events: events)
     }
 
     // MARK: - CallTransport
 
     func connect(_ connection: CallConnection) async throws {
-        didReportConnected = false
-        userRequestedDisconnect = false
+        var session = self.session ?? makeSession()
+        self.session = session
+        switch session.events.gate.plan(for: Self.phase(of: session.client.state)) {
+        case .join:
+            break
+        case .reportConnected:
+            if let event = session.events.gate.reconfirmConnected() { continuation.yield(event) }
+            return
+        case .awaitJoinUnderWay:
+            return
+        case .replaceSession:
+            await retire(session)
+            session = makeSession()
+            self.session = session
+        }
+
+        session.events.gate.connectDidStart()
         do {
             // A pairing agent's connection is the offer URL plus a short-lived
             // bearer for it — the engine key itself never rides the offer leg.
@@ -66,15 +100,19 @@ final class PipecatSmallWebRTCTransport: CallTransport, PipecatClientDelegate {
             let params = SmallWebRTCTransportConnectionParams(
                 webrtcRequestParams: APIRequest(endpoint: connection.url, headers: headers)
             )
-            try await client.connect(transportParams: params)
+            try await session.client.connect(transportParams: params)
         } catch {
+            session.events.gate.connectDidFail()
             Log.error(.transport, "SmallWebRTC connect failed: \(error)")
             throw TransportError.connectionFailed(String(describing: error))
         }
     }
 
     func disconnect() async {
-        userRequestedDisconnect = true
+        guard let session else { return }
+        self.session = nil
+        session.events.gate.userDidRequestDisconnect()
+        let client = session.client
         // Deliberate hangup: explicit end signal so the engine ends at once.
         // SmallWebRTC's data channel delivers client RTVI messages cleanly, so
         // the plain client-message path works (unlike LiveKit's raw envelope).
@@ -86,11 +124,32 @@ final class PipecatSmallWebRTCTransport: CallTransport, PipecatClientDelegate {
         // The SDK's audio manager starts managing the shared AVAudioSession on connect
         // and only stops on release(), not on disconnect(). Left running, it re-applies
         // its own route (speaker) on every later route change, in calls on any transport.
-        // A transport is never reused after disconnect, so releasing here is safe.
         client.release()
+        client.delegate = nil
+    }
+
+    /// Leave a session that is being replaced without reporting anything from it,
+    /// and stop its audio manager before the next one starts.
+    private func retire(_ session: Session) async {
+        session.events.gate.retire()
+        session.client.delegate = nil
+        do { try await session.client.disconnect() }
+        catch { Log.error(.transport, "SmallWebRTC disconnect (replaced session) error: \(error)") }
+        session.client.release()
+    }
+
+    private static func phase(of state: TransportState) -> SmallWebRTCSessionPhase {
+        switch state {
+        case .authenticating, .authenticated, .connecting, .connected: .joining
+        case .ready: .ready
+        case .disconnecting: .leaving
+        case .initializing, .initialized, .disconnected, .error: .idle
+        @unknown default: .leaving
+        }
     }
 
     func setMicEnabled(_ enabled: Bool) async {
+        guard let client = session?.client else { return }
         do { try await client.enableMic(enable: enabled) }
         catch { Log.error(.transport, "SmallWebRTC enableMic(\(enabled)) error: \(error)") }
     }
@@ -98,14 +157,15 @@ final class PipecatSmallWebRTCTransport: CallTransport, PipecatClientDelegate {
     // The SDK models audio routes (speaker / earpiece / Bluetooth / wired) as its
     // "mic" devices, same surface as Daily.
     func availableAudioDevices() async -> [AudioDeviceInfo] {
-        client.getAllMics().map { AudioDeviceInfo(id: $0.id.id, name: $0.name) }
+        session?.client.getAllMics().map { AudioDeviceInfo(id: $0.id.id, name: $0.name) } ?? []
     }
 
     func selectedAudioDevice() async -> AudioDeviceInfo? {
-        client.selectedMic.map { AudioDeviceInfo(id: $0.id.id, name: $0.name) }
+        session?.client.selectedMic.map { AudioDeviceInfo(id: $0.id.id, name: $0.name) }
     }
 
     func setAudioDevice(_ id: String) async {
+        guard let client = session?.client else { return }
         do { try await client.updateMic(micId: MediaDeviceId(id: id)) }
         catch { Log.error(.audio, "SmallWebRTC setAudioDevice(\(id)) error: \(error)") }
     }
@@ -119,8 +179,18 @@ final class PipecatSmallWebRTCTransport: CallTransport, PipecatClientDelegate {
     func detachAudioSession() async {
         // See attachAudioSession.
     }
+}
 
-    // MARK: - PipecatClientDelegate (→ TransportEvent)
+/// Translates the Pipecat client's delegate callbacks into `TransportEvent`s,
+/// through the attempt's gate.
+@MainActor
+private final class SmallWebRTCEventMapper: PipecatClientDelegate {
+    private nonisolated let continuation: AsyncStream<TransportEvent>.Continuation
+    var gate = SmallWebRTCConnectionGate()
+
+    init(continuation: AsyncStream<TransportEvent>.Continuation) {
+        self.continuation = continuation
+    }
 
     nonisolated func onTransportStateChanged(state: TransportState) {
         Task { @MainActor in self.mapState(state) }
@@ -131,30 +201,31 @@ final class PipecatSmallWebRTCTransport: CallTransport, PipecatClientDelegate {
         case .initializing, .initialized, .authenticating, .authenticated, .connecting, .connected:
             continuation.yield(.connecting)
         case .ready:
-            emitConnectedOnce()
+            reportReady()
         case .disconnecting:
             break
         case .disconnected:
-            continuation.yield(.disconnected(reason: userRequestedDisconnect ? .requestedByUser : .networkDropped))
+            if let event = gate.transportDidDisconnect() { continuation.yield(event) }
         case .error:
-            continuation.yield(.error(.connectionFailed("transport error")))
+            // A connect that fails also throws, and the throw reports it.
+            if gate.isLive { continuation.yield(.error(.connectionFailed("transport error"))) }
         @unknown default:
             break
         }
     }
 
-    private func emitConnectedOnce() {
-        guard !didReportConnected else { return }
-        didReportConnected = true
-        continuation.yield(.connected)
+    private func reportReady() {
+        if let event = gate.transportDidBecomeReady() { continuation.yield(event) }
     }
 
     nonisolated func onBotReady(botReadyData: BotReadyData) {
-        Task { @MainActor in self.emitConnectedOnce() }
+        Task { @MainActor in self.reportReady() }
     }
 
     nonisolated func onBotDisconnected(participant: Participant) {
-        continuation.yield(.disconnected(reason: .botLeft))
+        Task { @MainActor in
+            if let event = self.gate.botDidLeave() { self.continuation.yield(event) }
+        }
     }
 
     nonisolated func onDisconnected() {
@@ -184,6 +255,9 @@ final class PipecatSmallWebRTCTransport: CallTransport, PipecatClientDelegate {
     }
 
     nonisolated func onError(message: RTVIMessageInbound) {
-        continuation.yield(.error(.underlying(String(describing: message))))
+        let error = TransportError.underlying(String(describing: message))
+        Task { @MainActor in
+            if self.gate.isLive { self.continuation.yield(.error(error)) }
+        }
     }
 }
