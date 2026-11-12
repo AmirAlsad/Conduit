@@ -407,3 +407,41 @@ async def test_livekit_presence_counts_anyone_but_the_bot(monkeypatch):
     assert await service.human_in_room("conduit-1") is False
     participants.append(SimpleNamespace(name="User"))
     assert await service.human_in_room("conduit-1") is True
+
+
+def test_pairing_for_a_ring_before_apns_answers_is_kept():
+    # The app can wake and pair while the engine still awaits APNs' response.
+    with TestClient(app) as c:
+        _setup(c)
+        apns = app.state.apns
+        connect_status = []
+
+        async def slow_send(*, voip_token, bundle_id, payload):
+            from httpx import ASGITransport, AsyncClient
+
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+                r = await ac.post(
+                    "/connect/loopback",
+                    json={"transport": "daily", "ring": {"call_id": payload["call_id"], "await_answer": True}},
+                    headers=AUTH,
+                )
+                connect_status.append(r.status_code)
+            apns.sends.append((voip_token, bundle_id, payload))
+            return ApnsResult(status=200, apns_id="x")
+
+        apns.send_voip_push = slow_send
+        call_id, _ = _ring(c, preconnect="media", ring_timeout=20)
+        assert connect_status == [200]
+        ring = app.state.rings.get(call_id)
+        assert ring.room_key == "room-abc" and ring.preconnect == "media"
+        assert _deadline(_argv()) == 20 + settings.ring_deadline_margin_secs
+
+
+def test_failed_ring_push_is_not_tracked():
+    with TestClient(app) as c:
+        _setup(c)
+        app.state.apns.result = ApnsResult(status=400, reason="BadDeviceToken")
+        r = c.post("/admin/ring/loopback", json={}, headers=AUTH)
+        assert r.status_code == 502
+        call_id = app.state.apns.sends[-1][2]["call_id"]
+        assert app.state.rings.get(call_id) is None

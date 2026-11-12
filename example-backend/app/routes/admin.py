@@ -112,8 +112,14 @@ async def ring(
         ring.ring_bot = ring_flags is not None
         ring.awaits_answer = req.preconnect == "media"
 
-    result = await _push(state, agent_id, reg, payload)
+    # Tracked before the push: the app may pair for this ring (preconnect) before
+    # APNs has even answered us.
     state.rings.add(ring)
+    try:
+        result = await _push(state, agent_id, reg, payload)
+    except HTTPException:
+        state.rings.discard(ring.call_id)
+        raise
     event(
         _log,
         "ring.sent",
