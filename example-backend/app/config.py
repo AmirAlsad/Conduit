@@ -102,7 +102,7 @@ class Settings(BaseSettings):
 
     # --- Behaviour knobs ---
     bot_name: str = "Conduit Bot"
-    default_transport: str = "daily"  # "daily" | "livekit"
+    default_transport: str = "daily"  # "daily" | "livekit" | "smallwebrtc"
 
     # Dev-runner convenience: which agent `python -m bot.bot` (no dispatch args) runs.
     conduit_agent: str = "loopback"
@@ -208,8 +208,8 @@ class Settings(BaseSettings):
     # your topic differs from the app's bundle id.
     apns_topic: str | None = None
     # Which APNs host to try first (the other is the automatic fallback): false →
-    # production first (App Store/TestFlight, the normal case); true → sandbox first
-    # (set this only when iterating on dev-signed Xcode builds, to skip a round-trip).
+    # production first (a build you distributed, e.g. TestFlight under your team);
+    # true → sandbox first (a development build run from Xcode, to skip a round-trip).
     apns_use_sandbox: bool = False
 
     # --- Deployment / ops ---

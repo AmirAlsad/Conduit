@@ -2,7 +2,8 @@
 deadline.
 
 The Conduit app sends RTVI client-messages beside ``end-call``
-(``{"label":"rtvi-ai","type":"client-message","data":{"t":…}}``):
+(``{"label":"rtvi-ai","type":"client-message","data":{"t":…}}``; on Daily and
+SmallWebRTC ``data`` also carries ``"d": null``, and only ``t`` is read):
 
 - ``call-connected``: the user is on the line and can hear the agent. The app
   sends it on every call once the call is connected, iOS has activated its audio,

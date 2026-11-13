@@ -10,6 +10,14 @@ reactively.
     `POST /connect/{agent}` needs only your SFU API key and no public URL. The
     webhook machinery on this page is required *only* for direct mode.
 
+!!! warning "Before you expose the engine to a network"
+    Generate `ENGINE_API_KEY` with `openssl rand -hex 32` (the engine refuses an
+    empty or example key) and serve the engine over HTTPS. In this reference
+    server the pairing key is also the admin key: it rings the phone, ends
+    agents, mints long-lived room tokens and can redirect the agent's rings, so
+    treat it (and any pairing QR that embeds it) as a secret. See
+    [Deploy → Before you expose it](deploy.md#before-you-expose-it).
+
 ## Why direct mode needs a webhook (and pairing doesn't)
 
 In pairing, the engine creates the room and dispatches the agent *inside the
@@ -129,8 +137,10 @@ Conduit app: its bots wait for `call-connected`.
 - **Failed webhooks go dormant** — if your endpoint stops returning `200`, Daily
   marks the webhook `FAILED` after 3 failures and stops sending; re-register to
   reactivate.
-- **Redeploys orphan provisioned rooms.** The engine's registry is in-memory: a
-  restart wipes every room recorded by `/credentials`, so the webhook fires but
-  nobody is dispatched and the call connects to silence. Re-provision after a
-  redeploy, or wire a persistent registry (`app/registry.py` is the seam) before
-  relying on direct mode in production. Pairing is unaffected.
+- **Redeploys can orphan provisioned rooms.** The engine records the rooms
+  `/credentials` made in a SQLite file (`REGISTRY_DB_PATH`, default
+  `registry.db` in the working directory). On an ephemeral filesystem (Railway
+  without a volume) a redeploy wipes it: the webhook fires, nobody is dispatched,
+  and the app ends the call after 30 s as "Agent didn't join". Mount a volume and
+  point `REGISTRY_DB_PATH` at it (see [Deploy](deploy.md)), or re-provision after
+  a redeploy. Pairing is unaffected.

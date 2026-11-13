@@ -15,7 +15,7 @@ it to whoever runs the agent's backend. It is the inbound companion to
 the *app's* APNs key. Because Conduit is **self-built and self-signed** — you build
 it under *your own* Apple Developer team — *you* hold the APNs key and *your* server
 sends the push directly to Apple. The user's VoIP token only ever travels to your
-own server. Anthropic/Conduit operates nothing at runtime.
+own server. Conduit's developer operates nothing at runtime.
 
 ---
 
@@ -39,7 +39,8 @@ screen can carry the user's voice.
 
 ## 1. Token registration
 
-When the user enables inbound for an agent (and whenever iOS refreshes the token),
+When the user saves an agent with inbound enabled, and whenever PushKit hands the
+app its VoIP token (usually when the app starts, and whenever the token changes),
 Conduit POSTs its device VoIP token to that agent's registration endpoint. Store it,
 keyed to the user/agent, for use when you want to ring them.
 
@@ -174,8 +175,10 @@ On answer, Conduit needs a room + token to join. You choose how it gets them:
   the agent's **pairing endpoint** exactly as for an outgoing call (see
   CONNECTION_CONTRACT). Nothing sensitive rides the push. Requires a pairing endpoint.
 
-`room_url` is Daily's `https://…` room or LiveKit's `wss://…` URL, matching the
-agent's transport — same shapes as the pairing response.
+`room_url` is Daily's `https://…` room, LiveKit's `wss://…` URL, or for
+SmallWebRTC your server's offer endpoint (`http(s)://<host>/…/offer`, with
+`token` the bearer for it), matching the agent's transport — same shapes as the
+pairing response.
 
 When a ring asks for `preconnect` (§5), the app may call the pairing endpoint
 **while the phone is still ringing**, and then adds the ring to the usual body:
@@ -328,11 +331,10 @@ already means "answered"; as on every call, greet on `call-connected` (§6).
 
 ### Ready when the user picks up
 
-The phone joins a `media` ring's room within a fraction of a second of the push;
-what the user waits for is your agent. In one Daily `media` ring with inline
-credentials the phone was in the room 0.3 s after the push, the user answered at
-2 s, and the agent joined at 6.7 s (2 to 5 s in other rings that day), so the
-answered call sat connecting for 4.6 s. So:
+The phone joins a `media` ring's room soon after the push, usually before the
+user has even reached for it; what the user waits for is your agent, whose start
+(seconds, for a typical Pipecat bot) can easily outlast the time it takes to
+answer, leaving the answered call connecting until the agent arrives. So:
 
 - **Start your agent first, and send the push once it is in the room**, bounding
   that wait to a few seconds so a slow agent never holds the ring back. At the very
@@ -425,6 +427,9 @@ same envelope:
 { "id": "<…>", "label": "rtvi-ai", "type": "client-message", "data": { "t": "call-connected" } }
 ```
 
+On Daily and SmallWebRTC, `data` also carries `"d": null`
+(`{ "t": "call-connected", "d": null }`): read `t` and ignore any other key.
+
 | `t` | When |
 |---|---|
 | `call-connected` | The user is on the line: on every call (placed by the user, or a ring answered, prepared or not), once the call is connected, iOS has activated its audio, it is not held, and the app's own "Connected" has finished; sent again after every reconnect |
@@ -489,6 +494,13 @@ Agents that don't know these messages can ignore them.
 
 - **Device + paid account only.** None of this runs in the iOS Simulator (no CallKit,
   no PushKit). Verify on hardware.
+- **Your endpoints' key.** Registration and receipts are authenticated with the
+  key the user gave the app, which lives on the phone and in any pairing QR. A
+  holder of a key that can overwrite the registration can redirect the agent's
+  rings to another phone, so give the app a key that can do only what the app
+  does, separate from whatever you use to trigger rings. The reference engine
+  uses one key for everything and says so; see its
+  [deploy guide](backend/deploy.md#before-you-expose-it) before exposing it.
 - **Privacy.** The VoIP token is not a secret credential, but treat it with care: a
   party holding both your APNs key and a device token can ring that device. Keys live
   on your server; tokens are sent only to servers the user opted into.

@@ -1,8 +1,12 @@
 # Deploy
 
-The engine is a single always-on web process whose only inbound surface is HTTPS —
-your agent dials *out* to the Daily/LiveKit cloud SFU, so there's no inbound
-UDP/TURN/media termination to operate. Two constraints shape every deployment:
+The engine is a single always-on web process. Over Daily and LiveKit your agent
+dials *out* to the cloud SFU, so those calls need no inbound UDP, TURN or media
+termination: the inbound surface is HTTPS. SmallWebRTC is the exception: its
+offer route (`/webrtc/{agent_id}/offer`) is always mounted, and a call over it
+has the engine terminate WebRTC itself, which needs UDP from the phone to the
+host (LAN or self-hosted; on an HTTP-only host such as Railway it just fails to
+connect). Two constraints shape every deployment:
 
 - **Always-on.** It must answer `/connect` and webhooks without a cold start —
   disable any serverless/app-sleeping mode.

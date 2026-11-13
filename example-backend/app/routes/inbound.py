@@ -1,7 +1,8 @@
 """Inbound-call token registration and ring-status receipts (docs/INBOUND_CALLS.md).
 
 The Conduit app POSTs its device VoIP token here when the user enables "Let this
-agent call me" (and on every app launch thereafter). The stored token is what
+agent call me" and saves the agent, and again whenever PushKit hands the app a
+token (usually at launch, and when it changes). The stored token is what
 /admin/ring sends the push to. Latest registration per agent wins — the token is
 per-install, app-wide. Newer app builds also send the caller's display name and
 CallKit handle, which are stored and echoed in the ring push, the push

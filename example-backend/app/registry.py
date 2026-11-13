@@ -5,8 +5,8 @@ active bot (idempotent dispatch), and which devices registered a VoIP push token
 SQLite-backed. Rooms and VoIP tokens persist across restarts when
 ``REGISTRY_DB_PATH`` points at durable storage (e.g. a mounted volume); with the
 default cwd file or an ephemeral filesystem, a redeploy loses them — direct-mode
-dispatch until re-provisioned, inbound rings until the app's next launch
-re-registers its token. Active-bot state is deliberately in-memory only: pids are
+dispatch until re-provisioned, inbound rings until the app registers its token
+again (on save, or when PushKit next hands it the token, usually at launch). Active-bot state is deliberately in-memory only: pids are
 process-local (bots die with the dispatcher), and persisting the SPAWNING sentinel
 would permanently block a room after a crash mid-spawn.
 
@@ -185,7 +185,7 @@ class SQLiteRegistry:
 
     async def register_voip(self, registration: VoipRegistration) -> None:
         # Latest registration per backend agent wins (the VoIP token is per-install,
-        # app-wide; the app re-registers on every launch).
+        # app-wide; the app registers on save and whenever PushKit hands it a token).
         with self._lock:
             self._conn.execute(
                 """INSERT OR REPLACE INTO voip_tokens

@@ -112,7 +112,9 @@ class RingRequest(BaseModel):
     """POST /admin/ring/{agent_id} — ring the registered device.
 
     Default (pairing) mode sends a credential-free push; the app resolves
-    /connect/{agent_id} after the user answers, so a declined ring costs nothing.
+    /connect/{agent_id} during the ring (pre-connect, which every ring asks of a
+    device that takes it) or after the user answers (a plain ring, the only kind
+    for which a declined ring costs nothing).
     ``inline`` provisions a room + token NOW and embeds them in the push — the bot
     is dispatched before the user answers, and ended when the ring's first receipt
     is anything but "answered".

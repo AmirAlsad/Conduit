@@ -8,8 +8,9 @@ reference engine; the app↔server contract it implements is
 How it fits together:
 
 1. The user enables **"Let this agent call me"** in the app → the app registers its
-   VoIP push token at `POST /inbound/register/{agent_id}` (sent on save and
-   automatically re-sent on every app launch).
+   VoIP push token at `POST /inbound/register/{agent_id}`: when the agent is saved
+   with the toggle on, and whenever iOS hands the app its VoIP token (PushKit
+   usually does when the app starts, and does when the token changes).
 2. You trigger `POST /admin/ring/{agent_id}` (or `scripts/ring.py`) → when the
    ring needs your agent before the answer (inline credentials, or pre-connect,
    the default for apps that support it) the engine starts it in a room first,
@@ -19,6 +20,14 @@ How it fits together:
    (`/connect/{agent_id}`), during the ring with pre-connect (it then gets that
    room) or after the user answers without it (exactly like an outgoing call:
    your agent is dispatched then), and joins the room.
+
+!!! warning "Before you expose the engine to a network"
+    Generate `ENGINE_API_KEY` with `openssl rand -hex 32` (the engine refuses an
+    empty or example key) and serve the engine over HTTPS. In this reference
+    server the pairing key is also the admin key: it rings the phone, ends
+    agents, mints long-lived room tokens and can redirect the agent's rings, so
+    treat it (and any pairing QR that embeds it) as a secret. See
+    [Deploy → Before you expose it](deploy.md#before-you-expose-it).
 
 !!! note "Device + paid account only"
     None of this runs in the iOS Simulator (no PushKit, no CallKit), and the push
@@ -49,7 +58,7 @@ paste its contents into a log or chat.
 | `APNS_KEY_BASE64` | …or the key's contents, base64-encoded (hosted platforms): `base64 -i AuthKey_XXXXXXXXXX.p8 \| tr -d '\n'` |
 | `APNS_KEY_ID` | The key's ID from the portal |
 | `APNS_TEAM_ID` | Your Apple Developer Team ID |
-| `APNS_USE_SANDBOX` | Optional. The engine rings both APNs environments and falls back automatically, so you rarely set this — it only picks which host is tried *first*. Leave unset/`false` for **production** (App Store / TestFlight, the normal case); set `true` to try **sandbox** first while iterating on a dev-signed Xcode build (skips one round-trip) |
+| `APNS_USE_SANDBOX` | Optional. The engine rings both APNs environments and falls back automatically, so you rarely set this — it only picks which host is tried *first*. `false` (default) tries **production** first (a build you distributed, e.g. through TestFlight under your team); `true` tries **sandbox** first, right for a development build run from Xcode (skips one round-trip) |
 | `APNS_TOPIC` | Optional override; normally derived as `<registered bundle id>.voip` |
 
 Set either `APNS_KEY_PATH` or `APNS_KEY_BASE64`; the engine validates these at the
@@ -60,12 +69,13 @@ moment you ring, not at boot, so the rest of the engine runs fine without them.
     **app** was signed — and the token doesn't reveal which, so the engine tries one
     host and automatically falls back to the other. You normally don't configure this:
 
-    - **Production — the normal route.** A Conduit build installed from **TestFlight or
-      the App Store** registers a production token. This is the default; ring it as-is.
-    - **Sandbox — only if you fork the app.** A build you run from **Xcode onto your own
-      device** is dev-signed and registers a sandbox token. It still rings via the
-      fallback, but set `APNS_USE_SANDBOX=true` to try sandbox first and skip a wasted
-      round-trip while you develop.
+    - **Sandbox — a build you run from Xcode.** Conduit is self-built: a build you
+      run from **Xcode onto your own device** is development-signed and registers a
+      sandbox token. It rings via the fallback; set `APNS_USE_SANDBOX=true` to try
+      sandbox first and skip a wasted round-trip.
+    - **Production — a build you distribute.** A build of yours exported for
+      distribution (TestFlight under your own team, Ad Hoc) registers a
+      production token. The engine tries production first by default.
 
 ## Persistence: the registry and the (optional) volume
 
@@ -77,8 +87,9 @@ worth the effort for you:
 
 - **Without durable storage** (default on platforms with ephemeral filesystems,
   e.g. Railway without a volume): a **redeploy wipes the registry**. Inbound
-  ringing then fails until the user next opens the app (any launch silently
-  re-registers the token — nothing to reconfigure), and direct-mode webhook
+  ringing then fails until the app registers again: when iOS next hands it its
+  VoIP token (usually when the app starts) or the user saves the agent —
+  nothing to reconfigure. Direct-mode webhook
   dispatch fails until you re-run `scripts/provision.py`. Pairing-mode outgoing
   calls are unaffected.
 - **With durable storage**: registrations survive redeploys; your agent can ring
@@ -104,8 +115,9 @@ In Conduit → Add/Edit Agent:
    (e.g. `…/inbound/register/live`) — it's pre-filled from the pairing endpoint, so
    you'll usually just change `connect` to `inbound/register`.
 
-The app POSTs its token immediately and on every launch; you should see
-`inbound.registered` in the engine logs. Newer app builds also send the agent's
+The app POSTs its token when you save, and again whenever PushKit hands it a
+token (usually when the app starts, and whenever the token changes); you should
+see `inbound.registered` in the engine logs. Newer app builds also send the agent's
 `display_name` and `handle` (the caller name and CallKit handle); the engine stores
 them with the token and echoes them in every ring push. Older builds omit them, and
 the push then omits the keys too — the app rings under its own name for the agent.
@@ -152,10 +164,12 @@ Two modes:
   push. With pre-connect, the default for an app that lists it, the engine
   prepares the room and a ring bot **before the push** and hands that room to
   the app's `/connect/{agent_id}` during the ring, so the agent is in the room
-  on pickup; the bot ends on a decline or any other non-answer (below). Without
-  pre-connect (`--preconnect none`, `--no-wait`, or an app that does not list
-  it) the app resolves `/connect/{agent_id}` after the user **answers**, and **a
-  declined ring costs nothing** (no room, no bot).
+  on pickup; the bot ends on a decline or any other non-answer (below). With
+  `--no-wait` the push still asks for pre-connect, but nothing is prepared at
+  ring time: the app's `/connect` during the ring makes the room and a ring bot,
+  which a decline then ends. Only without pre-connect (`--preconnect none`, or an
+  app that does not list it) does the app resolve `/connect/{agent_id}` after
+  the user **answers**, so that **a declined ring costs nothing** (no room, no bot).
 - **Inline (`--inline` / `{"inline": true}`)** — the engine provisions a room and
   embeds `room_url` + `token` in the push. The bot is **dispatched before the
   push**, so the agent is already in the room on pickup. The engine ends that

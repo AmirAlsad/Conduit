@@ -9,6 +9,14 @@ and
 [`bot/pipelines/live.py`](https://github.com/AmirAlsad/Conduit/blob/main/example-backend/bot/pipelines/live.py)
 are working examples — copy `live` as your starting point.
 
+!!! warning "Before you expose the engine to a network"
+    Generate `ENGINE_API_KEY` with `openssl rand -hex 32` (the engine refuses an
+    empty or example key) and serve the engine over HTTPS. In this reference
+    server the pairing key is also the admin key: it rings the phone, ends
+    agents, mints long-lived room tokens and can redirect the agent's rings, so
+    treat it (and any pairing QR that embeds it) as a secret. See
+    [Deploy → Before you expose it](deploy.md#before-you-expose-it).
+
 ## The one thing you write: a pipeline factory
 
 ```python

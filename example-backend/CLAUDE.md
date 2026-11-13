@@ -23,8 +23,10 @@ Start with [`README.md`](./README.md) and
   agent into a room at call time, handles Daily/LiveKit webhooks, sends the VoIP
   pushes and tracks each ring (`rings.py`: receipts, cancels, the ring's bot).
 - `bot/` — launch-agnostic **bot engine** where the agent pipeline runs;
-  `call_control.py` handles the app's `call-answered` / `call-held` / `call-resumed`
-  messages (the audio gates a pipeline returns in `BotBuild.gates`).
+  `call_control.py` handles the app's `call-connected` message (Conduit lists only
+  it in `call_signals`) and the `call-held` / `call-resumed` an app with the
+  call engine's experimental hold sends (the audio gates a pipeline returns in
+  `BotBuild.gates`), plus the ring deadline and the join timeout.
 - `clients/web/` — a Vite/React test client (Daily only).
 - `tests/` — pytest suite (`pytest-asyncio`).
 
@@ -38,10 +40,10 @@ Start with [`README.md`](./README.md) and
 - Mint direct-mode creds to paste into the app: `uv run python scripts/provision.py --transport daily|livekit`
 - Register the Daily direct-mode webhook: `uv run python scripts/daily_webhook.py register --base-url <host>`
   (LiveKit's webhook is dashboard-only — see `docs/direct-mode.md`)
-- Ring the device (inbound call; needs the `APNS_*` vars): `uv run python scripts/ring.py --agent <id> [--inline] [--transport daily|livekit] [--ring-timeout <s>] [--preconnect credentials|media|none] [--no-wait] [--cancel-after <s>]`
+- Ring the device (inbound call; needs the `APNS_*` vars): `uv run python scripts/ring.py --agent <id> [--inline] [--transport daily|livekit|smallwebrtc] [--ring-timeout <s>] [--preconnect credentials|media|none] [--no-wait] [--cancel-after <s>]`
   (`--cancel <call_id>` withdraws a ring instead; `--base-url`, `--json`. `ring_timeout`, `preconnect` and cancel pushes go only to devices whose registration lists that push feature. Pre-connect defaults to the best tier the registration takes; `--preconnect none` sends a plain ring. A ring whose agent starts before the push (`--inline`, or a pre-connected pairing ring, whose room is prepared for the app's request during the ring) is pushed once the bot is in the room, at most `RING_BOT_WAIT_SECS` (8) later; `--no-wait` pushes at once. `--transport` picks the transport of that room; omitted, the one the app registered for its agent, and with none registered a pairing ring prepares nothing)
 - Print a conduit:// pairing link + QR for the app: `uv run python scripts/pair.py --agent <id> [--no-key] [--inbound]`
-  (the link embeds `ENGINE_API_KEY` unless `--no-key` — treat it like the key; shape is a contract with the app's `DeepLinkParser`)
+  (the link embeds `ENGINE_API_KEY` unless `--no-key` — treat it like the key, which is also this server's admin key; shape is a contract with the app's `DeepLinkParser`)
 
 Endpoint notes: per-agent routes (`POST /connect/{agent_id}`, `POST
 /credentials/{agent_id}`) are the canonical shape — the app sends no agent_id;
@@ -59,7 +61,9 @@ the Mac's LAN IP.
 ## Conventions & guardrails
 
 - **Secrets via env only.** Copy `.env.example` → `.env`; never commit a real key,
-  `.env`, or an APNs `.p8`. Same hard rule as the app.
+  `.env`, or an APNs `.p8`. Same hard rule as the app. The engine refuses to
+  start with `ENGINE_API_KEY` empty or a placeholder; one key is both the
+  phone's and the admin key (README "Security").
 - This backend implements the contracts the app depends on — keep it in sync with the
   repo's [`docs/CONNECTION_CONTRACT.md`](../docs/CONNECTION_CONTRACT.md) (outbound) and
   [`docs/INBOUND_CALLS.md`](../docs/INBOUND_CALLS.md) (agent-initiated inbound).

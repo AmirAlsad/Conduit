@@ -257,16 +257,16 @@ need opposite responses:
        whatever room that returns; with a direct room, or inline credentials from
        a ring, it reuses the same credentials and so **rejoins the same room**.
 
-  So the whole budget is about 100 s. If your agent exits the moment the human
-  leaves, stage 1 (and, for fixed or inline credentials, stage 2) finds an empty
-  room and the call dies: hold the room for a grace window that covers the
-  budget (the reference engine defaults to 120 s), and tear down only if nobody
-  returns. A pairing endpoint that answers a reconnect with a **new** room gets a
-  new agent session: the reference engine does this, so after a stage-2
-  reconnect its new agent greets again with no memory of the call, while the old
-  one waits out its grace window alone. To resume the same conversation, return
-  the room the call was already in; the request carries nothing that names it
-  today, so that needs your own bookkeeping.
+    So the whole budget is about 100 s. If your agent exits the moment the human
+    leaves, stage 1 (and, for fixed or inline credentials, stage 2) finds an empty
+    room and the call dies: hold the room for a grace window that covers the
+    budget (the reference engine defaults to 120 s), and tear down only if nobody
+    returns. A pairing endpoint that answers a reconnect with a **new** room gets a
+    new agent session: the reference engine does this, so after a stage-2
+    reconnect its new agent greets again with no memory of the call, while the old
+    one waits out its grace window alone. To resume the same conversation, return
+    the room the call was already in; the request carries nothing that names it
+    today, so that needs your own bookkeeping.
 - **A real hangup says so explicitly.** When the user deliberately ends the call,
   Conduit sends an RTVI **`end-call` client message** before leaving, so you can
   tear down immediately instead of waiting out the grace window (your agent is a
@@ -275,6 +275,9 @@ need opposite responses:
   ```json
   { "id": "<8 chars>", "label": "rtvi-ai", "type": "client-message", "data": { "t": "end-call" } }
   ```
+
+  On Daily and SmallWebRTC, `data` also carries `"d": null`; read `t` and ignore
+  any other key.
 
   How it arrives depends on the transport. On **Daily** and **SmallWebRTC** it
   comes through the Pipecat app-message channel — a Pipecat server sees it in the

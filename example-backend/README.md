@@ -39,8 +39,11 @@ joins, no keys).
   **launch-agnostic**: it never learns whether a pairing call, a webhook, or a dev
   script started it.
 
-Your agent dials **out** to the cloud SFU, so the only inbound surface is the
-HTTPS dispatcher. No inbound UDP / TURN / media termination to operate.
+Over Daily and LiveKit your agent dials **out** to the cloud SFU, so those calls
+need no inbound UDP, TURN or media termination. **SmallWebRTC** is the
+exception: the engine terminates WebRTC itself (`/webrtc/{agent_id}/offer`,
+always mounted, bearer or offer token), so its calls need UDP from the phone to
+this machine; on an HTTP-only host they just fail to connect.
 
 ---
 
@@ -110,11 +113,13 @@ public spec yet):
 
 ```jsonc
 {
-  "transport": "daily" | "livekit",
+  "transport": "daily" | "livekit" | "smallwebrtc",
   "connection": {
-    // daily:   { "room_url": "...", "token": "..." }
-    // livekit: { "room_url": "wss://...", "url": "wss://...", "token": "...", "room_name": "..." }
-    //          (`room_url` is canonical — what the app reads; `url` is a deprecated alias)
+    // daily:       { "room_url": "...", "token": "..." }
+    // livekit:     { "room_url": "wss://...", "url": "wss://...", "token": "...", "room_name": "..." }
+    //              (`room_url` is canonical — what the app reads; `url` is a deprecated alias)
+    // smallwebrtc: { "room_url": "http(s)://<engine>/webrtc/<agent>/offer", "token": "<offer token>" }
+    //              (pairing only)
   },
   "agent_id": "loopback" | "live" | "tone" | "<yours>",
   "expires_at": "<ISO8601 | null>"   // short for pairing, long/null for direct
@@ -209,7 +214,7 @@ to join and hear the agent. `uv run pytest` runs the suite.
 | PATCH | `/webrtc/{agent_id}/offer` | bearer or offer token | SmallWebRTC trickle-ICE candidates |
 | POST | `/webhooks/daily` | signature | Daily participant.joined → idempotent dispatch |
 | POST | `/webhooks/livekit` | signature | LiveKit participant_joined → idempotent dispatch |
-| POST | `/inbound/register/{agent_id}` | bearer | The app registers its VoIP push token, plus (newer builds) the caller `display_name` and `handle` and the device's `push_features` (inbound calls) |
+| POST | `/inbound/register/{agent_id}` | bearer | The app registers its VoIP push token, plus (newer builds) the caller `display_name` and `handle`, the device's `push_features`, the `call_signals` its calls carry, and the `transport` its agent calls over (inbound calls) |
 | DELETE | `/inbound/register/{agent_id}` | bearer | The app deleted the agent — drop its registration |
 | POST | `/inbound/status/{agent_id}` | bearer | The app reports how a ring ended (answered / declined / busy / suppressed_by_focus / unanswered / canceled; unknown statuses are accepted). The first one releases or ends the ring's bot |
 | POST | `/admin/ring/{agent_id}` | bearer | Ring the registered device — agent-initiated inbound call (push echoes the registered `display_name`/`handle`, when present; `ring_timeout`, sent only if the device lists that push feature, and then with every pre-connected ring (`RING_TIMEOUT_SECS` unless given); `preconnect` defaults to the best tier the device's registration takes). A ring whose agent starts before the push (inline, or a pre-connected pairing ring) is pushed once the agent's bot is in the room, at most `RING_BOT_WAIT_SECS` later |
@@ -384,7 +389,8 @@ See `.env.example` for the full list and which feature needs which key.
 
 ## Deploy (your own way)
 
-A single always-on web process; only inbound surface is HTTPS. Keep it a **single
+A single always-on web process; its inbound surface is HTTPS, plus UDP for
+SmallWebRTC calls where the host lets UDP in. Keep it a **single
 process** (see caveats) and **always-on** (no app-sleeping — it must answer
 webhooks and `/connect` without a cold start).
 
@@ -452,8 +458,10 @@ Before you expose this server to a network:
 - **The registry is durable only if its file is.** Direct-mode rooms and inbound
   VoIP tokens live in a SQLite file (`REGISTRY_DB_PATH`, default `registry.db`).
   On an ephemeral filesystem a redeploy wipes it: direct-mode webhooks find no
-  room (call connects to silence) until you re-provision, and inbound ringing
-  fails until the app's next launch re-registers its token. Mount a volume (e.g.
+  room, so no agent is dispatched and the app ends the call after 30 s as "Agent
+  didn't join", until you re-provision; and inbound ringing fails until the app
+  registers its token again (on save, or when PushKit next hands it the token,
+  usually at launch). Mount a volume (e.g.
   `/data/registry.db` on Railway) to survive redeploys. (Pairing is unaffected.)
 - **Single dispatcher process only.** Idempotency uses per-room asyncio locks +
   process-local active-bot state, which serialize only within one event loop —
