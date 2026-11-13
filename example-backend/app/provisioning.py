@@ -49,6 +49,7 @@ async def provision_pairing(
     ring_flags: list[str] | None = None,
     await_connected: bool = False,
     report_joined: bool = False,
+    token_ttl_secs: int | None = None,
 ) -> tuple[ConnectionPayload, str | None]:
     """Returns the payload and the room key the bot was dispatched into (None for
     smallwebrtc, which has no room). ``ring_flags`` (app.rings.ring_bot_flags)
@@ -56,7 +57,10 @@ async def provision_pairing(
     ``await_connected``: the client sends call-connected, so the bot stays silent
     until it (for smallwebrtc, the bot the offer starts). ``report_joined``: the
     bot says when it has joined the room (``Dispatcher.wait_joined``); a ring
-    pushes only then."""
+    pushes only then. ``token_ttl_secs``: the phone's token lifetime, a pairing
+    token's by default (the app fetches new credentials for each engine-level
+    reconnect); an inline ring's must last the whole call."""
+    app_ttl = token_ttl_secs or settings.pairing_token_ttl_secs
     extra = list(ring_flags or ())
     if await_connected:
         extra.append("--await-connected")
@@ -66,9 +70,7 @@ async def provision_pairing(
     if transport == "daily":
         daily = _daily(state)
         room = await daily.create_room(exp_secs=settings.pairing_room_exp_secs)
-        app_token = await daily.mint_token(
-            room.url, ttl_secs=settings.pairing_token_ttl_secs, owner=False
-        )
+        app_token = await daily.mint_token(room.url, ttl_secs=app_ttl, owner=False)
         bot_token = await daily.mint_token(
             room.url, ttl_secs=settings.pairing_token_ttl_secs, owner=True
         )
@@ -88,13 +90,13 @@ async def provision_pairing(
             transport="daily",
             connection={"room_url": room.url, "token": app_token},
             agent_id=agent_id,
-            expires_at=iso_expiry(settings.pairing_token_ttl_secs),
+            expires_at=iso_expiry(app_ttl),
         ), room.name
 
     if transport == "livekit":
         lk = _livekit(state)
         room_name = f"conduit-{uuid.uuid4().hex[:12]}"
-        app_token = lk.user_token(room_name, ttl_secs=settings.pairing_token_ttl_secs)
+        app_token = lk.user_token(room_name, ttl_secs=app_ttl)
         bot_token = lk.agent_token(room_name, ttl_secs=settings.pairing_token_ttl_secs)
         argv = [
             "--transport", "livekit", "--agent", agent_id,
@@ -109,7 +111,7 @@ async def provision_pairing(
             transport="livekit",
             connection=_livekit_connection(lk.url, app_token, room_name),
             agent_id=agent_id,
-            expires_at=iso_expiry(settings.pairing_token_ttl_secs),
+            expires_at=iso_expiry(app_ttl),
         ), room_name
 
     if transport == "smallwebrtc":
@@ -122,13 +124,13 @@ async def provision_pairing(
         if not base:
             raise TransportUnavailable("smallwebrtc needs the request's base URL.")
         token = state.smallwebrtc.mint_token(
-            agent_id, settings.pairing_token_ttl_secs, await_connected=await_connected
+            agent_id, app_ttl, await_connected=await_connected
         )
         return ConnectionPayload(
             transport="smallwebrtc",
             connection={"room_url": f"{base}/webrtc/{agent_id}/offer", "token": token},
             agent_id=agent_id,
-            expires_at=iso_expiry(settings.pairing_token_ttl_secs),
+            expires_at=iso_expiry(app_ttl),
         ), None
 
     raise TransportUnavailable(f"Unknown transport: {transport!r}")

@@ -25,7 +25,7 @@ def test_livekit_agent_and_user_grants():
         algorithms=["HS256"],
     )
     assert user["video"]["agent"] is False
-    # TTL gates the initial connect; assert it was set.
+    # The TTL bounds when the token can join; assert it was set.
     assert user["exp"] > user["nbf"]
 
 

@@ -36,7 +36,7 @@ Paste into Conduit → Add Agent → Direct room (advanced):
   Room URL : https://your-domain.daily.co/abc123
   Token    : eyJhbGciOi…
 
-Expires: 2026-07-09T…  (gates the initial connect only, not reconnects)
+Expires: 2026-07-09T…  (the app reuses this token for every call and reconnect; after it, provision again)
 ```
 
 `ENGINE_API_KEY` is read from `.env`; `--json` dumps the raw payload.

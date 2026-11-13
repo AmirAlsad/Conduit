@@ -154,6 +154,10 @@ async def ring(
                 # A smallwebrtc offer URL on the address this ring was sent
                 # through, like the push's status_url.
                 base_url=str(request.base_url),
+                # The app reuses inline credentials for every attempt of the
+                # call, reconnects included: the token must outlive the call,
+                # not just the ring (a pairing room's whole lifetime).
+                token_ttl_secs=settings.pairing_room_exp_secs,
                 ring_flags=ring_flags,
                 # The bot starts before the app asks for anything, so only the
                 # registration says whether the app sends call-connected.

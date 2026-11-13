@@ -163,7 +163,13 @@ matched the `agent_id` locally.
 On answer, Conduit needs a room + token to join. You choose how it gets them:
 
 - **Inline** — include `room_url` + `token` in the push. Conduit joins directly. Works
-  for any agent (including direct-room agents). Use short-lived join tokens.
+  for any agent (including direct-room agents). **The app uses these credentials
+  for every connection attempt of the call, reconnects included**: it never asks
+  your pairing endpoint for new ones during an inline call. So the token (and the
+  room) must stay valid for the whole call, not only the ring; a token that
+  expires after a few minutes turns the first reconnect after that into a failed
+  call. Keep it scoped to the one room. The reference engine mints inline tokens
+  for its pairing room's lifetime (`PAIRING_ROOM_EXP_SECS`, 1 h).
 - **Via pairing** — omit `room_url`/`token`. After the user answers, Conduit resolves
   the agent's **pairing endpoint** exactly as for an outgoing call (see
   CONNECTION_CONTRACT). Nothing sensitive rides the push. Requires a pairing endpoint.

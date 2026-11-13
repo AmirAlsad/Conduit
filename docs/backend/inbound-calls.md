@@ -165,6 +165,15 @@ Two modes:
   deadline. Pairing with pre-connect gets the agent just as ready, without
   credentials in the push.
 
+    !!! warning "Inline credentials must last the whole call"
+        The app reuses the pushed `room_url` + `token` for every connection
+        attempt of the call, reconnects included; it never asks `/connect` again
+        during an inline call. So the engine mints an inline ring's phone token
+        for `PAIRING_ROOM_EXP_SECS` (default 1 h, which is also when a Daily
+        pairing room closes), not the 5-minute `PAIRING_TOKEN_TTL_SECS` of a
+        pairing token. If you shorten one, shorten the other; a token that
+        expires mid-call fails the next reconnect.
+
     !!! warning "Inline must match the app's transport"
         The app joins inline credentials over the transport **configured for that
         agent in the app**. Pass `--transport daily|livekit|smallwebrtc` to match it — a

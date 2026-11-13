@@ -163,9 +163,11 @@ class Settings(BaseSettings):
     # push contract asks for 5 seconds or more.
     call_connected_grace_secs: float = Field(default=10.0, ge=5.0)
 
-    # Token TTLs. Pairing tokens are born per-call (short); direct tokens are pasted
-    # into the app once and must outlive many calls (long). Expiry gates only the
-    # *initial* connect, never reconnects (design §4).
+    # Token TTLs. Pairing tokens are born per-call (short): the app asks /connect
+    # again for each engine-level reconnect, so they need only last until the
+    # phone joins. Direct tokens are pasted into the app once and reused for every
+    # call and reconnect (long). An inline ring's phone token is reused for the
+    # whole call, so it gets pairing_room_exp_secs (app/routes/admin.py).
     pairing_token_ttl_secs: int = 300  # 5 min
     direct_token_ttl_secs: int = 60 * 60 * 24 * 30  # 30 days
     # Daily room expirations (rooms auto-close at exp). Pairing rooms are ephemeral;

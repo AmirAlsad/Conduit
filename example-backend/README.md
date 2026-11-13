@@ -133,8 +133,13 @@ Fastest app setup: `uv run python scripts/pair.py --agent live` prints a
 Add Agent sheet arrives pre-filled (the link embeds `ENGINE_API_KEY` unless
 `--no-key`; treat it like the key).
 
-A token's expiry gates only the **initial** connect, never reconnects — a
-long-lived direct token won't sabotage reconnection-with-backoff.
+Token lifetimes follow how the app reuses credentials. A pairing token matters
+only until the phone joins: for an engine-level reconnect the app asks
+`/connect` again (see [Teardown](#teardown-reconnection-and-the-end-call-signal)).
+Direct credentials, and an inline ring's, are reused for every connection attempt,
+reconnects included, so they must stay valid for as long as they are used: 30 days
+for direct tokens (`DIRECT_TOKEN_TTL_SECS`), and for inline tokens
+`PAIRING_ROOM_EXP_SECS` (1 h, the pairing room's own lifetime).
 
 ---
 

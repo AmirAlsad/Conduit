@@ -111,7 +111,10 @@ def main() -> None:
     if room_name := conn.get("room_name"):
         print(f"  (LiveKit room '{room_name}' — the token scopes it; the URL stays constant.)")
     if body.get("expires_at"):
-        print(f"Expires: {body['expires_at']}  (gates the initial connect only, not reconnects)")
+        print(
+            f"Expires: {body['expires_at']}  (the app reuses this token for every call "
+            "and reconnect; after it, provision again)"
+        )
     webhook_hint = (
         "scripts/daily_webhook.py register"
         if body["transport"] == "daily"
