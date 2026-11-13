@@ -62,7 +62,7 @@ jobs:
         # OS pinned to 18.6 — the iOS 26 simulator ships a broken accessibility
         # subsystem (the application AX frame reports as 0x0 with no children),
         # which makes every XCUITest query time out even though screens render
-        # fine. Delirio hit the same wall; we pin to iOS 18.x until it's fixed.
+        # fine, so we pin to iOS 18.x until it's fixed.
         # Re-verify on each Xcode/sim bump whether a newer iOS simulator has
         # resolved the broken-AX behavior, and raise the pin when it has.
         #
@@ -123,14 +123,26 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Fails the job on any Swift warning in the app's own sources. Packages (the
+      # engine, which has its own CI, and the third-party SDKs) build from
+      # SourcePackages/, so their warnings are not counted. The runner's grep is BSD grep, whose
+      # extended regexes have no \d; xcodebuild can print a warning more than once.
       - name: Check for Swift warnings
         if: always()
         run: |
-          WARNING_COUNT=$(grep -cE "^\/.+\.swift:\d+:\d+: warning:" xcodebuild.log || true)
-          echo "Swift warnings: $WARNING_COUNT"
-          if [ "$WARNING_COUNT" -gt 0 ]; then
-            grep -E "^\/.+\.swift:\d+:\d+: warning:" xcodebuild.log
+          if [ ! -f xcodebuild.log ]; then
+            echo "No build log; the test step did not run."
+            exit 0
           fi
+          WARNINGS=$(grep -E '^/.+\.swift:[0-9]+:[0-9]+: warning:' xcodebuild.log \
+            | grep -v '/SourcePackages/' | sort -u || true)
+          if [ -z "$WARNINGS" ]; then
+            echo "Swift warnings: 0"
+            exit 0
+          fi
+          echo "Swift warnings: $(printf '%s\n' "$WARNINGS" | wc -l | tr -d ' ')"
+          printf '%s\n' "$WARNINGS"
+          exit 1
 
       - name: Upload test results
         if: failure()

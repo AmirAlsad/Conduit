@@ -111,9 +111,12 @@ swap the destination for an installed one — `platform=iOS Simulator,name=iPhon
 — where XCUITest queries were confirmed to work. CI builds with Xcode 26.3 on
 `macos-15` and keeps iPhone 16 / iOS 18.6; a failing `xcodebuild` fails the job.
 
-A clean build shows **zero** Swift warnings (the strict baseline + CI gate hold
-the count at 0):
+A clean build shows **zero** Swift warnings in the app's own sources (the strict
+baseline holds it at 0, and CI fails the job when its build log has any; packages
+built from `SourcePackages/`, the engine and the third-party SDKs, are not
+counted):
 
 ```bash
-xcodebuild ... build 2>&1 | grep -E "^\/.+\.swift:\d+:\d+: warning:"
+xcodebuild ... build 2>&1 | grep -E '^/.+\.swift:[0-9]+:[0-9]+: warning:' \
+  | grep -v '/SourcePackages/' | sort -u
 ```
