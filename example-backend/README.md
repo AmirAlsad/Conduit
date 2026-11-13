@@ -163,7 +163,12 @@ long-lived direct token won't sabotage reconnection-with-backoff.
 ```bash
 uv sync
 cp .env.example .env     # fill the keys you have; see .env.example for what each feature needs
+openssl rand -hex 32     # paste the output as ENGINE_API_KEY in .env
 ```
+
+The engine refuses to start with `ENGINE_API_KEY` empty or left at an example
+value. Read [Security](#security-one-key-does-everything) before you expose it
+to any network.
 
 **Talk to an agent locally (no dispatcher):**
 ```bash
@@ -207,8 +212,9 @@ to join and hear the agent. `uv run pytest` runs the suite.
 | POST | `/admin/disconnect` | bearer | Force-end an agent in a room (drop test) |
 | GET  | `/health` | none | Liveness / keep-warm |
 
-Bearer = `Authorization: Bearer $ENGINE_API_KEY` (the dispatcher **fails fast on
-boot if it's unset**). Webhooks authenticate by signature (the caller is the SFU).
+Bearer = `Authorization: Bearer $ENGINE_API_KEY` (the dispatcher **refuses to
+start if it's unset or an example value**; it is also the admin key, see
+[Security](#security-one-key-does-everything)). Webhooks authenticate by signature (the caller is the SFU).
 The `/webrtc/*/offer` routes also accept the short-lived **offer token** that a
 smallwebrtc `/connect` minted, so the engine key never rides the offer leg.
 Body for `/connect*` and `/credentials*`:
@@ -360,6 +366,13 @@ webhooks and `/connect` without a cold start).
   `.venv`/`.env`/`node_modules` out — inject secrets via your platform, never the image.
 - **Railway**: `railway.json` sets the start command + `/health` check. **Disable
   Serverless / App Sleeping.**
+- **Forwarded headers.** Ring pushes carry a `status_url` built from the request's
+  scheme and host, so behind a TLS proxy uvicorn runs with `--proxy-headers`. The
+  Dockerfile trusts forwarded headers only from `FORWARDED_ALLOW_IPS` (uvicorn's
+  default `127.0.0.1`): set it to your proxy's address. `railway.json` and the
+  `Procfile` trust any address (`--forwarded-allow-ips="*"`), which is right only
+  because Railway's edge is the sole way in; don't copy that to a host whose port
+  anyone can reach.
 
 Then set the env vars on the platform, and **for direct mode only** register the
 SFU webhook **once** against your public URL (persists across redeploys):
@@ -371,6 +384,38 @@ uv run python scripts/daily_webhook.py register --base-url https://<your-public-
 Provision the credentials to paste into the app with
 `uv run python scripts/provision.py --transport daily|livekit`.
 Full deploy + webhook details: **[docs/direct-mode.md](./docs/direct-mode.md)**.
+
+---
+
+## Security: one key does everything
+
+This is a reference server, and it keeps auth deliberately simple: **one
+`ENGINE_API_KEY` is both the key the phone uses and the admin key.** Whoever
+holds it can:
+
+- start billable agents (`/connect`) and mint long-lived room tokens (`/credentials`);
+- ring the registered phone (`/admin/ring`) and end any agent (`/admin/disconnect`);
+- overwrite an agent's push registration (`/inbound/register`), which redirects
+  that agent's rings to another phone, and post ring receipts (`/inbound/status`).
+
+The phone stores the key in its Keychain and sends it with every pairing request,
+registration and receipt. `scripts/pair.py` embeds it in the `conduit://` link and
+QR code by default (`--no-key` leaves it out), so **treat that QR like the key**:
+don't screenshot it into a chat or leave it on a shared screen. If it leaks,
+generate a new key, restart the engine, and re-enter it in the app.
+
+Before you expose this server to a network:
+
+- Generate the key with `openssl rand -hex 32`; the engine refuses an empty or
+  example key.
+- Serve it over HTTPS (the key is a bearer token). Plain `http://` is only for a
+  LAN you trust (SmallWebRTC testing).
+- Decide whether one key is acceptable for you. A production server should give
+  the phone a separate key that can only pair, register and post receipts, and
+  keep the admin routes (`/admin/*`, `/credentials`) behind a key the phone never
+  sees. This server does not do that yet.
+- Check the forwarded-header trust of your start command (see
+  [Deploy](#deploy-your-own-way)).
 
 ---
 

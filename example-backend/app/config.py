@@ -36,14 +36,43 @@ class MissingSettingError(RuntimeError):
     so callers can catch it and return a clean error (e.g. 503) instead of a 500."""
 
 
+class InsecureSettingError(RuntimeError):
+    """A setting holds a value that must never protect a running engine (an
+    example value copied from the docs)."""
+
+
+# Example values that have shipped in this repo's docs or .env.example: an engine
+# started with one is open to anyone who has read them.
+PLACEHOLDER_ENGINE_KEYS = frozenset({"changeme-long-random-string", "changeme", "change-me"})
+
+
+def check_engine_api_key(key: str | None) -> None:
+    """Refuse an empty or placeholder ENGINE_API_KEY. It is the bearer on every
+    billable route and the admin key (rings, disconnects, registrations), so the
+    engine does not start without a real one (``openssl rand -hex 32``)."""
+    value = (key or "").strip()
+    if not value:
+        raise MissingSettingError(
+            "Missing required setting: ENGINE_API_KEY. Generate one with "
+            "`openssl rand -hex 32` and set it in the environment or .env."
+        )
+    if value.lower() in PLACEHOLDER_ENGINE_KEYS:
+        raise InsecureSettingError(
+            "ENGINE_API_KEY is still the example placeholder. Generate a real one "
+            "with `openssl rand -hex 32`."
+        )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
     # --- Dispatcher auth ---
-    # Bearer token required on /connect, /credentials, /admin/*. Spawning bots is
-    # billable, so an unauthenticated dispatcher on a public URL is a cost/abuse vector.
+    # Bearer token required on /connect, /credentials, /inbound/*, /admin/* and
+    # (or an offer token) /webrtc/*. Spawning bots is billable, and the same key
+    # rings the phone and redirects its rings, so the engine refuses to start
+    # without a real one (check_engine_api_key).
     engine_api_key: str | None = None
 
     # --- Daily Cloud ---

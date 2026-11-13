@@ -122,6 +122,12 @@ makes the room), since a room on the wrong transport would only delay the ring
 and be thrown away. Existing registry databases pick up the new columns
 automatically on the next start.
 
+The registration endpoint takes the same `ENGINE_API_KEY` as pairing, and in this
+reference server that key is also the admin key: anyone holding it can overwrite
+the registration with another phone's token (redirecting the agent's rings) or
+ring the phone through `/admin/ring`. Keep it, and the pairing QR that embeds it,
+secret.
+
 Deleting the agent in the app sends a best-effort `DELETE` to the same endpoint — the engine drops the registration
 (`inbound.unregistered`) and `/admin/ring` returns 404 from then on.
 
@@ -403,10 +409,12 @@ from the app. The engine logs it, and uses a ring's first receipt to release or
 end the bot dispatched for it (inline and pre-connect rings above) — extend the `/inbound/status` route if your agent should
 react further.
 
-The engine derives `status_url` from the ring request's own URL, which behind a
-TLS-terminating proxy (any hosted platform) requires uvicorn's
-`--proxy-headers --forwarded-allow-ips="*"` — already part of this repo's start
-commands. A status receipt also reveals the user's busy/Focus state — fine here
+The engine derives `status_url` from the ring request's own URL, so ring through
+the address the phone can reach (`scripts/ring.py --base-url`). Behind a
+TLS-terminating proxy that needs uvicorn's `--proxy-headers` with the proxy
+trusted: Railway's start command trusts any address (its edge is the only way
+in); the Dockerfile trusts `FORWARDED_ALLOW_IPS` (see
+[Deploy → Forwarded headers](deploy.md#forwarded-headers)). A status receipt also reveals the user's busy/Focus state — fine here
 (it's the user's own server), but don't forward receipts elsewhere.
 
 ## Troubleshooting

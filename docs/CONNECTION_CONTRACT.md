@@ -314,6 +314,13 @@ anyway about 10 seconds after the device joined; the reference engine's
   the device Keychain and never logs it, but the endpoint must be HTTPS. (The one
   sanctioned exception is SmallWebRTC on a private network — plain `http://` to a
   LAN address is normal for local development.)
+- **Give the app's key only what the app needs.** The key the user enters (or
+  scans from a pairing link) is sent with every pairing request, token
+  registration and ring receipt; it lives on the phone and in any QR you print
+  for it. Don't make it your admin key: a key that can also ring the phone,
+  overwrite its registration or mint long-lived tokens turns a leaked QR into
+  control of the agent. The reference engine uses one `ENGINE_API_KEY` for
+  everything, for simplicity, and says so; a production server should not.
 - **The `transport` field is authoritative for this call.** Provision the room for
   the transport Conduit asks for; don't assume one.
 - **Keep credentials short-lived.** Per-call rooms/tokens are the design intent —

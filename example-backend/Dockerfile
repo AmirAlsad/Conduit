@@ -21,5 +21,9 @@ RUN uv sync --frozen --no-dev
 COPY . .
 
 # The dispatcher binds the platform-injected $PORT, or 8000 locally.
+# --proxy-headers trusts X-Forwarded-Proto/-For only from FORWARDED_ALLOW_IPS
+# (uvicorn's default: 127.0.0.1). Set it to your TLS proxy's address so the
+# status_url in ring pushes comes out as https; use "*" only when the container
+# is reachable solely through that proxy (docs/backend/deploy.md).
 EXPOSE 8000
-CMD ["sh", "-c", "uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["sh", "-c", "uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers"]

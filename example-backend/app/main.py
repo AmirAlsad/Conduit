@@ -15,7 +15,7 @@ import httpx
 from fastapi import FastAPI
 
 from app.apns import ApnsSender
-from app.config import settings
+from app.config import check_engine_api_key, settings
 from app.dispatch import Dispatcher
 from app.obs import event, get_logger, setup_logging
 from app.registry import SQLiteRegistry
@@ -41,8 +41,9 @@ async def lifespan(app: FastAPI):
 
     # Fail fast on a misconfigured deploy. Every billable endpoint needs this; without
     # it the container would boot, pass /health, and 500 on every real request — a
-    # silent trap. Crash on startup instead so the deploy never goes "green" broken.
-    settings.require("engine_api_key")
+    # silent trap. An example key copied from the docs is refused too: it would
+    # leave the engine (and the phone's rings) open to anyone who read them.
+    check_engine_api_key(settings.engine_api_key)
 
     # Verify TLS against certifi's CA bundle rather than the OS trust store. The
     # python.org / uv Python builds (notably on macOS) don't read the system store,

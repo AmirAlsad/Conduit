@@ -1,8 +1,11 @@
 """Bearer-token auth for the billable endpoints.
 
-``/connect``, ``/credentials``, and ``/admin/*`` mint credentials and spawn
-billable bots, so they require ``ENGINE_API_KEY`` (design §2.1). Webhooks are the
-exception — they authenticate by signature, since the caller is the SFU.
+``/connect``, ``/credentials``, ``/inbound/*`` and ``/admin/*`` require
+``ENGINE_API_KEY`` (design §2.1): they mint credentials, spawn billable bots and
+ring the phone. It is one key for the phone and the operator alike (see the
+README's Security section). Webhooks are the exception — they authenticate by
+signature, since the caller is the SFU; ``/webrtc/*`` also takes a short-lived
+offer token (app/routes/webrtc.py).
 """
 
 from __future__ import annotations
@@ -15,8 +18,8 @@ from app.config import settings
 
 
 async def require_engine_key(authorization: str = Header(default="")) -> None:
-    # engine_api_key presence is guaranteed at startup (app.main lifespan fails fast
-    # if unset), so we never 500 here — just compare and 401 on mismatch.
+    # A real engine_api_key is guaranteed at startup (app.main lifespan refuses an
+    # empty or placeholder one), so we never 500 here — just compare and 401.
     expected = f"Bearer {settings.engine_api_key}"
     # Constant-time compare so the token can't be recovered by timing.
     if not hmac.compare_digest(authorization, expected):

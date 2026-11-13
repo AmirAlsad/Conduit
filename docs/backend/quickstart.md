@@ -30,9 +30,15 @@ Two reference agents are included:
 cd example-backend
 uv sync
 cp .env.example .env
+openssl rand -hex 32     # paste the output as ENGINE_API_KEY in .env
 ```
 
-Fill in only the keys for what you run (`.env.example` annotates every variable):
+`ENGINE_API_KEY` is required, and the engine refuses to start with it empty or
+left at an example value. It is the only key this server has: the phone sends it
+to pair, and it is also the admin key that rings the phone and can redirect its
+rings (see [Before you expose it](#before-you-expose-it)).
+
+Fill in the other keys only for what you run (`.env.example` annotates every variable):
 
 | You want | You need |
 |---|---|
@@ -97,10 +103,12 @@ Scan the printed QR with the iPhone Camera app — Conduit opens with the agent
 pre-filled (name, transport, endpoint, key); just tap Save. Add `--inbound` to
 also enable "Let this agent call me".
 
-!!! warning "The link embeds your API key by default"
+!!! warning "The link embeds your API key by default, and that key is the admin key"
     One scan = fully configured, but the link (and the QR) is then as secret as
-    `ENGINE_API_KEY` itself. Pass `--no-key` to leave it out and type the key in
-    the app instead.
+    `ENGINE_API_KEY` itself, and in this reference server that key also rings the
+    phone, ends calls, mints long-lived tokens and can redirect the agent's rings
+    to another phone. Don't share or screenshot the QR. Pass `--no-key` to leave
+    the key out and type it in the app instead.
 
 Or fill **Add Agent → Connection** by hand:
 
@@ -110,6 +118,19 @@ Or fill **Add Agent → Connection** by hand:
 
 Tap **Test Connection** — it walks the stages (pairing endpoint → credentials →
 transport → agent ready) and names the step that fails — then call.
+
+## Before you expose it
+
+The quickstart runs on your own machine. Before the engine is reachable from any
+network you don't fully trust:
+
+- **A real key.** `openssl rand -hex 32`; the engine refuses an empty or example one.
+- **One key does everything here.** The key you give the phone is also the admin
+  key (`/admin/ring`, `/admin/disconnect`, `/credentials`, overwriting
+  `/inbound/register`). A production server should give the phone a separate,
+  narrower key; this reference server does not.
+- **HTTPS.** The key is a bearer token. Plain `http://` only on a LAN you trust.
+- **Forwarded headers.** See [Deploy](deploy.md#forwarded-headers).
 
 ## Endpoints
 
@@ -122,6 +143,8 @@ transport → agent ready) and names the step that fails — then call.
 | POST | `/webrtc/{agent_id}/offer` | bearer or offer token | SmallWebRTC: SDP offer in, answer out; spawns the agent in-process |
 | PATCH | `/webrtc/{agent_id}/offer` | bearer or offer token | SmallWebRTC trickle-ICE candidates |
 | POST | `/webhooks/daily`, `/webhooks/livekit` | signature | participant-joined → idempotent dispatch |
+| POST | `/inbound/register/{agent_id}`, `/inbound/status/{agent_id}` | bearer | Push registration and ring receipts ([Inbound calls](inbound-calls.md)) |
+| POST | `/admin/ring/{agent_id}` | bearer | Ring the registered phone |
 | POST | `/admin/disconnect` | bearer | Force-end an agent in a room |
 | GET | `/health` | none | Liveness / keep-warm |
 
