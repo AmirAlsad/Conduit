@@ -174,12 +174,13 @@ final class AppEnvironment {
         makeCallEngine = { CallEngine(configuration: $0) }
         transportFactory = { kind in
             let transport: CallTransport = switch kind {
-            case .daily: PipecatDailyTransport()
-            case .livekit: LiveKitTransport()
+            case .daily: makeDailyTransport()
+            case .livekit: makeLiveKitTransport()
             case .smallwebrtc: PipecatSmallWebRTCTransport()
             }
             #if DEBUG
             CallTrace.record("transport made: \(kind.rawValue) canConnectWhileRinging=\(transport.canConnectWhileRinging)")
+            CallTrace.record("interruption recovery for this call: \(DebugInterruptionRecovery.summary())")
             #endif
             return transport
         }
@@ -209,11 +210,30 @@ final class AppEnvironment {
         let engine = environment.callEngine
         ringback.followAudioActivation { [weak engine] in engine?.isAudioActivated ?? false }
         #if DEBUG
+        DebugInterruptionRecovery.install(on: engine)
         environment.callHost.trace = { CallTrace.record($0) }
         announcer.trace = { CallTrace.record($0) }
         CallTraceObserver.start(engine: environment.callEngine)
         #endif
         return environment
+    }
+
+    /// The Daily transport; in DEBUG, with the recovery after a phone call chosen in Settings.
+    private static func makeDailyTransport() -> CallTransport {
+        #if DEBUG
+        DebugInterruptionRecovery.makeDailyTransport()
+        #else
+        PipecatDailyTransport()
+        #endif
+    }
+
+    /// The LiveKit transport; in DEBUG, with the recovery after a phone call chosen in Settings.
+    private static func makeLiveKitTransport() -> CallTransport {
+        #if DEBUG
+        DebugInterruptionRecovery.makeLiveKitTransport()
+        #else
+        LiveKitTransport()
+        #endif
     }
 
     /// The process-wide live environment. The SwiftUI `App` and the UIKit
