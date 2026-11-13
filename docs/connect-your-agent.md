@@ -13,7 +13,8 @@ credentials. Nothing in the app ever goes stale, and a leaked token is useless
 minutes later.
 
 ```
-Conduit ── POST {"transport": "daily"|"livekit"} + Bearer <API key> ──► your endpoint
+Conduit ── POST {"transport": "daily"|"livekit"|"smallwebrtc",
+               "call_signals": ["call-connected"]} + Bearer <API key> ──► your endpoint
         ◄─────────── { "room_url": "...", "token": "..." } ───────────┘
 Conduit joins the room; your agent is already there.
 ```
@@ -49,6 +50,9 @@ QR included.
     Treat a key-bearing link or QR exactly like the API key itself — share it
     over channels you'd trust with the key, or omit `key` and enter it in the
     app.
+    With the example backend, that key is also the server's admin key: whoever
+    holds it can ring the phone, end agents and re-point an agent's calls at
+    another phone (see [Before you expose it](backend/deploy.md#before-you-expose-it)).
 
 ## SmallWebRTC — no cloud at all
 
