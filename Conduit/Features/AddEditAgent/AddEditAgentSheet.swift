@@ -243,7 +243,7 @@ struct AddEditAgentSheet: View {
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Sends this device's push token to your own server so this agent can ring you.")
-                Link("Learn more.", destination: ExternalLinks.inboundCalls)
+                Link("Learn more.", destination: ExternalLinks.callsFromAgentDocs)
                     .font(.footnote)
                     .accessibilityIdentifier(AccessibilityID.AddAgent.inboundDocsLink)
                 if viewModel.inboundEnabled && viewModel.microphoneDenied {

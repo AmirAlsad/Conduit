@@ -1,7 +1,7 @@
 # Conduit
 
 A native iOS *bring-your-own-agent voice client*: point it at a voice agent you already run
-(Pipecat / Daily / LiveKit over WebRTC) and talking to it becomes a hands-free phone call,
+(Pipecat over WebRTC: Daily, LiveKit, or a SmallWebRTC server you run) and talking to it becomes a hands-free phone call,
 routed through your car over Bluetooth via CallKit. No backend of ours, no accounts, no
 per-minute cost.
 
@@ -51,6 +51,7 @@ Conduit/
   Core/       Shared models, services, utilities (e.g. Log, AccessibilityID)
   Features/   Feature modules (Views / ViewModels / Services / Models)
   Shared/     Reusable components and navigation helpers
+  Debug/      DEBUG-only tooling (call trace, Cue Lab), compiled out of Release
   Resources/  Fonts, JSON, assets
 Config/       Base.xcconfig (committed) + local.xcconfig (gitignored, per-developer)
 docs/         Architecture, conventions, core-systems guides (start at docs/README.md)

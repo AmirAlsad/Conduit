@@ -25,7 +25,7 @@ struct SettingsView: View {
 
             Section("About") {
                 LabeledContent("Version", value: appVersion)
-                Text("Your agent, your keys — credentials never leave this device. [Learn more.](\(ExternalLinks.usingConduit.absoluteString)#privacy)")
+                Text("Your agent, your keys — credentials stay in your Keychain and go only to your own server. [Learn more.](\(ExternalLinks.privacyDocs.absoluteString))")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier(AccessibilityID.Settings.aboutRow)

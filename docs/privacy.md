@@ -1,6 +1,6 @@
 # Privacy Policy
 
-_Last updated: 11 November 2026_
+_Last updated: 12 November 2026_
 
 Conduit is a **bring-your-own-agent** voice calling app for iOS. It connects your
 iPhone to a voice agent **you** run, and gets out of the way. This policy explains
@@ -8,7 +8,8 @@ what the app does and does not do with your information.
 
 The short version: **Conduit has no backend of its own, no account, and no
 analytics. The developer collects no data about you.** Everything the app handles
-either stays on your device or travels only to the server **you** configure.
+either stays on your device or travels only to the servers **you** configure
+(and, for calls from your agent, to addresses your own server names).
 
 ## No data collected by us
 
@@ -19,19 +20,36 @@ usage. The app phones home to nobody.
 ## Information the app handles, and where it goes
 
 **Connection credentials.** The endpoint URLs, API keys, and tokens you enter to
-reach your agent are stored in the iOS **Keychain** on your device. They never
-leave your phone except to authenticate with the server you pointed the app at.
+reach your agent are stored in the iOS **Keychain** on your device. They leave
+your phone only to authenticate with your own servers: the pairing or room
+endpoint you entered, the inbound registration endpoint, and, for a call from your
+agent, the status address your server puts in that ring (see "Incoming-call
+outcomes" below). They are never logged and never written into a contact.
 
 **Inbound calls (optional).** If you turn on "Let this agent call me" for an agent,
-the app sends that agent's registration endpoint your device's VoIP push token, the
-app's bundle id, the agent's id, and the agent's display name and call handle, so
-the agent can ring you. That endpoint is one you chose, and nothing goes anywhere
-else.
+the app sends that agent's registration endpoint, so the agent can ring you: your
+device's VoIP push token, the platform (`ios`), the app's bundle id, the agent's
+id, its display name and call handle, the transport it uses, and which ring and
+call features this version of the app supports. That endpoint is one you chose.
+Your server then rings you through **Apple's push notification service (APNs)**:
+the ring travels from your server through Apple to your phone, carrying what your
+server puts in it.
+
+**Incoming-call outcomes.** If your server asks for it (by including a status
+address in a ring), Conduit reports how that ring ended to that address: the
+call's id and one of answered, declined, busy (you were already on a Conduit call),
+suppressed by Focus, unanswered, or canceled. The report is authenticated with
+that agent's API key. So your server learns whether you were busy or had a Focus
+on, and the key goes to whatever address the ring names: turn on calls from an
+agent only if you trust its server.
 
 **Your voice during a call.** While a call is connected, microphone audio is sent
 in real time, over an encrypted WebRTC connection, **only** to the agent endpoint
 you configured. Conduit does not record, store, or copy your call audio, and does
-not route it to the developer or any third party of ours.
+not route it to the developer or any third party of ours. During a call the app
+also tells your agent when you are on the line (a short "call connected" message,
+when the call connects and again after a reconnect), so it knows when to start
+speaking.
 
 **Call history.** Your list of recent calls (who, when, outcome) is stored locally
 on your device. It is not uploaded anywhere. Deleting a call, or the app, removes it.
@@ -54,7 +72,8 @@ connection stays on your local network.
 The server you connect to — your own backend, and the real-time transport it uses
 (for example a Daily or LiveKit room, or a direct connection to your machine) — is
 operated by **you or whoever you chose**. Their handling of your audio is governed
-by their terms, not ours. Choose endpoints you trust.
+by their terms, not ours. Choose endpoints you trust. Rings from your agent reach
+your phone through Apple's push notification service, under Apple's terms.
 
 Conduit includes no third-party analytics, advertising, attribution, or tracking
 libraries. The app does not track you across other apps or websites.

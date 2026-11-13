@@ -13,7 +13,8 @@ never leave your phone except to reach your own server.
 ```
  your voice           Conduit (iOS)                 your backend
  ─────────►  CallKit call ⇄ WebRTC transport  ⇄  your agent (STT·LLM·TTS)
-              Bluetooth / CarPlay / lock screen     Daily or LiveKit room
+              Bluetooth / CarPlay / lock screen     Daily or LiveKit room,
+                                                    or your own server (SmallWebRTC)
 ```
 
 ## Connect your agent
@@ -25,7 +26,7 @@ Three ways in, depending on how much you want to read:
 2. **[Connection contract](CONNECTION_CONTRACT.md)** — the precise request and
    response shapes. Hand this to whoever runs your agent's backend.
 3. **[Example backend quickstart](backend/quickstart.md)** — a working, self-hosted
-   reference backend (FastAPI + Pipecat, Daily and LiveKit) you can deploy under
+   reference backend (FastAPI + Pipecat; Daily, LiveKit and SmallWebRTC) you can deploy under
    your own keys and point the app at today.
 
 Your server can also **call you**: see [Inbound calls](INBOUND_CALLS.md) for the

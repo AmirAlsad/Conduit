@@ -1,7 +1,7 @@
 # Using Conduit
 
-The longer explanations behind the app's settings and behaviors. Each section
-here is linked from the matching "Learn more" in the app.
+The longer explanations behind the app's settings and behaviors. Several
+sections here are linked from a "Learn more" in the app.
 
 ## Push to talk
 
@@ -15,10 +15,30 @@ in both modes; push-to-talk simply adds a second gate.
 ## Where the sound comes from
 
 A call starts like a phone call: on the earpiece, unless AirPods, headphones or
-your car are connected, in which case it plays there. Hold the phone to your ear,
-or switch to the speaker from Conduit's in-call controls (or, on LiveKit calls,
-the system call screen's audio button). Your choice stays for
-the rest of the call, through a reconnect.
+your car are connected, in which case it plays there. Conduit never switches to
+the loudspeaker by itself. Hold the phone to your ear, or switch to the speaker
+from Conduit's in-call controls (or, on LiveKit calls, the system call screen's
+audio button). Your choice stays for the rest of the call, through a reconnect.
+
+## What you hear
+
+Conduit marks the moments of a call with a ring and a few short words, in a plain
+system voice that is not your agent's:
+
+- **A call you place:** after about half a second, a ringing tone; then
+  "Connected". Your microphone stays closed while these play, so your agent does
+  not hear them; once "Connected" has finished, the call is yours.
+- **A call from your agent that you answer:** if your agent is already on the
+  line, nothing at all: you are straight into the conversation. If it is still
+  connecting a second after you answer, you hear "Connecting" once, then
+  "Connected" when it arrives. There is no ringing tone after you answer.
+- **When the connection drops:** "Disconnected", then "Retrying connection" every
+  few seconds while Conduit reconnects, then "Connected" when the call is back.
+  You can talk again as soon as it is back. If the connection stays down for more
+  than about a minute, the call ends and Recents shows **Failed — connection lost**.
+
+At your ear the ringing tone is quiet, like a phone's; in AirPods or headphones it
+plays at the call volume, and the volume buttons change it.
 
 ## Daily audio routing
 
@@ -76,10 +96,11 @@ lock screen can carry your voice. A call that rings out, or that your agent
 withdraws, shows in **Recents** as missed, with a quiet notification.
 
 !!! warning "Not ringing? Check Focus / Do Not Disturb"
-    iOS silences incoming calls while a **Focus** or **Do Not Disturb** is on. The
-    call still arrives — it just won't ring or light up the lock screen, and even the
-    quiet missed-call notification is filtered. You'll still find it in the **Recents**
-    tab, marked as missed. To let your agent ring through, turn off Focus/DND, or
+    Depending on your iOS version and Focus settings, iOS may silence incoming calls
+    while a **Focus** or **Do Not Disturb** is on. The call still arrives — it just
+    won't ring or light up the lock screen, and even the quiet missed-call
+    notification may be filtered. You'll still find it in the **Recents** tab, marked
+    as missed. To let your agent ring through, turn off Focus/DND, or
     allow calls from the agent's contact in your Focus settings. (If it's missing from
     Recents entirely, inbound isn't registered — re-toggle "Let this agent call me",
     and make sure you're testing on a real device, not the simulator.)
@@ -89,9 +110,10 @@ withdraws, shows in **Recents** as missed, with a quiet notification.
 A ring you never answered or declined shows in **Recents** as **Missed**, in red,
 like a missed call in the Phone app, and Conduit posts a quiet notification. That
 covers a call that rang out, one your agent withdrew before you picked up, one that
-arrived while you were on another call (**Missed — on another call**) and one that
-iOS silenced for a Focus (**Missed — Focus**). The last two never rang, so the row
-says why. A call you declined shows as **Declined**.
+arrived while you were already on a Conduit call (**Missed — on another call**; its
+notification says it came "during another call") and one that iOS silenced for a
+Focus (**Missed — Focus**). The last two never rang, so the row says why. A call you
+declined shows as **Declined**.
 
 ## Phone calls during a call
 
@@ -125,21 +147,30 @@ transport setting and your server's credentials).
 ## Add to Contacts
 
 **Add to Contacts** (Agent Detail) saves the agent as a regular iOS contact —
-through the system's own Add Contact sheet, so Conduit never requests Contacts
-permission and never reads your address book. With the contact saved, the
-agent's name and photo appear everywhere the system shows a caller: the lock
-screen, the full-screen call UI, Bluetooth devices, and your car's display.
-Editing the agent later keeps a linked contact's name and photo in step.
+through the system's own Add Contact sheet, so adding it needs no Contacts
+permission. With the contact saved, the agent's name and photo appear everywhere
+the system shows a caller: the lock screen, the full-screen call UI, Bluetooth
+devices, and your car's display.
+
+When you later edit an agent you've added, Conduit keeps that one contact's name
+and photo in step. To do that it asks for Contacts access the first time; if you
+say no, the contact simply keeps its old name and photo. Conduit only ever opens
+the agent's own contact: it does not read, upload or change your other contacts.
 
 ## Privacy
 
 Conduit is a thin, private pipe to your own voice agent:
 
 - **No Conduit server.** The app talks only to endpoints you configure — your
-  pairing endpoint, your room provider (Daily/LiveKit), your inbound
-  registration endpoint. There are no accounts and no analytics.
-- **Credentials stay on the device.** API keys and room tokens live in the iOS
-  Keychain. They are never uploaded anywhere except as the bearer token to
-  *your own* endpoints, never logged, and never written into a contact.
+  pairing endpoint, your room provider (Daily/LiveKit) or your own machine
+  (SmallWebRTC), your inbound registration endpoint — and, when your server asks
+  for it, reports how each ring from your agent ended to the address your server
+  names. Rings reach you through Apple's push service. There are no accounts and
+  no analytics.
+- **Credentials stay in your Keychain.** API keys and room tokens live in the iOS
+  Keychain. They are sent only as the key to *your own* endpoints (including that
+  ring-status address), never logged, and never written into a contact.
 - **The audio goes agent-to-app.** Calls are WebRTC sessions between your phone
   and the room your server provisioned. Conduit adds no middle hop.
+
+The full details are in the [Privacy Policy](privacy.md).

@@ -12,7 +12,6 @@ import Foundation
 enum ExternalLinks {
     static let docsBase = URL(string: "https://amiralsad.github.io/Conduit")!
     static let connectYourAgent = docsBase.appending(path: "connect-your-agent/")
-    static let inboundCalls = docsBase.appending(path: "INBOUND_CALLS/")
     static let usingConduit = docsBase.appending(path: "using-conduit/")
 
     // Fragment links are composed as strings — appending(path:) would
@@ -22,4 +21,6 @@ enum ExternalLinks {
     static let pushToTalkDocs = URL(string: usingConduit.absoluteString + "#push-to-talk")!
     static let dailyAudioDocs = URL(string: usingConduit.absoluteString + "#daily-audio-routing")!
     static let contactMirrorDocs = URL(string: usingConduit.absoluteString + "#add-to-contacts")!
+    static let callsFromAgentDocs = URL(string: usingConduit.absoluteString + "#calls-from-your-agent")!
+    static let privacyDocs = URL(string: usingConduit.absoluteString + "#privacy")!
 }
