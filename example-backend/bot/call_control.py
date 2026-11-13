@@ -24,6 +24,12 @@ The Conduit app sends RTVI client-messages beside ``end-call``
   while held. The resume starts the wait again in full if the user is not on the
   line yet, and greets at once if the bot is on the line but has not greeted.
 
+A bot that never meets a human ends after ``join_timeout_secs``
+(HUMAN_JOIN_TIMEOUT_SECS, or the dispatcher's ``--join-timeout``), counted from
+the moment it knows the user answered: its start for an ordinary call, the answer
+for a ring. Any sign of the device (a join, client-ready, ``call-connected``)
+stops that bound for good; a device that leaves later gets the grace window.
+
 A ring bot (``--ring-deadline``) ends if no answer arrives in time. The answer is
 ``call-connected``, the ring's ``answered`` receipt (relayed by the dispatcher),
 or, unless the device joins before the answer (``--joins-before-answer``, a
@@ -91,6 +97,8 @@ class CallControl:
         joins_before_answer: bool = False,
         ring_deadline_secs: float | None = None,
         connected_grace_secs: float = 0.0,
+        join_timeout_secs: float | None = None,
+        others_present: Callable[[], bool] | None = None,
         log,
     ):
         self._teardown = teardown
@@ -118,6 +126,13 @@ class CallControl:
         self._held = False
         self._joined = False
         self._deadline_task: asyncio.Task | None = None
+        self._join_timeout_secs = join_timeout_secs
+        # Asks the transport whether anyone but the bot is in the room, for a
+        # device that was there before the bot and never reported (Daily).
+        self._others_present = others_present
+        # Whether the device has ever shown up; then the join bound never applies.
+        self._met_human = False
+        self._join_task: asyncio.Task | None = None
         if self._awaiting:
             for gate in self._gates:
                 gate.close()
@@ -137,16 +152,19 @@ class CallControl:
     def start(self) -> None:
         if self._deadline_secs is not None and not self._answered:
             self._deadline_task = asyncio.create_task(self._ring_deadline())
+        self._arm_join_timeout()
 
     def stop(self) -> None:
         self._cancel_deadline()
         self._drop_fallback()
+        self._cancel_join_timeout()
 
     # --- readiness and presence ---
 
     async def client_ready(self) -> None:
         """The client can hear the bot: RTVI client-ready (Daily, SmallWebRTC), or
         the first human join on LiveKit, whose app sends no client-ready."""
+        self._met()
         if not self._awaiting:
             # The app connects such a call only after the answer.
             await self._mark_answered("ready")
@@ -166,6 +184,7 @@ class CallControl:
         """A human joined. Returns True for the first join of this bot."""
         first = not self._joined
         self._joined = True
+        self._met()
         self._present.add(participant_id)
         if not self._joins_before_answer:
             await self._mark_answered("join")
@@ -199,6 +218,8 @@ class CallControl:
         """The user is on the line (``call-connected``, or the fallback). A repeat
         (every reconnect sends one) is the same call coming back: it greets no
         one again, but it does say the call is not held."""
+        if via == "signal":
+            self._met()
         await self._mark_answered(via)
         if self._held:
             if via != "signal":
@@ -285,6 +306,7 @@ class CallControl:
         self._answered = True
         self._cancel_deadline()
         event(self._log, "bot.call_answered", via=via)
+        self._arm_join_timeout()
 
     async def _arm_fallback(self) -> None:
         """Start the fallback wait once the user answered and the device is there,
@@ -331,6 +353,40 @@ class CallControl:
     async def _run_greet(self) -> None:
         if self._greet is not None:
             await self._greet()
+
+    def _met(self) -> None:
+        self._met_human = True
+        self._cancel_join_timeout()
+
+    def _arm_join_timeout(self) -> None:
+        """Bound the wait for a device that has not shown up, once the user has
+        answered (before that, a ring bot's deadline governs)."""
+        if not self._join_timeout_secs or self._join_timeout_secs <= 0:
+            return
+        if self._met_human or not self._answered or self._join_task is not None:
+            return
+        self._join_task = asyncio.create_task(self._join_timeout())
+
+    def _cancel_join_timeout(self) -> None:
+        task, self._join_task = self._join_task, None
+        if task is not None and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+
+    async def _join_timeout(self) -> None:
+        try:
+            await asyncio.sleep(self._join_timeout_secs)
+        except asyncio.CancelledError:
+            return
+        self._join_task = None
+        if self._met_human:
+            return
+        if self._others_present is not None and self._others_present():
+            # In the room since before the bot, never reported as a join.
+            event(self._log, "bot.human_found_in_room")
+            self._met_human = True
+            return
+        event(self._log, "bot.no_human_joined", secs=self._join_timeout_secs)
+        await self._teardown.end_now("no-human-joined")
 
     async def _ring_deadline(self) -> None:
         try:

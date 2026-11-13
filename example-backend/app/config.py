@@ -121,6 +121,14 @@ class Settings(BaseSettings):
     # client's total reconnect-with-backoff budget. SHARED CONSTANT with the client team.
     human_absent_grace_secs: float = 60.0
 
+    # A bot whose room has had no human this long after the bot started (or, for
+    # a ring bot, after the ring was answered) ends itself: the user hung up while
+    # pairing was in flight, the phone abandoned a prepared room, a direct-mode
+    # caller left before the bot arrived. The phone gives up joining after 30 s,
+    # so 45 s leaves a margin. A bot still waiting for its ring is governed by its
+    # ring deadline instead. 0 turns it off.
+    human_join_timeout_secs: float = Field(default=45.0, ge=0)
+
     # Backstop so a wedged/forgotten bot can't bill forever. The thinking-partner use
     # case has long silences, so this is generous; teardown is normally driven by the
     # grace timer + the explicit end-call signal, not this.

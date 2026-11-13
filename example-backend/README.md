@@ -330,6 +330,16 @@ return them as `BotBuild(gates=…)` — see `bot/pipelines/live.py`.
   provider's key. The agent's required-keys check follows it.
 - **`HUMAN_ABSENT_GRACE_SECS`** — see above. **`HELD_GRACE_SECS`** (default `600`)
   replaces it while the call is on hold.
+- **`HUMAN_JOIN_TIMEOUT_SECS`** (default `45`, `0` turns it off) — a bot whose
+  room has had no human this long after it started ends itself, rather than
+  billing until `PIPELINE_IDLE_TIMEOUT_SECS` (30 min): the user hung up while
+  pairing was in flight, the phone abandoned a prepared room, a direct-mode
+  caller left before the bot arrived. Conduit gives up joining after 30 s. Any
+  sign of the device (a join, RTVI client-ready, `call-connected`, or the
+  transport listing someone in the room) cancels it for good; a device that
+  leaves later gets the grace window instead. A ring bot counts it from the
+  answer (its ring deadline governs before that); a plain inline ring's bot,
+  which the phone joins only after the answer, waits the ring's whole deadline.
 - **`RING_BOT_WAIT_SECS`** (default `8`, `0` turns it off) — agent-first ringing:
   a ring whose agent starts before the push (inline, or a pre-connected pairing
   ring) is pushed once the agent's bot has joined the room, or after this many

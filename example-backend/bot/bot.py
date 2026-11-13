@@ -67,6 +67,9 @@ async def _run_from_cli() -> None:
     # before the answer, its joining is not the answer.
     parser.add_argument("--joins-before-answer", action="store_true")
     parser.add_argument("--ring-deadline", type=float)
+    # End if no human has come this long after the answer (default:
+    # HUMAN_JOIN_TIMEOUT_SECS; a plain inline ring's bot gets the ring's length).
+    parser.add_argument("--join-timeout", type=float)
     # The ring's push waits for this bot: say on stdout when it has joined the room.
     parser.add_argument("--report-joined", action="store_true")
     args = parser.parse_args()
@@ -85,6 +88,7 @@ async def _run_from_cli() -> None:
         await_connected=args.await_connected,
         joins_before_answer=args.joins_before_answer,
         ring_deadline_secs=args.ring_deadline,
+        join_timeout_secs=args.join_timeout,
         # The dispatcher gives ring bots a stdin pipe for the receipt-driven answer.
         control=_stdin_lines() if args.ring_deadline is not None else None,
         announce_joined=announce_joined_on_stdout if args.report_joined else None,

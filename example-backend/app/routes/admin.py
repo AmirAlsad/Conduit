@@ -55,6 +55,7 @@ from app.rings import (
     RING_ENDED,
     TrackedRing,
     ring_bot_flags,
+    ring_deadline_secs,
 )
 
 # The bot-wait outcome when the ring ended (a cancel or a receipt) during the wait.
@@ -139,12 +140,17 @@ async def ring(
         # receipt; with preconnect it is also a ring bot, with a deadline and a
         # control pipe.
         ring_flags = None
+        # A plain inline bot has no ring deadline, and the phone joins it only
+        # after the answer: it waits for the phone as long as the ring can last.
+        join_timeout = ring_deadline_secs(ring_timeout) + wait_secs
         if preconnect is not None:
             ring_flags = ring_bot_flags(
                 ring_timeout=ring_timeout,
                 joins_before_answer=preconnect == "media",
                 push_wait_secs=wait_secs,
             )
+            # A ring bot's deadline covers the ring; after the answer, the default.
+            join_timeout = None
         try:
             settings.require(*agent.required_settings)
             creds, room_key = await provision_pairing(
@@ -158,6 +164,7 @@ async def ring(
                 # call, reconnects included: the token must outlive the call,
                 # not just the ring (a pairing room's whole lifetime).
                 token_ttl_secs=settings.pairing_room_exp_secs,
+                join_timeout_secs=join_timeout,
                 ring_flags=ring_flags,
                 # The bot starts before the app asks for anything, so only the
                 # registration says whether the app sends call-connected.

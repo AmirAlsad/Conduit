@@ -37,6 +37,12 @@ def _livekit_connection(server_url: str, token: str, room_name: str) -> dict:
     return {"room_url": server_url, "url": server_url, "token": token, "room_name": room_name}
 
 
+def _join_timeout_flags(secs: float | None = None) -> list[str]:
+    """argv for how long a bot waits for a human (bot/call_control.py)."""
+    value = settings.human_join_timeout_secs if secs is None else secs
+    return ["--join-timeout", f"{value:g}"]
+
+
 # --- pairing: create per-call creds and dispatch the bot now ---
 
 
@@ -50,6 +56,7 @@ async def provision_pairing(
     await_connected: bool = False,
     report_joined: bool = False,
     token_ttl_secs: int | None = None,
+    join_timeout_secs: float | None = None,
 ) -> tuple[ConnectionPayload, str | None]:
     """Returns the payload and the room key the bot was dispatched into (None for
     smallwebrtc, which has no room). ``ring_flags`` (app.rings.ring_bot_flags)
@@ -59,9 +66,11 @@ async def provision_pairing(
     bot says when it has joined the room (``Dispatcher.wait_joined``); a ring
     pushes only then. ``token_ttl_secs``: the phone's token lifetime, a pairing
     token's by default (the app fetches new credentials for each engine-level
-    reconnect); an inline ring's must last the whole call."""
+    reconnect); an inline ring's must last the whole call. ``join_timeout_secs``:
+    how long after the answer the bot waits for a human before it ends
+    (HUMAN_JOIN_TIMEOUT_SECS by default)."""
     app_ttl = token_ttl_secs or settings.pairing_token_ttl_secs
-    extra = list(ring_flags or ())
+    extra = [*(ring_flags or ()), *_join_timeout_flags(join_timeout_secs)]
     if await_connected:
         extra.append("--await-connected")
     if report_joined:
@@ -187,7 +196,7 @@ async def dispatch_for_webhook(state, record: RoomRecord) -> int | None:
         )
         argv = [
             "--transport", "daily", "--agent", record.agent_id,
-            "--room-url", record.room_url, "--token", bot_token,
+            "--room-url", record.room_url, "--token", bot_token, *_join_timeout_flags(),
         ]
         return await state.dispatcher.dispatch(
             room_key=record.room_key, agent_id=record.agent_id,
@@ -200,6 +209,7 @@ async def dispatch_for_webhook(state, record: RoomRecord) -> int | None:
         argv = [
             "--transport", "livekit", "--agent", record.agent_id,
             "--url", lk.url, "--room-name", record.room_key, "--token", bot_token,
+            *_join_timeout_flags(),
         ]
         return await state.dispatcher.dispatch(
             room_key=record.room_key, agent_id=record.agent_id,

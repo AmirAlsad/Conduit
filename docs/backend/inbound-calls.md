@@ -160,9 +160,9 @@ Two modes:
   embeds `room_url` + `token` in the push. The bot is **dispatched before the
   push**, so the agent is already in the room on pickup. The engine ends that
   bot when the ring's first receipt is anything but `answered` (a decline, busy,
-  Focus, a timeout, a cancel); with no receipt at all it runs (billing) until
-  `PIPELINE_IDLE_TIMEOUT_SECS` reaps it, or, for a ring bot, until its ring
-  deadline. Pairing with pre-connect gets the agent just as ready, without
+  Focus, a timeout, a cancel); with no receipt at all, a ring bot ends at its
+  ring deadline, and a plain inline bot (no pre-connect) ends if the phone has
+  not joined within that same deadline (its `--join-timeout`). Pairing with pre-connect gets the agent just as ready, without
   credentials in the push.
 
     !!! warning "Inline credentials must last the whole call"
@@ -326,7 +326,11 @@ A ring bot differs from a normal bot in three ways:
   engine). The app sends the receipt at the moment of answer, before its audio is
   up and often before it has (re)joined, so the receipt only starts the fallback
   wait. The device leaving the room stops that wait, and its return starts it
-  again in full. The receipt stops the ring deadline at once.
+  again in full. The receipt stops the ring deadline at once; if the phone is
+  not in the room by then, the bot ends unless it arrives within
+  `HUMAN_JOIN_TIMEOUT_SECS` (45) of the answer (a phone that answered but
+  connected elsewhere, e.g. through a fresh request after abandoning the
+  prepared room).
 - The ring's first receipt steers it: `answered` starts that fallback, any other
   status ends it at once. (A plain inline ring's bot is ended the same way, but has no deadline
   and no control pipe.)

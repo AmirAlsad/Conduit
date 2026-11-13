@@ -166,6 +166,33 @@ def _wire_presence(
             await controller.end_now("client-left")
 
 
+def _presence_probe(transport, transport_type: str) -> Callable[[], bool] | None:
+    """Whether anyone but the bot is in the room, asked of the transport itself:
+    a device already in the room when the bot joined may never be reported as a
+    join. None where the transport has no room (SmallWebRTC: its peer is the
+    device). A probe that fails says yes, so it never ends a call."""
+    if transport_type == "daily":
+
+        def others() -> bool:
+            return any(pid != "local" for pid in transport.participants())
+
+    elif transport_type == "livekit":
+
+        def others() -> bool:
+            return bool(transport.get_participants())
+
+    else:
+        return None
+
+    def probe() -> bool:
+        try:
+            return others()
+        except Exception:
+            return True
+
+    return probe
+
+
 def _wire_joined(transport, transport_type: str, announce: Callable[[], None], log) -> None:
     """Call ``announce`` once, when the bot's own transport has joined the room
     (Daily's on_joined, LiveKit's on_connected, which can fire twice)."""
@@ -207,12 +234,13 @@ async def run_bot(
     await_connected: bool = False,
     joins_before_answer: bool = False,
     ring_deadline_secs: float | None = None,
+    join_timeout_secs: float | None = None,
     control: AsyncIterator[str] | None = None,
     control_reply: Callable[[bool], None] | None = reply_on_stdout,
     announce_joined: Callable[[], None] | None = None,
 ) -> None:
-    """``await_connected`` / ``joins_before_answer`` / ``ring_deadline_secs``: see
-    bot/call_control.py.
+    """``await_connected`` / ``joins_before_answer`` / ``ring_deadline_secs`` /
+    ``join_timeout_secs`` (None: HUMAN_JOIN_TIMEOUT_SECS): see bot/call_control.py.
     ``control``: lines from the dispatcher (a ring bot's stdin); "answered" is the
     ring's answered receipt, "cancel" a withdrawn ring (answered with
     ``reply_on_stdout`` unless ``control_reply`` says otherwise).
@@ -240,6 +268,10 @@ async def run_bot(
         joins_before_answer=joins_before_answer,
         ring_deadline_secs=ring_deadline_secs,
         connected_grace_secs=settings.call_connected_grace_secs,
+        join_timeout_secs=(
+            settings.human_join_timeout_secs if join_timeout_secs is None else join_timeout_secs
+        ),
+        others_present=_presence_probe(transport, transport_type),
         log=log,
     )
 
@@ -265,6 +297,7 @@ async def run_bot(
         await_connected=await_connected,
         joins_before_answer=joins_before_answer,
         ring_deadline=ring_deadline_secs,
+        join_timeout=join_timeout_secs,
     )
     call.start()
     control_task = (
