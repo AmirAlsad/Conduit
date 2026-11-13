@@ -5,8 +5,9 @@ POSTs ``{base}/admin/ring/{agent}`` with the engine key. The engine sends a VoIP
 push to the device that registered for that agent (the app's **Let this agent
 call me** toggle must be on, which registers the token at
 ``/inbound/register/{agent}``). Default mode sends a credential-free push — the
-app resolves the pairing endpoint after the user answers, so a declined ring
-costs nothing. ``--inline`` provisions a room + token up-front and embeds them
+app resolves the pairing endpoint during the ring (pre-connect, below) or, for a
+plain ring, after the user answers, so a declined plain ring costs nothing.
+``--inline`` provisions a room + token up-front and embeds them
 in the push (the bot is dispatched before the answer). The push also carries the
 caller ``display_name`` (and ``handle``) the app registered, when it sent them;
 the script prints the name it rang as.
@@ -24,7 +25,8 @@ Agent first: when the ring starts its agent before the push (``--inline``, and a
 pre-connected pairing ring, whose room the engine prepares for the app's request
 during the ring), the engine pushes once the agent's bot is in the room, or after
 ``RING_BOT_WAIT_SECS`` (8) without it; the script prints how long that took.
-``--no-wait`` pushes at once and prepares nothing for a pairing ring.
+``--no-wait`` pushes at once and prepares nothing for a pairing ring (the push
+still asks for pre-connect, so the app's request during the ring starts the bot).
 
 ``--cancel CALL_ID`` withdraws a ring that is still ringing (no new ring);
 ``--cancel-after SECONDS`` rings, waits, then cancels that ring. A cancel push
@@ -193,7 +195,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--transport",
-        choices=["daily", "livekit"],
+        choices=["daily", "livekit", "smallwebrtc"],
         help="Transport of the room made at ring time (--inline, or a pre-connected "
         "pairing ring). Default: the one the app registered for its agent; with none "
         "registered (an older app) a pairing ring prepares nothing and --inline uses "

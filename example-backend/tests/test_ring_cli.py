@@ -171,3 +171,9 @@ def test_cancel_before_the_push_says_nothing_reached_the_phone(monkeypatch, caps
 def test_preconnect_rejects_unknown_tiers(monkeypatch):
     with pytest.raises(SystemExit):
         _run(monkeypatch, ["--preconnect", "everything"], [])
+
+
+def test_transport_offers_every_transport_the_engine_takes(monkeypatch):
+    for transport in ("daily", "livekit", "smallwebrtc"):
+        calls = _run(monkeypatch, ["--agent", "live", "--inline", "--transport", transport], [_RANG])
+        assert calls[0][1]["transport"] == transport
