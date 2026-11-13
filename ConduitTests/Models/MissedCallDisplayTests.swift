@@ -36,11 +36,24 @@ struct MissedCallDisplayTests {
         let noAnswer = incoming(.noAnswer) // the agent left before connecting, or a row from an older build
         #expect(!noAnswer.isMissed)
         #expect(noAnswer.outcomeDisplayLabel == "No answer")
-        #expect(noAnswer.iconName == CallOutcome.noAnswer.iconName)
+        #expect(noAnswer.iconName == "phone.arrow.down.left")
 
         let failed = CallLogEntry(outcome: .failed, transportKind: .daily, failureReason: .badToken)
         #expect(failed.outcomeDisplayLabel == "Failed — authentication")
         #expect(failed.tint == .red)
+    }
+
+    @Test(arguments: [
+        (CallDirection.outgoing, CallOutcome.completed, "phone.arrow.up.right"),
+        (.incoming, .completed, "phone.arrow.down.left"),
+        (.outgoing, .canceled, "phone.arrow.up.right"),
+        (.incoming, .canceled, "phone.arrow.down.left"),
+        (.outgoing, .failed, "phone.down.fill"),
+        (.incoming, .declined, "phone.down.fill"),
+    ])
+    func theRowsArrowFollowsTheCallsDirection(direction: CallDirection, outcome: CallOutcome, icon: String) {
+        let entry = CallLogEntry(direction: direction, outcome: outcome, transportKind: .daily)
+        #expect(entry.iconName == icon)
     }
 
     @Test func missedReasonSurvivesItsRawValue() {

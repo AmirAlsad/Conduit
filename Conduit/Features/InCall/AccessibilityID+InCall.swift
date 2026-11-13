@@ -18,5 +18,6 @@ extension AccessibilityID {
         static let pushToTalkButton = "InCall_PushToTalkButton"
         static let routePicker = "InCall_RoutePicker"
         static let closeButton = "InCall_CloseButton"
+        static let minimizeButton = "InCall_MinimizeButton"
     }
 }

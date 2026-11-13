@@ -11,13 +11,13 @@ import ConduitCallEngine
 import SwiftUI
 
 extension CallOutcome {
-    var iconName: String {
+    /// The arrow points the way the call went: up-right for a call the user
+    /// placed, down-left for one from the agent.
+    func iconName(for direction: CallDirection) -> String {
         switch self {
-        case .completed: "phone.arrow.up.right"
-        case .failed: "phone.down.fill"
-        case .declined: "phone.down.fill"
-        case .noAnswer: "phone.arrow.up.right"
-        case .canceled: "phone.arrow.up.right"
+        case .failed, .declined: "phone.down.fill"
+        case .completed, .noAnswer, .canceled:
+            direction == .incoming ? "phone.arrow.down.left" : "phone.arrow.up.right"
         }
     }
 
@@ -47,7 +47,7 @@ extension CallLogEntry {
     var isMissed: Bool { missedReason != nil }
 
     var iconName: String {
-        isMissed ? "phone.arrow.down.left" : outcome.iconName
+        isMissed ? "phone.arrow.down.left" : outcome.iconName(for: direction)
     }
 
     var tint: Color {

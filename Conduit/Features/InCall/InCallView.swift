@@ -162,7 +162,7 @@ struct InCallView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Minimize")
-                .accessibilityIdentifier(AccessibilityID.InCall.closeButton)
+                .accessibilityIdentifier(AccessibilityID.InCall.minimizeButton)
             }
             Spacer()
             #if DEBUG
@@ -334,9 +334,10 @@ struct InCallView: View {
 
     // MARK: - Route picker
 
-    // A Daily-backed route menu (speaker / earpiece / Bluetooth / AirPods). Routing
-    // goes through the transport because the SDK manages its own audio session and
-    // re-asserts its choice — AVRoutePickerView (AirPlay) just fought it.
+    // The route menu (speaker / earpiece / Bluetooth / AirPods), on every transport.
+    // Routing goes through the transport because the WebRTC SDKs manage their own
+    // audio session and re-assert their choice — AVRoutePickerView (AirPlay) just
+    // fought Daily's.
     private var routeButton: some View {
         Menu {
             Picker("Audio Output", selection: routeSelection) {
