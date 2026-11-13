@@ -42,7 +42,6 @@ struct AppWiringTests {
             announcer: FakeSpokenStateAnnouncer(),
             microphone: FakeMicrophonePermission(),
             transportFactory: { _ in FakeTransport() },
-            simulatedCallSystem: system,
             makeCallEngine: {
                 configuration = $0
                 return CallEngine.simulated(configuration: $0, system: system)

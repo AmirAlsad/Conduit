@@ -315,6 +315,8 @@ struct AddEditAgentSheet: View {
 
 }
 
+#if DEBUG
 #Preview {
     AddEditAgentSheet(environment: .inMemory())
 }
+#endif

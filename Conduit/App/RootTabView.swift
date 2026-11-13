@@ -173,7 +173,9 @@ struct RootTabView: View {
     }
 }
 
+#if DEBUG
 #Preview {
     RootTabView()
         .environment(AppEnvironment.inMemory())
 }
+#endif

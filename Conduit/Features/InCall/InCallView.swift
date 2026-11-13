@@ -419,8 +419,10 @@ struct InCallView: View {
     }
 }
 
+#if DEBUG
 #Preview {
     // Layout preview only — state is `.idle`; a live preview needs a placed call.
     InCallView()
         .environment(AppEnvironment.inMemory())
 }
+#endif

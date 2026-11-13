@@ -180,6 +180,18 @@ every package; `xcodegen generate` copies it into the generated project (the
 newer, unverified SDKs. Change a pin deliberately, commit the `Package.resolved`
 diff, and re-check the built app with `scripts/check-bundle.sh`.
 
+To work on the app and the package together, point the `ConduitCallEngine` entry
+in `project.yml` at `path: ../ConduitCallEngine` and regenerate; never commit that.
+A build with the local path rewrites the root `Package.resolved` without an engine
+pin, so after restoring the URL entry, re-resolve and commit the new
+`Package.resolved`, never the one the path build left behind.
+
+`ConduitCallEngineTesting` is a build dependency of the app that is linked only in
+Debug and simulator builds (`OTHER_LDFLAGS` in `project.yml`), and its import is
+behind `#if DEBUG || targetEnvironment(simulator)`, so a Release device build carries
+none of the fakes. Code that uses it (the simulated engine, `AppEnvironment.inMemory()`,
+`#Preview`s) sits behind the same condition, or behind `#if DEBUG`.
+
 ## Logging
 
 All logging goes through the `Log` utility (`Core/Utilities/Log.swift`), built on

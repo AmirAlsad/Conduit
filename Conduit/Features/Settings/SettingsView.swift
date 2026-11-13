@@ -44,9 +44,11 @@ struct SettingsView: View {
     }
 }
 
+#if DEBUG
 #Preview {
     NavigationStack {
         SettingsView()
     }
     .environment(AppEnvironment.inMemory())
 }
+#endif

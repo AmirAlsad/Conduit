@@ -124,9 +124,11 @@ struct ContactsView: View {
     }
 }
 
+#if DEBUG
 #Preview {
     NavigationStack {
         ContactsView()
     }
     .environment(AppEnvironment.inMemory())
 }
+#endif

@@ -94,9 +94,11 @@ struct RecentsView: View {
     }
 }
 
+#if DEBUG
 #Preview {
     NavigationStack {
         RecentsView()
     }
     .environment(AppEnvironment.inMemory())
 }
+#endif

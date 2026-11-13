@@ -220,6 +220,7 @@ struct AgentDetailView: View {
     }
 }
 
+#if DEBUG
 #Preview {
     let env = AppEnvironment.inMemory()
     let sample = Agent(
@@ -234,3 +235,4 @@ struct AgentDetailView: View {
     }
     .environment(env)
 }
+#endif

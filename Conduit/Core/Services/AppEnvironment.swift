@@ -6,16 +6,22 @@
 //  services, injected into the view tree via `.environment(_:)`. ViewModels read
 //  only the protocols they need, so each test wires exactly its fakes.
 //
-//  `inMemory()` wires fakes + an in-memory store (previews, tests, and the M0
-//  shell). The live wiring is introduced as the real services land (Daily
-//  transport WS-2, CallKit WS-3, Keychain/Contacts WS-4) — at which point a
-//  `live()` factory selects them and a persistent store.
+//  `live()` is what the app runs on: a persistent store and the real services,
+//  with the real CallKit/PushKit engine and transports on a device and the
+//  simulated engine over fake transports in the simulator. `inMemory()` wires
+//  fakes and an in-memory store for previews and tests.
+//
+//  The fakes come from the package's `ConduitCallEngineTesting`, which is linked
+//  and imported only in Debug and simulator builds (see `project.yml`), so a
+//  Release device build ships none of them.
 //
 
 import ConduitCallEngine
 import ConduitCallEngineDaily
 import ConduitCallEngineLiveKit
+#if DEBUG || targetEnvironment(simulator)
 import ConduitCallEngineTesting
+#endif
 import Foundation
 import SwiftData
 
@@ -30,9 +36,11 @@ final class AppEnvironment {
     let microphone: MicrophonePermissionProviding
     let transportFactory: (TransportKind) -> CallTransport
     let callEngine: CallEngine
+    #if DEBUG || targetEnvironment(simulator)
     /// The stand-in CallKit/PushKit system behind `callEngine` when it is simulated
     /// (the simulator, previews, tests); nil on a device, where the engine is real.
-    let simulatedCallSystem: SimulatedCallSystem?
+    @ObservationIgnored private(set) var simulatedCallSystem: SimulatedCallSystem?
+    #endif
     /// The engine's delegate: call targets, history, spoken cues, Siri donation,
     /// VoIP token registration.
     let callHost: AgentCallHost
@@ -67,7 +75,6 @@ final class AppEnvironment {
         microphone: MicrophonePermissionProviding,
         transportFactory: @escaping (TransportKind) -> CallTransport,
         isPushToTalkEnabled: @escaping @MainActor () -> Bool = { false },
-        simulatedCallSystem: SimulatedCallSystem? = nil,
         makeCallEngine: (CallEngineConfiguration) -> CallEngine
     ) {
         self.modelContainer = modelContainer
@@ -77,7 +84,6 @@ final class AppEnvironment {
         self.announcer = announcer
         self.microphone = microphone
         self.transportFactory = transportFactory
-        self.simulatedCallSystem = simulatedCallSystem
         self.callHost = AgentCallHost(
             repository: agentRepository,
             keychain: keychain,
@@ -166,14 +172,11 @@ final class AppEnvironment {
 
         let makeCallEngine: (CallEngineConfiguration) -> CallEngine
         let transportFactory: (TransportKind) -> CallTransport
-        let simulatedCallSystem: SimulatedCallSystem?
         #if targetEnvironment(simulator)
         let system = SimulatedCallSystem()
-        simulatedCallSystem = system
         makeCallEngine = { CallEngine.simulated(configuration: $0, system: system) }
         transportFactory = { _ in FakeTransport() }
         #else
-        simulatedCallSystem = nil
         makeCallEngine = { CallEngine(configuration: $0) }
         transportFactory = { kind in
             let transport: CallTransport = switch kind {
@@ -206,9 +209,11 @@ final class AppEnvironment {
             microphone: SystemMicrophonePermission(),
             transportFactory: transportFactory,
             isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) },
-            simulatedCallSystem: simulatedCallSystem,
             makeCallEngine: makeCallEngine
         )
+        #if targetEnvironment(simulator)
+        environment.simulatedCallSystem = system
+        #endif
         let engine = environment.callEngine
         ringback.followAudioActivation { [weak engine] in engine?.isAudioActivated ?? false }
         #if DEBUG
@@ -224,6 +229,7 @@ final class AppEnvironment {
     /// routes into the same engine the UI observes.
     static let shared = live()
 
+    #if DEBUG || targetEnvironment(simulator)
     /// All-fakes environment over an in-memory SwiftData store.
     static func inMemory(microphone: MicrophonePermissionProviding? = nil) -> AppEnvironment {
         let container: ModelContainer
@@ -236,7 +242,7 @@ final class AppEnvironment {
             fatalError("Failed to build in-memory ModelContainer: \(error)")
         }
         let system = SimulatedCallSystem()
-        return AppEnvironment(
+        let environment = AppEnvironment(
             modelContainer: container,
             keychain: InMemoryKeychain(),
             contactSync: FakeContactSync(),
@@ -245,8 +251,10 @@ final class AppEnvironment {
             microphone: microphone ?? FakeMicrophonePermission(),
             transportFactory: { _ in FakeTransport() },
             isPushToTalkEnabled: { UserDefaults.standard.bool(forKey: SettingsStore.pushToTalkKey) },
-            simulatedCallSystem: system,
             makeCallEngine: { CallEngine.simulated(configuration: $0, system: system) }
         )
+        environment.simulatedCallSystem = system
+        return environment
     }
+    #endif
 }
