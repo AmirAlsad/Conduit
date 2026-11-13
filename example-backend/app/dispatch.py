@@ -83,6 +83,7 @@ class Dispatcher:
         cleanup: Callable[[], Awaitable[None]] | None = None,
         control: bool = False,
         report_joined: bool = False,
+        bot_env: dict[str, str] | None = None,
     ) -> int | None:
         """Spawn a bot into ``room_key`` unless one is already active there.
 
@@ -95,6 +96,9 @@ class Dispatcher:
 
         ``report_joined`` (a bot started with ``--report-joined``) pipes its stdout
         too, for the line it writes once it has joined the room: ``wait_joined``.
+
+        ``bot_env`` is added to the bot's environment: its room token goes there,
+        not on argv, which every user on the host can read.
 
         Returns the new pid, or None if an active bot made this a no-op.
         """
@@ -120,7 +124,7 @@ class Dispatcher:
                     "-m",
                     "bot.bot",
                     *bot_argv,
-                    env=os.environ.copy(),
+                    env={**os.environ, **(bot_env or {})},
                     cwd=_PROJECT_ROOT,
                     stdin=asyncio.subprocess.PIPE if control else None,
                     stdout=asyncio.subprocess.PIPE if pipe_stdout else None,

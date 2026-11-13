@@ -41,6 +41,7 @@ class FakeLiveKit:
 class FakeDispatcher:
     def __init__(self):
         self.calls = []
+        self.envs = []  # the bot_env of each dispatch
         self.controls = []
         self.sent = []  # (room_key, control line)
         self.disconnected = []
@@ -85,9 +86,10 @@ class FakeDispatcher:
 
     async def dispatch(
         self, *, room_key, agent_id, transport, bot_argv, cleanup=None, control=False,
-        report_joined=False,
+        report_joined=False, bot_env=None,
     ):
         self.calls.append((room_key, agent_id, transport, tuple(bot_argv)))
+        self.envs.append(bot_env)
         self.controls.append(control)
         self.reports_joined.append(report_joined)
         self.alive.add(room_key)
@@ -110,12 +112,16 @@ def test_connect_pairing_daily_dispatches_and_returns_contract():
         }
         assert body["expires_at"] is not None  # pairing → short-lived
 
-        # The bot was dispatched into the room with the BOT token (not the app token).
+        # The bot was dispatched into the room with the BOT token (not the app
+        # token), through its environment: argv is visible to every user in `ps`.
         calls = app.state.dispatcher.calls
         assert len(calls) == 1
         room_key, agent_id, transport, argv = calls[0]
         assert (room_key, agent_id, transport) == ("room-abc", "loopback", "daily")
-        assert "token-bot" in argv and "--room-url" in argv
+        assert "--room-url" in argv
+        assert "token-bot" not in argv
+        assert argv[argv.index("--token-env") + 1] == "CONDUIT_BOT_TOKEN"
+        assert app.state.dispatcher.envs == [{"CONDUIT_BOT_TOKEN": "token-bot"}]
         # The request listed no call signals: the bot greets when the client is ready.
         assert "--await-connected" not in argv
 
@@ -187,7 +193,8 @@ def test_livekit_pairing_returns_room_url_shape():
         # The bot got the agent token, joined to the same room.
         ((room_key, agent_id, transport, argv),) = app.state.dispatcher.calls
         assert (room_key, transport) == (conn["room_name"], "livekit")
-        assert "lk-token-bot" in argv
+        assert "lk-token-bot" not in argv and "--token-env" in argv
+        assert app.state.dispatcher.envs == [{"CONDUIT_BOT_TOKEN": "lk-token-bot"}]
 
 
 def test_connect_default_agent_is_loopback():

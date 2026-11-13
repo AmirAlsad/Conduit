@@ -37,6 +37,16 @@ def _livekit_connection(server_url: str, token: str, room_name: str) -> dict:
     return {"room_url": server_url, "url": server_url, "token": token, "room_name": room_name}
 
 
+# The bot's room token rides its environment under this name, not its argv
+# (visible to every user in `ps`; a Daily bot token is a room owner token).
+BOT_TOKEN_ENV = "CONDUIT_BOT_TOKEN"
+_TOKEN_ARGV = ["--token-env", BOT_TOKEN_ENV]
+
+
+def _bot_env(token: str) -> dict[str, str]:
+    return {BOT_TOKEN_ENV: token}
+
+
 def _join_timeout_flags(secs: float | None = None) -> list[str]:
     """argv for how long a bot waits for a human (bot/call_control.py)."""
     value = settings.human_join_timeout_secs if secs is None else secs
@@ -85,7 +95,7 @@ async def provision_pairing(
         )
         argv = [
             "--transport", "daily", "--agent", agent_id,
-            "--room-url", room.url, "--token", bot_token, *extra,
+            "--room-url", room.url, *_TOKEN_ARGV, *extra,
         ]
 
         async def cleanup() -> None:
@@ -94,6 +104,7 @@ async def provision_pairing(
         await state.dispatcher.dispatch(
             room_key=room.name, agent_id=agent_id, transport="daily",
             bot_argv=argv, cleanup=cleanup, control=control, report_joined=report_joined,
+            bot_env=_bot_env(bot_token),
         )
         return ConnectionPayload(
             transport="daily",
@@ -109,12 +120,13 @@ async def provision_pairing(
         bot_token = lk.agent_token(room_name, ttl_secs=settings.pairing_token_ttl_secs)
         argv = [
             "--transport", "livekit", "--agent", agent_id,
-            "--url", lk.url, "--room-name", room_name, "--token", bot_token, *extra,
+            "--url", lk.url, "--room-name", room_name, *_TOKEN_ARGV, *extra,
         ]
         # LiveKit Cloud auto-closes empty rooms; no cleanup needed.
         await state.dispatcher.dispatch(
             room_key=room_name, agent_id=agent_id, transport="livekit",
             bot_argv=argv, control=control, report_joined=report_joined,
+            bot_env=_bot_env(bot_token),
         )
         return ConnectionPayload(
             transport="livekit",
@@ -196,11 +208,11 @@ async def dispatch_for_webhook(state, record: RoomRecord) -> int | None:
         )
         argv = [
             "--transport", "daily", "--agent", record.agent_id,
-            "--room-url", record.room_url, "--token", bot_token, *_join_timeout_flags(),
+            "--room-url", record.room_url, *_TOKEN_ARGV, *_join_timeout_flags(),
         ]
         return await state.dispatcher.dispatch(
             room_key=record.room_key, agent_id=record.agent_id,
-            transport="daily", bot_argv=argv,
+            transport="daily", bot_argv=argv, bot_env=_bot_env(bot_token),
         )
 
     if record.transport == "livekit":
@@ -208,12 +220,12 @@ async def dispatch_for_webhook(state, record: RoomRecord) -> int | None:
         bot_token = lk.agent_token(record.room_key, ttl_secs=settings.pairing_token_ttl_secs)
         argv = [
             "--transport", "livekit", "--agent", record.agent_id,
-            "--url", lk.url, "--room-name", record.room_key, "--token", bot_token,
+            "--url", lk.url, "--room-name", record.room_key, *_TOKEN_ARGV,
             *_join_timeout_flags(),
         ]
         return await state.dispatcher.dispatch(
             room_key=record.room_key, agent_id=record.agent_id,
-            transport="livekit", bot_argv=argv,
+            transport="livekit", bot_argv=argv, bot_env=_bot_env(bot_token),
         )
 
     raise TransportUnavailable(f"Unknown transport: {record.transport!r}")

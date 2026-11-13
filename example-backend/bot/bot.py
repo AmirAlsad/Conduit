@@ -1,8 +1,9 @@
 """Bot entrypoint — one async ``bot()`` for the dev runner, plus a ``__main__``
 that branches between two launch modes converging on ``run_bot``:
 
-  * production: ``python -m bot.bot --transport … --agent … --token …``
-    (the dispatcher spawns this per call). Builds the transport from argv. A bot
+  * production: ``python -m bot.bot --transport … --agent … --token-env NAME``
+    (the dispatcher spawns this per call, with the room token in the
+    environment variable NAME; ``--token`` takes it directly, for manual runs). Builds the transport from argv. A bot
     for a client that sends call-connected gets ``--await-connected``; one
     dispatched for a ring also gets ``--ring-deadline SECS`` (and, when the app
     joins during the ring, ``--joins-before-answer``) and reads control lines
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from collections.abc import AsyncIterator
 
@@ -49,15 +51,20 @@ async def bot(runner_args: RunnerArguments) -> None:
 
 
 def _is_dispatch_invocation(argv: list[str]) -> bool:
-    # The dispatcher always passes --token; its absence means "run the dev runner".
-    return "--token" in argv
+    # The dispatcher always passes --token-env (or, by hand, --token); without
+    # either, run the dev runner.
+    return "--token" in argv or "--token-env" in argv
 
 
 async def _run_from_cli() -> None:
     parser = argparse.ArgumentParser(description="Conduit bot (dispatched subprocess)")
     parser.add_argument("--transport", required=True, choices=["daily", "livekit"])
     parser.add_argument("--agent", required=True)
-    parser.add_argument("--token", required=True)
+    token = parser.add_mutually_exclusive_group(required=True)
+    token.add_argument("--token")
+    # The dispatcher's way: the name of the environment variable holding the
+    # token, which stays out of argv (readable by every user in `ps`).
+    token.add_argument("--token-env")
     parser.add_argument("--room-url")  # daily
     parser.add_argument("--url")  # livekit server url
     parser.add_argument("--room-name")  # livekit
@@ -73,6 +80,10 @@ async def _run_from_cli() -> None:
     # The ring's push waits for this bot: say on stdout when it has joined the room.
     parser.add_argument("--report-joined", action="store_true")
     args = parser.parse_args()
+    if args.token_env:
+        args.token = os.environ.get(args.token_env) or parser.error(
+            f"--token-env: {args.token_env} is not set"
+        )
 
     if args.transport == "daily":
         creds = {"room_url": args.room_url, "token": args.token}
