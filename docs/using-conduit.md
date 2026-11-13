@@ -18,7 +18,7 @@ A call starts like a phone call: on the earpiece, unless AirPods, headphones or
 your car are connected, in which case it plays there. Hold the phone to your ear,
 or switch to the speaker from Conduit's in-call controls (or, on LiveKit calls,
 the system call screen's audio button). Your choice stays for
-the rest of the call, through a reconnect or a hold.
+the rest of the call, through a reconnect.
 
 ## Daily audio routing
 
@@ -93,23 +93,12 @@ arrived while you were on another call (**Missed — on another call**) and one 
 iOS silenced for a Focus (**Missed — Focus**). The last two never rang, so the row
 says why. A call you declined shows as **Declined**.
 
-## Hold
+## Phone calls during a call
 
-Pressing **Hold** on the call screen (the pause button; it reads **Resume** while
-held) puts the call on hold, and so does taking or placing a phone call: Conduit
-keeps the call instead of ending it. The microphone closes, the call screen reads
-**On Hold**, and Conduit tells your agent, which can stop talking and wait. When
-the other call ends, or when you press **Resume**, the conversation continues. A
-connection that drops while the call is on hold is picked up again when you resume.
-The time on hold counts toward the call's duration.
-
-Whether the agent actually goes quiet depends on it: on **SmallWebRTC** the app
-cannot silence the agent itself, so it relies on your agent honouring the hold
-message. The example backend does.
-
-!!! note "New in this release"
-    Hold has been tested with simulated calls, and is still being verified on
-    physical phones, with real phone calls and on each transport.
+Conduit calls can't be put on hold yet. If you accept or place a phone call
+during a Conduit call, iOS ends the Conduit call, and it shows in Recents as a
+completed call; call the agent again once you're done. Declining the phone call
+leaves the Conduit call as it is.
 
 ## Microphone access
 

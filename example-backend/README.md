@@ -270,9 +270,11 @@ and reconnects with backoff while CallKit still shows the call up. So:
 
 ### Call-control signals: when to speak, and hold
 
-The app also sends `call-connected`, `call-held` and `call-resumed` client
-messages (same RTVI envelope as `end-call`; same per-transport delivery). The
-entrypoint handles them for you (`bot/call_control.py`):
+The app also sends `call-connected` client messages (same RTVI envelope as
+`end-call`; same per-transport delivery). The entrypoint handles them for you
+(`bot/call_control.py`), and also `call-held` and `call-resumed`, which Conduit
+does not send (its calls cannot be held: a phone call ends the call) but an app
+on the call engine with its experimental hold turned on does:
 
 - **Speak on `call-connected`.** The app sends it on every call once the user is
   on the line: the call is connected, iOS has activated its audio, it is not held,
@@ -292,7 +294,7 @@ entrypoint handles them for you (`bot/call_control.py`):
   bot ends if no answer comes in time. A `"media"` ring (`--joins-before-answer`)
   stays silent until then even for an app that lists nothing, and is only sent to
   an app that lists `call-connected`.
-- **Hold.** `call-held` interrupts the bot and closes its audio gates (no turns,
+- **Hold** (from an app that holds calls; not Conduit). `call-held` interrupts the bot and closes its audio gates (no turns,
   no speech) until `call-resumed`; a human who drops while held gets
   `HELD_GRACE_SECS` instead of `HUMAN_ABSENT_GRACE_SECS`. The app sends it as soon
   as it is in the room, also while the call still shows connecting, so a hold

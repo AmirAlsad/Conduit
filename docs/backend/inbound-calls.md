@@ -361,8 +361,11 @@ uv run python scripts/ring.py --agent live --cancel-after 8        # ring, wait 
 
 ### Hold
 
-When the user puts the call on hold (taking or placing a cellular call, or the
-Hold button in the app), the app sends `call-held` and, later, `call-resumed`,
+Conduit's calls cannot be held: a phone call the user accepts ends the call, and
+Conduit never sends `call-held` or `call-resumed`. An app on the call engine with
+its experimental hold turned on does: when the user puts the call on hold (taking
+or placing a cellular call, or holding it in the app), it sends `call-held` and,
+later, `call-resumed`,
 each again if it did not leave the device and `call-held` again after a
 reconnect. The bot stops talking and hears nothing while held, and if the phone drops out of the room while held it waits
 `HELD_GRACE_SECS` (default 600) instead of `HUMAN_ABSENT_GRACE_SECS`.

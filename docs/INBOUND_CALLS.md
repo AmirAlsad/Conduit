@@ -58,7 +58,7 @@ Authorization: Bearer <API key>      # the agent's key; omitted if blank
   "display_name": "<optional>",          // the caller name the user gave the agent in the app
   "handle": "<optional>",                // the CallKit handle the app uses for it
   "push_features": ["cancel", "ring_timeout", "preconnect"],  // optional — see below
-  "call_signals": ["call-connected", "call-held", "call-resumed"],  // optional — see below
+  "call_signals": ["call-connected"],    // optional — see below
   "transport": "livekit"                 // optional — see below
 }
 ```
@@ -419,8 +419,8 @@ same envelope:
 | `t` | When |
 |---|---|
 | `call-connected` | The user is on the line: on every call (placed by the user, or a ring answered, prepared or not), once the call is connected, iOS has activated its audio, it is not held, and the app's own "Connected" has finished; sent again after every reconnect |
-| `call-held` | The call went on hold: the user took or placed a cellular call, or pressed Hold in the app. Any call, incoming or outgoing; sent as soon as the app is in the room, also while the call still shows connecting (so it can come before `call-connected`); sent again after every reconnect of a held call |
-| `call-resumed` | The call came back from hold and iOS has given it its audio again: the user can hear and speak. Usually a moment after the resume, seconds later when iOS has to be asked again for the audio |
+| `call-held` | **Not sent by Conduit**, whose calls cannot be held (a phone call ends the call; it lists only `call-connected`). Sent by an app on the engine with its experimental hold turned on, when the call went on hold: the user took or placed a cellular call, or held it in the app. Any call, incoming or outgoing; sent as soon as the app is in the room, also while the call still shows connecting (so it can come before `call-connected`); sent again after every reconnect of a held call |
+| `call-resumed` | **Not sent by Conduit**, as `call-held`. The call came back from hold and iOS has given it its audio again: the user can hear and speak. Usually a moment after the resume, seconds later when iOS has to be asked again for the audio |
 
 **When your agent should start speaking: on `call-connected`, not when the
 session connects.** The app lists the messages it sends as `call_signals` in every
@@ -432,7 +432,7 @@ shows "connecting" for at least about 2.6 s, so the first ring tone always plays
 full), while an answered call is still connecting, and, for a `media` ring, while
 the phone still rings. A call answered with its agent already there says nothing
 of its own, so `call-connected` follows the answer within about a second. Being muted or in push-to-talk does not delay it:
-the user hears you. Treat it with `call-held` and `call-resumed` as state: the user
+the user hears you. From an app that holds calls, treat it with `call-held` and `call-resumed` as state: the user
 is on the line once you have had `call-connected`, and away while the latest of the
 three is `call-held` (`call-connected` is never sent while the call is held; a call
 that connects during a hold gets `call-resumed` and then `call-connected` at the
@@ -444,7 +444,7 @@ receipt, or the device joining a ring it joins only after the answer) and the de
 is in the room, it greets anyway if `call-connected` has not come within a grace
 period: 5 seconds at least, 10 to cover the app's own sequence after it joins (on a
 call the user placed, the minimum connecting time; and its "Connected", which the
-app bounds at 5 s). The fallback must not fire while the call is held: the app
+app bounds at 5 s). With an app that holds calls, the fallback must not fire while the call is held: the app
 sends `call-held` as soon as it is in the room, also while the call still shows
 connecting, so stop the wait on `call-held`, start it again in full on
 `call-resumed`, and greet at the resume if your agent is on the line but has not
@@ -452,7 +452,7 @@ greeted. A greeting during a hold plays to nobody (or is dropped by your own aud
 gate while staying in the conversation as if it had been said). The
 reference engine does all of this (`CALL_CONNECTED_GRACE_SECS`, default 10).
 
-On hold the app's mic is off and, where the transport can, its playout too. A
+On hold (an app with the engine's experimental hold on; never Conduit) the app's mic is off and, where the transport can, its playout too. A
 reasonable agent stops talking, takes no turns, and gives a human who drops while
 held a longer grace window than a normal drop. SmallWebRTC's SDK cannot stop
 playout, so on that transport a held call is silent only if the agent honours
@@ -460,8 +460,9 @@ playout, so on that transport a held call is silent only if the agent honours
 
 Each message is sent once the connection to the agent is up, and the app learns
 whether it left the device: if it did not, it sends the call's current state
-again after 1, 2, 4, 8, 16 and 30 seconds, so a lost `call-held` does not leave
-the agent talking, and a lost `call-resumed` does not leave it silent. Expect
+again after 1, 2, 4, 8, 16 and 30 seconds, so a lost `call-connected` is sent
+again (and, from an app that holds calls, a lost `call-held` does not leave the
+agent talking, nor a lost `call-resumed` leave it silent). Expect
 the same message more than once, and treat each as the call's current state
 rather than an event to count.
 

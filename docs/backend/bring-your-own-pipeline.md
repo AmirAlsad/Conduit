@@ -99,8 +99,10 @@ app's `call-connected` (the user is on the line, after the app's own ringback an
 
 ## When to speak, hold, and rings (optional)
 
-The app sends `call-connected` on every call once the user is on the line, and
-`call-held` / `call-resumed` (the user took a phone call or pressed Hold). The
+The app sends `call-connected` on every call once the user is on the line.
+Conduit's calls cannot be held (a phone call ends the call), so it never sends
+`call-held` / `call-resumed`; an app on the call engine with its experimental hold
+on does, and the entrypoint handles those too. The
 entrypoint receives them for you (`bot/call_control.py`), but your pipeline only
 honours them if it can close its audio: put an `AudioGate`
 (`from bot.call_control import AudioGate`) after `transport.input()` and one before

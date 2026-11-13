@@ -30,7 +30,7 @@ Content-Type: application/json
 Authorization: Bearer <API key>      # the key the user entered; omitted if blank
 
 { "transport": "daily",              # or "livekit" / "smallwebrtc"
-  "call_signals": ["call-connected", "call-held", "call-resumed"] }
+  "call_signals": ["call-connected"] }
 ```
 
 - **Method:** always `POST`.
@@ -271,12 +271,14 @@ need opposite responses:
 
   The signal is best-effort: a connection that dies mid-drop never sends one, which
   is exactly when the grace window should apply.
-- **Hold is not a hangup either.** When the user takes a cellular call (or presses
-  Hold in the app), Conduit keeps the call and sends the RTVI client messages
-  `call-held` and, later, `call-resumed`, in the same envelope as `end-call`. A
-  reasonable agent stops talking while held and gives a human who drops during the
-  hold a longer grace window. Agents that don't know the messages can ignore them.
-  Details, and the other call-control message (`call-connected`), are in
+- **A phone call ends the call.** Conduit calls cannot be held: when the user
+  accepts or places a cellular call, iOS ends the Conduit call and the app sends
+  `end-call` as for any hangup. The engine Conduit is built on can send
+  `call-held` and `call-resumed` from an app that turns on its experimental hold;
+  Conduit does not and never lists them in `call_signals`, but an agent that
+  handles them (stop talking while held, a longer grace window for a human who
+  drops during the hold) is ready for an app that does. Details, and
+  `call-connected`, are in
   [Inbound calls](INBOUND_CALLS.md#6-call-control-messages-to-your-agent-engine-02).
 
 ### When to start speaking
@@ -293,7 +295,7 @@ A request that does not list it (an older app) gets the old behaviour: greet whe
 the client is ready. If it is listed but never arrives (lost on the way), greet
 anyway about 10 seconds after the device joined; the reference engine's
 `CALL_CONNECTED_GRACE_SECS`. Full rules, including how it combines with
-`call-held` / `call-resumed`:
+`call-held` / `call-resumed` from an app that holds calls:
 [Inbound calls §6](INBOUND_CALLS.md#6-call-control-messages-to-your-agent-engine-02).
 
 ---

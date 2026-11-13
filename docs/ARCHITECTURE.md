@@ -14,10 +14,12 @@
 > answer, decline, inline creds, Focus-filtered → missed + local notification,
 > busy report-and-end, redeploy survival — June 2026, LiveKit agent). The device
 > verification above dates to June and November 2026, on engine 0.1.x. The app now
-> consumes engine 0.2.x — call hold, pre-connect while ringing, ring timeouts and
+> consumes engine 0.2.x — pre-connect while ringing, ring timeouts and
 > cancel pushes, call-control signals to the agent, engine-driven sound cues, a join
 > deadline — which is built and unit-tested, with device verification pending
-> ([DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md)).
+> ([DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md)). The engine's call hold is
+> experimental and the app leaves it off: a phone call ends the call
+> ([ROADMAP](./ROADMAP.md) has the follow-up).
 > See [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 ## Overview
@@ -87,7 +89,8 @@ transport selection can unit-test against fakes (voice plan "Layer 1").
 The protocol also lets a transport state what it can do: whether it can join a
 room while the phone still rings (`canConnectWhileRinging` — LiveKit and Daily yes;
 SmallWebRTC no), and whether a call-control
-signal (`call-connected`, `call-held`, `call-resumed`) reached the agent
+signal (`call-connected`; `call-held` and `call-resumed` only with the engine's
+experimental hold, which the app leaves off) reached the agent
 (`send(_:)`'s `CallSignalDelivery`). The engine adapts to what each one reports.
 
 ### (3) The agent — the user's
@@ -108,11 +111,13 @@ Related hazards to design for (detailed in [CORE_SYSTEMS](./CORE_SYSTEMS.md)):
 - **Reconnection.** A dropped WebRTC connection leaves CallKit thinking the call
   is still up. Reconnect with backoff; speak state in a built-in synthesis voice
   (distinct from the agent's) since the agent is exactly what's unreachable.
-- **Interruptions and hold.** Duck under transient system audio (nav prompts,
-  alerts); pause the mic for a full takeover (Siri); and *hold*, not end, the call
-  when the user takes or places a phone call (or presses Hold in the app): the mic
-  closes, the transport detaches from the audio session, and the agent is told
-  with `call-held` / `call-resumed`.
+- **Interruptions and phone calls.** Duck under transient system audio (nav
+  prompts, alerts); pause the mic for a full takeover (Siri). A phone call the user
+  accepts or places ends the call: calls are not holdable. Holding instead (the mic
+  closed, the transport detached, the agent told with `call-held` /
+  `call-resumed`) is an experimental engine opt-in the app leaves off, because on a
+  device the audio did not come back after a real phone call
+  ([ROADMAP](./ROADMAP.md)).
 
 ## Folder Structure
 

@@ -149,7 +149,7 @@ including the cold launch a VoIP push causes, and is **not truncated per call**:
   phase, so fast ones are not lost), `cue: ...`, `spoken: connecting (answered, still
   connecting)`, `record: ...` (outcome, failure and missed reason, duration),
   `voip token: invalidated`.
-- The engine's observable state: `hold: on|off`, `audio activated: true|false` (as the
+- The engine's observable state: `hold: on|off` (always off: the app leaves the engine's hold off), `audio activated: true|false` (as the
   engine counts it; an activation it ignores, such as one during an unanswered ring,
   does not show), `interruption: began|ended`, `muted: true|false`.
 - Every log event of the engine package, prefixed `engine <category> <level>:`
@@ -194,9 +194,9 @@ lines also go to os.log (category `call`) if you have Console.app attached.
 | O2 | Warm call (Daily, LiveKit, SmallWebRTC) | Without force-quitting, call each agent in turn (SmallWebRTC over the hotspot LAN, local engine running). Talk about 30 s each, then hang up. | Two-way audio and mic indicator on every transport; each call ends cleanly. | | |
 | O3 | Mute sync | On a connected call, mute in-app. Lock the phone (or use the call pill / lock-screen call UI) and check the native Mute. Toggle from the native side, then back in-app. | In-app and native mute always agree; while muted the agent does not hear you (echo stops on loopback); unmute restores it. Trace `muted=` follows. | | |
 | O4 | Route picker and native route button (Daily, LiveKit) | With AirPods or other Bluetooth connected: use the in-app route picker to move Speaker / Receiver / Bluetooth on each transport. Then use the native call screen's audio button. | In-app picker audibly moves the sound on both transports. Native button audibly moves it on LiveKit. **Daily native button: known limitation, record what happens** (expected: route metadata changes, audio does not move). Trace `activeRoute=` matches. | | |
-| O4b | A call starts on the earpiece (Daily, LiveKit, SmallWebRTC) | Nothing connected (AirPods off, no car). Place an outgoing call on each transport and hold the phone to your ear; once connected, switch to the speaker in the app; then airplane mode on for 10 s and off; then hold and resume from the call screen. Repeat on LiveKit with the native audio button instead of the in-app picker. | The call starts on the earpiece and stays there through connecting: the in-call picker shows Receiver, and the trace shows no `setAudioDevice` by the engine before your switch. *Record* whether the ringback and the spoken cues ("Connected", and on an answered call "Connecting") are audible at the ear on each transport. After your switch to the speaker, the sound stays on the speaker through the reconnect and the hold. | | |
+| O4b | A call starts on the earpiece (Daily, LiveKit, SmallWebRTC) | Nothing connected (AirPods off, no car). Place an outgoing call on each transport and hold the phone to your ear; once connected, switch to the speaker in the app; then airplane mode on for 10 s and off. Repeat on LiveKit with the native audio button instead of the in-app picker. | The call starts on the earpiece and stays there through connecting: the in-call picker shows Receiver, and the trace shows no `setAudioDevice` by the engine before your switch. *Record* whether the ringback and the spoken cues ("Connected", and on an answered call "Connecting") are audible at the ear on each transport. After your switch to the speaker, the sound stays on the speaker through the reconnect. | | |
 | O4c | Ringback method A/B (done, iPhone 17, iOS 27.0; the DEBUG switch is gone) | Recorded result. Each method on Daily and LiveKit, with AirPods (Bluetooth HFP) and with nothing connected (phone at the ear). | *Earpiece:* the system sound is audible, quiet, fine; the audio player is inaudible even at full volume (the trace showed `play()` returned true, player volume 0.5, session output volume 1.0, route Receiver, about 1.7 s of playing). *AirPods:* the system sound is far too loud (it uses the ringer volume, not the call volume), and on LiveKit it jumps in level partway through the ring; the audio player is audible, steady, at call volume. *Speaker:* the system sound is audible (earlier tests); the audio player was not tried. On AirPods the player's `play()` returned 0.3 to 1.6 s after the ring was asked to start, once leaving 15 ms of ring before a LiveKit call connected. Neither method is right on every route, so the app now picks by route (O4e). | n/a | done |
-| O4d | SmallWebRTC keeps its route | Over the hotspot LAN: place a SmallWebRTC call with nothing connected (phone at the ear); once connected switch to the speaker in the app and back to the receiver. Then a call with AirPods connected; then connect AirPods mid-call on an earpiece call, and take them out. Then airplane mode on for 10 s and off, and hold/resume. Pull the trace. | The call starts on the earpiece (or the AirPods) and stays there through connecting. Trace (`smallwebrtc route:`): `route at activation: Receiver -> keep earpiece`, `join: route Receiver -> preferred audio device earpiece`, `preferred audio device -> earpiece`, then `joined: SDK selected earpiece, route Receiver` (with AirPods: `BluetoothHFP` and `bluetooth`). When the join comes before the activation the reason reads `the call's route before activation`. No line shows `route Speaker` unless you chose the speaker. The in-app picker moves the call; a reconnect logs `join: …` again for its new client and keeps the route; the hold keeps it. *Record* the route after AirPods connect mid-call (`devices now …: preferred audio device earpiece -> bluetooth`) and after they go. | | |
+| O4d | SmallWebRTC keeps its route | Over the hotspot LAN: place a SmallWebRTC call with nothing connected (phone at the ear); once connected switch to the speaker in the app and back to the receiver. Then a call with AirPods connected; then connect AirPods mid-call on an earpiece call, and take them out. Then airplane mode on for 10 s and off. Pull the trace. | The call starts on the earpiece (or the AirPods) and stays there through connecting. Trace (`smallwebrtc route:`): `route at activation: Receiver -> keep earpiece`, `join: route Receiver -> preferred audio device earpiece`, `preferred audio device -> earpiece`, then `joined: SDK selected earpiece, route Receiver` (with AirPods: `BluetoothHFP` and `bluetooth`). When the join comes before the activation the reason reads `the call's route before activation`. No line shows `route Speaker` unless you chose the speaker. The in-app picker moves the call; a reconnect logs `join: …` again for its new client and keeps the route. *Record* the route after AirPods connect mid-call (`devices now …: preferred audio device earpiece -> bluetooth`) and after they go. | | |
 | O4e | The ringback follows the route (Daily, LiveKit) | Set the call volume to about half. Place an outgoing call with nothing connected (phone at the ear); then one with AirPods connected; then one from the ear where you switch to the speaker in the app while it rings; then one where you connect AirPods while it rings. On one AirPods call, try the volume buttons while it rings. Pull the trace. | *Earpiece:* the ring is heard at the ear, as before. *AirPods:* the ring is heard at call volume, steady, and the volume buttons change it. *Switched to the speaker mid-ring:* the ring goes on with the system sound and is heard on the speaker; *AirPods connected mid-ring:* the ring keeps the system sound to the end (no second `chose` line in either; *record* how loud it is in the AirPods). Trace per call: `ringback: chose systemSound: route Receiver is the phone's own or another output (the ringer volume)` then `ringback (system sound): playing at the ringer volume` on the earpiece; on AirPods `ringback (audio player): player made in … ms` at the cue, `ringback: route BluetoothHFP at the activation; readying the audio player`, `ringback (audio player): prepareToPlay() returned true in … ms`, then `ringback: chose audioPlayer: route BluetoothHFP is a headset-type output (the call volume)` and `ringback (audio player): play() returned true in … ms, player volume 0.5`; at connected `ringback: stopped, method …`. *Record* the `prepareToPlay()` and `play()` times on AirPods (O4c saw 0.3 to 1.6 s from the start to `play()` returning); a `play()` that still takes most of a second once prepared is the Bluetooth link's, not the app's. A `ringback: waiting for CallKit's audio activation to choose a method` line means the activation came after the 0.5 s start. | | |
 | O5 | Lock mid-call | Start a call, lock the phone, wait 30 s, look at the lock screen. | Audio continues both ways; lock screen shows the agent's name (and photo if linked to a contact) and a timer that matches the in-app one. | | |
 | O6 | Reconnection (Daily, LiveKit) | (a) Find `room` in `dispatch.accepted`, send `/admin/disconnect` for it. (b) Separately, with a new call: airplane mode on for 5 s, then off. Pull the trace after each. | You hear "Retrying connection" (repeats about every 7 s while down), then "Connected", and audio resumes with no input from you; the call is still one call. Engine shows `teardown.human_left` then `grace_started` then `grace_cancelled` or `human_joined`, never `grace_expired`. For (b) on both Daily and LiveKit, expect "Disconnected" within a second or two of airplane mode on (Daily infers it from the network path, LiveKit from its SDK), then "Retrying connection", then "Connected" soon after airplane mode off; if "Connected" is heard but audio stays silent for more than a few seconds, record it (Daily announces recovery when the path returns, before its media resumes). After the call is back you can talk at once, while "Connected" plays: the trace shows `cue: moment(reconnected)` with no `mic withheld: true` after it and no "mic was still withheld" warning. "Connected" is heard within about 1.5 s of the call being back or not at all (the trace then shows `speech: connected not started within 1.5 seconds; cutting off`), and no "Retrying connection" is heard once the call is back. *Record* the `speech:` lines from `request connected` to `didFinish connected` (or the cut-off) for each recovery. TODO(verify): what the app does after the bot is killed by `/admin/disconnect` (re-pair vs. end); record the observed behavior. | | |
@@ -264,7 +264,7 @@ Leave Before as `n/a`. These cover behavior fixed or added by the change.
 
 ## Run sheet: engine 0.2.0 (pending, not yet run)
 
-**Status.** Everything this sheet covers (call hold, pre-connect while ringing, ring
+**Status.** Everything this sheet covers (a phone call ending the call, pre-connect while ringing, ring
 timeouts and cancel pushes, call-control signals, engine-driven spoken cues, the
 join deadline and "Agent didn't join", the explicit microphone request, the Cue Lab,
 the Daily ring join, the rebuilt SmallWebRTC adapter, and the SDK bumps to
@@ -283,7 +283,7 @@ How to use it:
   deployment, Debug build), plus the setup below. Record the build SHA, the package
   version resolved in `Package.resolved`, and the backend commit in the results block.
 - Ids are new so they do not collide with the main sheet's: **K** build and
-  permissions, **H** hold, **R** missed rings, timeouts and cancels, **P** pre-connect,
+  permissions, **H** a phone call during a call, **R** missed rings, timeouts and cancels, **P** pre-connect,
   **T** the tone agent (audio-leak checks), **DJ** the Daily ring-join experiment
   (concluded), **W** incoming calls ready when the user picks up ("when they pick up"),
   **C** cues and the Cue Lab, **G** the join deadline, **X** regression calls on the
@@ -315,21 +315,51 @@ How to use it:
 | K7 | Release-like build | Install a Release build (TestFlight or a local Release install) and ring it through production APNs. | Settings has no Debug section; no `conduit-call-trace.log` is written; the ring arrives and the call connects. | |
 | K8 | Registration carries features | Save an inbound agent; read the engine log. | `inbound.registered` appears; then `ring.py --ring-timeout 15 --preconnect media` produces no `ring.preconnect_unsupported` or `ring.ring_timeout_unsupported` in the engine log (those appear only for a registration without the features). | |
 
-### H. Hold
+### H. A phone call during a call
 
-Run each on Daily, LiveKit and SmallWebRTC unless the row says otherwise; the
-SmallWebRTC agent cannot be silenced by the app, so record what you hear there.
+The app leaves the engine's call hold off (`supportsHolding: false`), so a phone
+call the user accepts or places **ends** the Conduit call, as on 0.1 (O10 in the
+November run). These rows confirm that it ends cleanly on each transport. Run each
+on Daily, LiveKit and SmallWebRTC.
 
 | # | Check | Steps | Pass when | Result |
 |---|---|---|---|---|
-| H1 | Hold for a phone call | On a connected call, have the second phone call the test phone; choose Hold & Accept. Talk on the phone call. End it; resume the Conduit call if iOS does not. | The Conduit call is held, not ended: the call screen reads "On Hold", the agent goes quiet, the trace has `hold: on`, the engine log has `bot.call_held`. After resume, two-way audio returns within about a second, `hold: off`, `bot.call_resumed` once. Console: LiveKit `LiveKit detach: audio engine unavailable` then `LiveKit attach: audio engine available`; Daily `Daily agent audio -> unsubscribed (playout stopped)` then `-> subscribed (playout restored)`. *Record* whether iOS resumes the call by itself when the phone call ends. | |
-| H2 | Daily silence while held | On a Daily call to the `tone` agent (ring or call it so the tone plays), hold the call with a phone call. | Nothing of the tone is heard on the phone call or from the device while held; it is back after the resume. *Record* the same on LiveKit; on SmallWebRTC the tone is expected to keep playing (the app cannot stop its playout): record. | |
-| H3 | Phone call placed during a call | From the Phone app, place a call during an engine call. | The engine call is held and comes back when the phone call ends and the call is resumed. | |
-| H4 | The in-app Hold control | On a connected call tap Hold on the call screen, then Resume. Repeat from the native call screen, and while the call is still connecting and while it is ringing back. | The pause button fills and reads "Resume" while held; the status reads "On Hold"; the native call UI agrees; the agent receives `call-held` then `call-resumed`. The control is disabled while dialing and when no call is up, and enabled once the call is connecting, connected or reconnecting. | |
-| H5 | A long hold | Stay on hold for more than a minute. In a second attempt turn airplane mode on for about 20 seconds during the hold, then off, then resume. | The call survives both; after the airplane-mode hold, resume reconnects and audio returns; the agent stayed in the room (no `teardown.end_now`, no `grace_expired`). | |
-| H6 | Hold before the agent is ready | Place a call and hold it within a second or two, before the agent greets. Stay held 40 seconds, then resume. On Daily the agent cannot get ready while held. | The call connects and the agent greets **after** the resume; it does not fail as "Agent didn't join". | |
-| H7 | The signals reach the agent | After H1, read the engine log and the trace. With the network degraded at the moment of the resume, repeat once. | `bot.call_resumed` appears once, after the device's audio is back (Daily: after `Daily agent audio is subscribed` in Console). With a bad network, Console may show `did not leave the device; sending the call's state again`, followed within a few seconds by the signal. *Record* on SmallWebRTC whether the signals appear at all. | |
-| H8 | Car or Bluetooth head unit | If you have one: place, take and end calls, and hold, from the head unit. | Calls place and end; a phone call taken in the car holds the engine call. *Record.* | |
+| H1 | A phone call accepted ends the call | On a connected call, have the second phone call the test phone, and accept. Talk a few seconds, hang up. Then place a new Conduit call to the same agent. Pull the trace. | iOS offers to end the Conduit call and accept (no Hold & Accept). The Conduit call ends cleanly: trace `state: connected -> ended(completed)` and no `hold: on`; engine log `bot.end_call_signal` and `teardown.end_now reason=client-end-call` (SmallWebRTC may show `reason=client-left`) within about a second, no `grace_expired`; one **Completed** row in Recents; no "On Hold" anywhere. The phone call has normal audio. The new Conduit call connects with two-way audio. | |
+| H2 | A phone call placed ends the call | During a connected Conduit call, place a call from the Phone app. | As H1: the Conduit call ends cleanly with one Recents row, and the phone call goes through. | |
+| H3 | A declined phone call | On a connected call, have the second phone call the test phone and decline it. | The Conduit call carries on; *record* whether the in-call status shows "Paused" while it rings and that the agent hears you afterwards. | |
+| H4 | Car or Bluetooth head unit | If you have one: place, take and end calls from the head unit, and accept a phone call during one. | Calls place and end; the phone call ends the Conduit call as in H1. *Record.* | |
+
+#### Recorded: the engine's experimental hold (iPhone 17, iOS 27.0, November 2026)
+
+Run on a build that turned the engine's hold on, before it was cut from the
+release; kept for the follow-up in [ROADMAP](./ROADMAP.md) ("Hold for a real phone
+call"). Not a row to run.
+
+- **In-app hold and resume, no other call:** restored two-way audio on Daily and on
+  LiveKit, every time it was tried.
+- **Hold for a real phone call:** iOS held the engine's call; when the phone call
+  ended the engine resumed it and CallKit reported `didActivate`; the session read
+  `PlayAndRecord` / `VoiceChat`; no audio returned in either direction, on either
+  transport, after several fix rounds. LiveKit: `setEngineAvailability(.default)`
+  failed with `LiveKitError` code 801, "Audio engine returned error code: -4010", on
+  every attempt for at least six seconds (the engine's three re-attaches and the
+  experimental restarts L-B and L-C included); once CallKit's activation arrived
+  5.4 s after the resume. Daily: no error, audio simply absent; a second in-app
+  hold/resume and a route change did not help. iOS never delivered an
+  interruption-ended notification.
+- **One run each, not conclusions:** Daily candidate C (leave without the end-call
+  signal, release the client, rejoin the same room on a fresh client) restored
+  two-way audio once ("Disconnected", then "Connected", then the echo). The LiveKit
+  candidates (restart the audio engine at once; after a pause with retries; tell
+  WebRTC's audio session it was activated, then restart) all failed with -4010. The
+  session-level candidates (re-apply the category, explicitly activate the session)
+  were not run.
+- **Open question:** after the phone call ended, the system call screen still showed
+  the call as on hold on both transports, while the engine and the app reported it
+  not held. Untraced.
+
+The candidates, their DEBUG picker and the sheet row that drove them are on the
+`hold-recovery-experiments` branches.
 
 ### R. Missed rings, timeouts and cancels
 
@@ -504,7 +534,7 @@ confirm after `xcodegen generate` and a package resolve.
 |---|---|---|
 | Engine log | `engine.log` (and `engine-local.log` for SmallWebRTC) | The `teardown.*`, `inbound.*`, `apns.*` lines cited per row; same sequence both runs |
 | Call trace, per key call | `trace-<row>-<transport>.log` (at least O1 both transports, O3, O4, O6, O10, N5) | State sequence and `audioActivated` / `muted` / `activeRoute` transitions |
-| Call trace, 0.2.0 sheet | `trace-<row>-<transport>.log` plus `conduit-call-trace.previous.log` if present (at least H1, H6, P2, T1, T2, DJ rows, C4 to C7, G1) | `ring preparation:` phases, `hold:`, `audio activated:`, `cue:`, the engine's lines, the Cue Lab snapshots |
+| Call trace, 0.2.0 sheet | `trace-<row>-<transport>.log` plus `conduit-call-trace.previous.log` if present (at least H1, P2, T1, T2, DJ rows, C4 to C7, G1) | `ring preparation:` phases, `hold:` (always off), `audio activated:`, `cue:`, the engine's lines, the Cue Lab snapshots |
 | Frameworks listing | `frameworks.txt` | Identical, no `WebRTC.framework` (B1) |
 | Entitlements | `entitlements.txt` | Identical (`aps-environment`, Siri, etc.) |
 | Info.plist | `info-plist.txt` | Identical except version/build; background modes and usage strings unchanged |

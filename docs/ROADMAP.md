@@ -19,10 +19,12 @@ pairing, staged connection diagnostics, persisted failure reasons, decluttered
 in-app copy). The call engine (state machine, CallKit, PushKit, the Daily and
 LiveKit adapters) lives in the `ConduitCallEngine` Swift package, consumed by version
 from `github.com/AmirAlsad/ConduitCallEngine` (0.2.x). The adoption of engine 0.2 —
-call hold, pre-connect while ringing, ring timeouts and cancels, call-control
+pre-connect while ringing, ring timeouts and cancels, call-control
 signals to the agent, engine-driven cues, a join deadline, the SDK bumps — is built
 and unit-tested; **none of it has been run on a physical phone yet** (see the
 follow-ups below and the 0.2.0 sheet in [DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md)).
+Call hold is **not** shipped: the engine's hold is an experimental opt-in the app
+leaves off, so a phone call ends the call (see "Hold for a real phone call" below).
 See [ARCHITECTURE](./ARCHITECTURE.md) and [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 **The one fact that shapes this roadmap:** a large share of what's "built" is verified
@@ -31,8 +33,7 @@ device-verified (M3/M5), the **LiveKit** call path (pairing connect, two-way
 audio, the native route button, reconnection — against the deployed reference
 engine) in June 2026, and the **inbound VoIP-push round-trip** (cold ring through
 redeploy survival, LiveKit agent) days later. Not yet proven on hardware:
-**interruption/ducking** audio, call **hold** (built since, with engine 0.2; still
-unrun on a device), pre-connect, and finalized spoken-state ducking. You cannot responsibly build on a foundation that
+**interruption/ducking** audio, pre-connect, and finalized spoken-state ducking. You cannot responsibly build on a foundation that
 hasn't rung a real phone — so the roadmap leads with closing that debt.
 
 ## Guiding principles (the constraints that pick priorities)
@@ -77,9 +78,48 @@ bug-fix, not new surface.
 - **Interruptions & ducking, real audio** — Siri mid-call (pause + clean resume), an
   incoming PSTN call (yield the route), and **nav/GPS prompts ducking/mixing over the
   call** in the car (AirPods / CarPlay). Verify on both transports.
-- **Hold for a real phone call** — built with engine 0.2 (CallKit hold, an in-call
-  Hold control, `call-held` / `call-resumed` to the agent); **device verification
-  pending**.
+- **Hold for a real phone call — open follow-up; cut from the release.** Today a
+  phone call the user accepts or places ends the Conduit call (the engine's
+  `supportsHolding` is off by default and the app leaves it off; the in-call Hold
+  control is gone). Holding was built and device-tested (iPhone 17, iOS 27.0, Daily
+  and LiveKit) and does not work yet:
+  - In-app hold and resume with no other call restored two-way audio on both
+    transports, every time it was tried.
+  - With a real phone call: iOS held the engine's call; when the phone call ended
+    the engine resumed it and CallKit reported `didActivate`; the session read
+    `PlayAndRecord` / `VoiceChat`; and no audio returned in either direction. On
+    LiveKit, `setEngineAvailability(.default)` failed with `LiveKitError` code 801,
+    "Audio engine returned error code: -4010", on every attempt for at least six
+    seconds (the engine's three re-attaches and the experimental restarts all failed
+    the same way); once CallKit's activation came 5.4 s after the resume. On Daily
+    no error surfaced and audio was simply absent; a second in-app hold/resume and a
+    route change did not help. iOS never delivered an interruption-ended
+    notification in any run.
+  - Observations from **one run each**, not conclusions: on Daily, experimental
+    candidate C (leave without the end-call signal, release the client, rejoin the
+    same room on a fresh client) **did** restore two-way audio once (the user heard
+    "Disconnected", then "Connected", then the echo); so the audio hardware is
+    available again after the phone call and what fails to restart is each SDK's
+    existing audio stack, and a rejoin is a working recovery on Daily. On LiveKit
+    every candidate (restart the audio engine at once; after a pause with retries;
+    tell WebRTC's audio session it was activated, then restart) failed with the same
+    -4010; nothing is known to work there.
+  - **Open question:** on both transports, after the phone call ended, the system
+    call screen still showed the call as on hold while the engine and the app
+    reported it not held. Untraced; candidates are CallKit holding the call again
+    without delivering an action, the engine marking a resume CallKit did not
+    complete, or a stale system UI. It matters: if CallKit really still holds the
+    call, that could be why LiveKit's audio engine cannot start.
+  - **Next to try:** the two session-level experiments that were never run:
+    re-applying the session's category and mode (`playAndRecord` / `voiceChat`)
+    before the attach (E-A), and additionally activating the session explicitly
+    (`setActive(true)`, E-B, against the rule that CallKit owns activation). Then
+    trace the stale held state, and decide whether Daily's rejoin is acceptable as
+    the recovery there. The candidates, the DEBUG picker that chose them and their
+    tests are on the `hold-recovery-experiments` branch in both repos (Conduit and
+    ConduitCallEngine); `main` keeps only the attach retry, LiveKit's refused-start
+    report, the activation re-check while another call is listed, and the session
+    log at the attach after an interruption.
 - **Finalize spoken-state ducking** under the CallKit-owned session — the announcer must
   *mix with*, never deactivate, the session.
 
@@ -270,9 +310,11 @@ the November run**, so none is closed until the 0.2.0 sheet in
   *when* they play, not whether they are heard: the announcer's audio mechanism is
   unchanged. The DEBUG Cue Lab was built to find out which playback paths are audible
   on which transport. Needs the device session, then the mechanism decision below.
-- **Call hold** — placing or taking a cellular call ended the Conduit call. **Addressed
-  in code, pending device verification:** the engine holds the call through CallKit,
-  the call screen has a Hold control, and the agent gets `call-held` / `call-resumed`.
+- **Call hold** — placing or taking a cellular call ended the Conduit call. **Still
+  so, by decision:** holding was built and tested on a device, but audio did not come
+  back after a real phone call, so it is off (see "Hold for a real phone call" above).
+  To confirm on each transport: accepting a phone call ends the call cleanly
+  (DEVICE_VERIFICATION H1).
 - **Focus-filtered rings** — re-check on device when iOS filters them again; the path is
   unit-tested but was not exercised on iOS 27.0. **Unchanged.**
 - **SiriKit "Call <agent>"** — re-run with an agent that is in Contacts (unlocked and
@@ -288,7 +330,8 @@ the November run**, so none is closed until the 0.2.0 sheet in
 ### Open items created by the 0.2 adoption
 
 - **The device session.** The 0.2.0 sheet in
-  [DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md) (hold, pre-connect, cancel and
+  [DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md) (a phone call ending the call,
+  pre-connect, cancel and
   timeout rings, the tone agent, microphone prompt, missed-call rows, Cue Lab, the
   Daily ring join, and regression calls on all three transports on Pipecat
   1.3.0, Daily 0.41.0 and LiveKit 2.19.0) is written and unrun.
@@ -309,8 +352,9 @@ the November run**, so none is closed until the 0.2.0 sheet in
   one calling"); the reference backend asks for pre-connect by default and starts the
   agent before it rings. Device run of the new timelines pending (DEVICE_VERIFICATION,
   section W).
-- **SmallWebRTC on hold and signals.** Its SDK exposes no playout control, so a held
-  SmallWebRTC call is silent only if the agent honours `call-held`, and the SDK reports
+- **SmallWebRTC on hold and signals.** Its SDK exposes no playout control, so with the
+  engine's hold (off today) a held SmallWebRTC call would be silent only if the agent
+  honoured `call-held`, and the SDK reports
   nothing past the data channel's hand-off, so a signal's delivery cannot be
   confirmed. It also cannot join while ringing.
 - **Package issue #13, deferred items.**
