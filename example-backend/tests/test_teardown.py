@@ -108,3 +108,14 @@ async def test_livekit_data_ignores_other_messages():
     ):
         await t.handlers["on_data_received"](t, payload, "a")
     assert w.cancelled == 0
+
+
+def test_the_grace_default_covers_the_phones_whole_reconnect_budget():
+    # Up to 30 s of SDK self-heal, then backoff attempts at 1, 2, 4, 8, 16 and 30 s
+    # (91 s before the last attempt starts), plus each attempt's connect time.
+    from app.config import Settings
+
+    budget = 30 + sum((1, 2, 4, 8, 16, 30))
+    default = Settings.model_fields["human_absent_grace_secs"].default
+    assert default == 120.0
+    assert default > budget

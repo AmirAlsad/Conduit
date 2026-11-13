@@ -9,7 +9,10 @@ the moment the connection drops, the client reconnects into an empty room.
 Policy:
 - On the human leaving, do NOT exit. Start a human-absent grace timer; tear down
   only if no human has rejoined when it expires. While the bot stays, the room is
-  non-empty (won't auto-close) and a rejoining client resumes mid-conversation.
+  non-empty (won't auto-close) and a client that rejoins this room (the SDK's own
+  recovery; the app's reconnects with direct or inline credentials) resumes
+  mid-conversation. A pairing call's app-level reconnect gets a new room from
+  /connect instead, and this bot just waits the window out.
 - A real hangup and a dropped connection look identical at the transport layer.
   An explicit end signal (RTVI ``end-call`` message, or ``/admin/disconnect``)
   ends the call at once and reserves the grace window for genuine drops.

@@ -95,9 +95,9 @@ they're requirements, so a from-scratch agent must honor them:
    automatically (RTVI is on by default). **An agent that omits RTVI leaves the glow
    dark** — this is the one requirement people miss.
 3. **Reconnection-safe teardown.** Do **not** exit the instant the human drops —
-   the iOS client reconnects with backoff through tunnels/dead-zones. Stay for a
-   grace window so a reconnecting caller resumes mid-conversation, and end
-   immediately only on an explicit hangup signal. `run_bot` + `bot/teardown.py` do
+   the iOS client reconnects through tunnels/dead-zones. Stay for a grace window
+   so a caller who comes back into the same room resumes the conversation, and
+   end immediately only on an explicit hangup signal. `run_bot` + `bot/teardown.py` do
    this for you (`HUMAN_ABSENT_GRACE_SECS`; RTVI `{"type":"end-call"}` ends at once).
    See [Teardown](#teardown-reconnection-and-the-end-call-signal).
 
@@ -266,7 +266,17 @@ and reconnects with backoff while CallKit still shows the call up. So:
 
 - On the human leaving, a **`HUMAN_ABSENT_GRACE_SECS`** timer starts; teardown only
   fires if no human rejoins. The agent stays, so the room is non-empty and a
-  reconnecting caller resumes mid-conversation.
+  caller who comes back **into the same room** resumes the conversation.
+- **Which reconnects come back to the same room.** The phone first lets the
+  Daily/LiveKit SDK recover by itself, for up to 30 s, in the same room. If that
+  fails it reconnects itself, with attempts after 1, 2, 4, 8, 16 and 30 s (plus
+  each attempt's connect time). Those attempts reuse direct and inline
+  credentials, so they rejoin the same room; for a **pairing** agent each one
+  asks `/connect` again, and this engine answers as it does for any call: a
+  **new room and a new bot, which greets again** with no memory of the call,
+  while the old bot waits out its grace window alone. Handing a reconnecting
+  phone its old room is not built. SmallWebRTC has no SDK recovery: a dropped
+  peer ends its bot at once, and the phone's next offer starts a new one.
 - An **explicit end signal** ends a real hangup at once: the client sends the RTVI
   client message `end-call`, or you hit `POST /admin/disconnect`. Without it, every
   hangup harmlessly waits out the window (as a billed participant). On Daily the
@@ -275,9 +285,11 @@ and reconnects with backoff while CallKit still shows the call up. So:
   the same message from the raw `on_data_received` event (`bot/runtime.py`). The
   Conduit app sends it on every deliberate hangup, on both transports.
 
-> **`HUMAN_ABSENT_GRACE_SECS` is a shared constant with the client team** — it must
-> be ≥ the client's total reconnect-with-backoff budget, and no longer (your agent
-> is a billed participant during the window).
+> **`HUMAN_ABSENT_GRACE_SECS`** (default `120`) must cover the phone's reconnect
+> budget for the calls that come back to the same room: Conduit's is about 100 s
+> (30 s of SDK recovery, then attempts after 1, 2, 4, 8, 16 and 30 s, plus connect
+> time). Your agent is a billed participant during the window, and a pairing
+> call's old bot waits it out in full after a stage-2 reconnect.
 
 ### Call-control signals: when to speak, and hold
 
@@ -328,7 +340,7 @@ return them as `BotBuild(gates=…)` — see `bot/pipelines/live.py`.
   to give a thinking-partner more silence tolerance, at some latency cost.
 - **`TTS_PROVIDER`** — `cartesia` (default) | `deepgram` | `groq`; each reuses that
   provider's key. The agent's required-keys check follows it.
-- **`HUMAN_ABSENT_GRACE_SECS`** — see above. **`HELD_GRACE_SECS`** (default `600`)
+- **`HUMAN_ABSENT_GRACE_SECS`** (default `120`) — see above. **`HELD_GRACE_SECS`** (default `600`)
   replaces it while the call is on hold.
 - **`HUMAN_JOIN_TIMEOUT_SECS`** (default `45`, `0` turns it off) — a bot whose
   room has had no human this long after it started ends itself, rather than

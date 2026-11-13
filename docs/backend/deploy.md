@@ -82,6 +82,10 @@ it's fine to skip.
   rooms are orphaned and inbound VoIP tokens forgotten until re-registered.
   Pairing is unaffected. Fix: a volume + `REGISTRY_DB_PATH` (see
   [Inbound calls](inbound-calls.md)).
-- Keep `HUMAN_ABSENT_GRACE_SECS` ≥ the app's reconnect-with-backoff budget — the
-  agent is a billed participant during the window, but cutting it short breaks
-  reconnection, Conduit's headline feature.
+- Keep `HUMAN_ABSENT_GRACE_SECS` (default 120) above the app's reconnect budget,
+  about 100 s for Conduit (up to 30 s of SDK recovery, then attempts after 1, 2,
+  4, 8, 16 and 30 s, plus connect time) — the agent is a billed participant
+  during the window, but cutting it short breaks the reconnects that return to
+  the same room (SDK recovery; direct and inline credentials). A pairing call's
+  app-level reconnect gets a new room and agent from `/connect`, and its old agent
+  waits the window out.

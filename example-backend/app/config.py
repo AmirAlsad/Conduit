@@ -117,9 +117,14 @@ class Settings(BaseSettings):
     vad_stop_secs: float = 0.2
 
     # Human-absent grace window (design §2.5). On a dropped connection the bot stays
-    # this long so a reconnecting client resumes mid-conversation. Must be >= the
-    # client's total reconnect-with-backoff budget. SHARED CONSTANT with the client team.
-    human_absent_grace_secs: float = 60.0
+    # this long so a client that comes back into the SAME room resumes the
+    # conversation: the SDK's own recovery (any credentials), and every engine
+    # reconnect with credentials the app reuses (direct, inline). Conduit's budget:
+    # up to 30 s of SDK self-heal, then attempts after 1, 2, 4, 8, 16 and 30 s,
+    # plus each attempt's connect time, about 100 s. An engine reconnect with
+    # pairing credentials asks /connect again and gets a new room and bot; this
+    # bot then waits the window out alone.
+    human_absent_grace_secs: float = 120.0
 
     # A bot whose room has had no human this long after the bot started (or, for
     # a ring bot, after the ring was answered) ends itself: the user hung up while

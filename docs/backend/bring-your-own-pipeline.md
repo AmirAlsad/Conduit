@@ -82,10 +82,16 @@ because breaking one fails in ways that are easy to misdiagnose:
    or bridge in a non-Pipecat agent that never emits them, the glow stays dark**
    even though audio works — the single most-missed requirement.
 3. **Reconnection-safe teardown.** The iOS client drops media in tunnels and
-   dead-zones and reconnects with backoff while CallKit still shows the call up.
-   Don't exit when the human leaves — stay for a grace window
-   (`HUMAN_ABSENT_GRACE_SECS`) so a reconnecting caller resumes mid-conversation,
-   and end immediately only on an explicit hangup. The app sends an RTVI
+   dead-zones and reconnects while CallKit still shows the call up. Don't exit
+   when the human leaves — stay for a grace window (`HUMAN_ABSENT_GRACE_SECS`,
+   default 120 s) so a caller who comes back into the same room resumes the
+   conversation, and end immediately only on an explicit hangup. Only some
+   reconnects come back to the same room: the SDK's own recovery (up to 30 s),
+   and the app's later attempts when its credentials are fixed (direct) or came
+   in a ring push (inline). For a pairing agent the app's later attempts ask
+   `/connect` again, and the engine starts a new room and bot, which greets
+   again without the earlier conversation (details in the
+   [connection contract](../CONNECTION_CONTRACT.md#call-lifecycle-drops-hangups-and-the-end-call-signal)). The app sends an RTVI
    `end-call` client message on every deliberate hangup, on both transports —
    and `bot/runtime.py` + `bot/teardown.py` handle both arrival paths for every
    registered agent (on LiveKit the message rides the raw data channel, because

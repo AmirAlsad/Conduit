@@ -246,10 +246,27 @@ Two events look identical from your side — the user's media vanishing — but 
 need opposite responses:
 
 - **A drop is not a hangup.** Conduit is built for cars and dead-zones: when media
-  drops, the app reconnects with backoff **into the same room** while CallKit still
-  shows the call as up. If your agent exits the moment the human leaves, the user
-  reconnects into an empty room and the call dies. Hold the room for a grace window
-  (the reference engine defaults to 60 s) and tear down only if nobody returns.
+  drops, CallKit keeps showing the call as up while the app reconnects, in two
+  stages:
+    1. **The transport SDK recovers by itself**, for up to 30 s, **in the same
+       room** (Daily and LiveKit; SmallWebRTC has no such recovery).
+    2. If that fails, **the app reconnects**: attempts after 1, 2, 4, 8, 16 and
+       30 s, each plus its connect time. Each attempt uses the call's credentials
+       as the agent is configured: **with a pairing endpoint it asks the endpoint
+       again** (a plain request, the same body as for a new call), and joins
+       whatever room that returns; with a direct room, or inline credentials from
+       a ring, it reuses the same credentials and so **rejoins the same room**.
+
+  So the whole budget is about 100 s. If your agent exits the moment the human
+  leaves, stage 1 (and, for fixed or inline credentials, stage 2) finds an empty
+  room and the call dies: hold the room for a grace window that covers the
+  budget (the reference engine defaults to 120 s), and tear down only if nobody
+  returns. A pairing endpoint that answers a reconnect with a **new** room gets a
+  new agent session: the reference engine does this, so after a stage-2
+  reconnect its new agent greets again with no memory of the call, while the old
+  one waits out its grace window alone. To resume the same conversation, return
+  the room the call was already in; the request carries nothing that names it
+  today, so that needs your own bookkeeping.
 - **A real hangup says so explicitly.** When the user deliberately ends the call,
   Conduit sends an RTVI **`end-call` client message** before leaving, so you can
   tear down immediately instead of waiting out the grace window (your agent is a
