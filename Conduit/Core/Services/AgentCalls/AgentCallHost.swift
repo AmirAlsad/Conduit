@@ -45,7 +45,7 @@ final class AgentCallHost: CallEngineDelegate {
     /// or call changes nothing.
     private var connectSoundsID: UUID?
     /// The pending "Connecting" of an answered call; only that prompt's delay may
-    /// speak it. Cleared when the connecting loop stops (connected, held, ended).
+    /// speak it. Cleared when the connecting loop stops (connected, ended).
     private var connectingPromptID: UUID?
     /// Whether this call has said "Connecting": an answered call says it at most once.
     private var didPromptConnecting = false
@@ -187,9 +187,8 @@ final class AgentCallHost: CallEngineDelegate {
             announcer.cutOffPending()
             announcer.announce(.connected)
         case .moment(.connectionLost): announcer.announce(.disconnected)
-        // "Connected" will not follow until the resume, which withholds again.
-        case .moment(.held): releaseMicAfterConnectSounds(engine)
-        case .moment(.resumed): break
+        // The app leaves the engine's experimental hold off, so these never come.
+        case .moment(.held), .moment(.resumed): break
         @unknown default: break
         }
     }

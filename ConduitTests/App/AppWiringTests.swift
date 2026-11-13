@@ -67,6 +67,28 @@ struct AppWiringTests {
         #expect(configuration.defaultsToSpeaker == false)
     }
 
+    /// The engine's call hold is experimental (audio did not come back after a real
+    /// phone call), so the app leaves it off: a phone call the user accepts ends
+    /// the call, and no call is ever reported holdable.
+    @Test func callsCannotBeHeld() async throws {
+        let configuration = try #require(try appConfiguration())
+        #expect(configuration.supportsHolding == false)
+
+        let system = SimulatedCallSystem()
+        let engine = CallEngine.simulated(configuration: configuration, system: system)
+        await engine.placeCall(CallTarget(
+            id: UUID(),
+            displayName: "Agent",
+            makeTransport: { FakeTransport() },
+            connect: { _ in CallConnection(url: URL(string: "https://example.invalid/room")!, token: "t") }
+        ))
+        let callID = try #require(system.startedCallIDs.first)
+        #expect(system.reportedSupportsHolding(callID) == false)
+        #expect(!(await system.setHeldFromSystem(callID, onHold: true)))
+        #expect(!engine.isOnHold)
+        await engine.endCall()
+    }
+
     @Test func launchWiresSaveTimeRegistrationToTheHost() {
         // The hosted test bundle runs inside the launched app, so the AppDelegate's
         // didFinishLaunching has already wired the shared environment.

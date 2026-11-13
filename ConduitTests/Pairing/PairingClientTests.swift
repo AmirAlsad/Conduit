@@ -104,7 +104,7 @@ struct PairingClientTests {
         #expect(body.keys.sorted() == ["call_signals", "transport"])
         #expect(body["transport"] as? String == "livekit")
         // The backend's agent waits for call-connected only from an app that lists it.
-        #expect(body["call_signals"] as? [String] == ["call-connected", "call-held", "call-resumed"])
+        #expect(body["call_signals"] as? [String] == ["call-connected"])
     }
 
     @Test(arguments: [false, true])

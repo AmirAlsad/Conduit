@@ -4,7 +4,7 @@
 //
 //  Conduit's side of the call engine, driven by the real engine against
 //  fakes: the call-log rows it writes from each record, the engine's cues it
-//  speaks (and the hold moments it keeps silent), Siri donation, missed-call
+//  speaks, what a phone call does to a call, Siri donation, missed-call
 //  notifications, the receipt bearer, the agent targets it hands the engine
 //  (direct, pairing, inline push, and the ring preparation it allows), and VoIP
 //  token registration.
@@ -620,99 +620,36 @@ struct AgentCallHostTests {
         #expect(entry.outcomeDisplayLabel == "Failed — agent didn't join")
     }
 
-    // MARK: - Hold
+    // MARK: - A phone call
 
-    @Test func holdAndResumeAreSilent() async throws {
-        let h = try AgentCallHostHarness()
+    /// With the app's configuration a call cannot be held: a phone call the user
+    /// accepts ends it, iOS ending it through CallKit, as a hangup from the system
+    /// call screen would. The agent gets the end-call signal and Recents one row.
+    @Test func aPhoneCallTheUserAcceptsEndsTheCall() async throws {
+        let h = try soundsHarness()
         await h.placeCall()
         await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected)
-        let announced = h.announcer.announced
-        let started = h.announcer.startedRepeating
-        let stops = h.announcer.stopRepeatingCount
-
-        await h.engine.setOnHold(true)
-        await h.system.awaitPendingWork()
-        #expect(h.engine.isOnHold)
-        await h.engine.setOnHold(false)
-        await h.system.awaitPendingWork()
-        #expect(!h.engine.isOnHold)
-
-        #expect(h.announcer.announced == announced)
-        #expect(h.announcer.startedRepeating == started)
-        #expect(h.announcer.stopRepeatingCount == stops)
-        #expect(h.announcer.repeatingPhrase == nil)
-    }
-
-    @Test func holdIsReportedToCallKitAndToTheAgent() async throws {
-        let h = try AgentCallHostHarness()
-        await h.placeCall()
-        await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected)
-        let callID = try #require(h.system.startedCallIDs.first)
-        #expect(h.system.reportedSupportsHolding(callID) == true)
-
-        await h.engine.setOnHold(true)
-        await h.system.awaitPendingWork()
-        #expect(h.transport.sentSignals.contains(.held))
-        #expect(h.system.holdRequests.map(\.onHold) == [true])
-        #expect(!h.transport.isMicEnabled)
-        #expect(!h.transport.isAudioAttached)
-
-        await h.engine.setOnHold(false)
-        await h.system.awaitPendingWork()
-        #expect(h.transport.sentSignals.contains(.resumed))
-        #expect(h.system.holdRequests.map(\.onHold) == [true, false])
-        #expect(h.transport.isAudioAttached)
-        #expect(h.transport.isMicEnabled)
-    }
-
-    /// A phone call the user accepts holds the agent call; when it ends, the engine
-    /// resumes the call by itself (iOS does not), quietly, and the agent call has
-    /// its mic again once CallKit hands the audio back, with no "Paused" left over.
-    @Test func aPhoneCallTakenDuringACallGivesItBackWhenItEnds() async throws {
-        let h = try AgentCallHostHarness(sleep: AgentCallHostHarness.realTimeSleep)
-        await h.placeCall()
-        await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected)
+        await agentIsReady(h)
         h.announcer.finishAnnouncements()
         await h.system.awaitPendingWork()
         let callID = try #require(h.system.startedCallIDs.first)
-        let announced = h.announcer.announced
+        let transport = h.transport
+        #expect(h.system.reportedSupportsHolding(callID) == false)
 
         let phoneCall = h.system.startOtherCall()
-        #expect(await h.system.setHeldFromSystem(callID, onHold: true))
+        #expect(!(await h.system.setHeldFromSystem(callID, onHold: true)))
         h.system.beginAudioInterruption()
+        h.system.endCallFromSystem(callID)
         h.system.deactivateAudioSession()
         await h.system.awaitPendingWork()
-        #expect(InCallStatus.pausedText(for: h.engine.state, isOnHold: h.engine.isOnHold, isInterrupted: h.engine.isInterrupted) == InCallStatus.onHold)
-
         await h.system.endOtherCall(phoneCall)
+
+        #expect(h.engine.state == .ended(.completed))
         #expect(!h.engine.isOnHold)
-        #expect(h.system.holdRequests.map(\.onHold) == [false])
-
-        await h.system.activateAudioSession()
-
-        #expect(!h.engine.isInterrupted)
-        #expect(InCallStatus.pausedText(for: h.engine.state, isOnHold: h.engine.isOnHold, isInterrupted: h.engine.isInterrupted) == nil)
-        #expect(h.transport.isAudioAttached)
-        #expect(h.transport.isMicEnabled)
-        #expect(h.transport.sentSignals.suffix(2) == [.held, .resumed])
-        #expect(h.announcer.announced == announced)
-    }
-
-    @Test func aHoldFromTheCallScreenStaysWhenAPhoneCallEnds() async throws {
-        let h = try AgentCallHostHarness(sleep: AgentCallHostHarness.realTimeSleep)
-        await h.placeCall()
-        await h.system.activateAudioSession()
-        h.system.deliverTransportEvent(.connected)
-        let phoneCall = h.system.startOtherCall()
-
-        await h.engine.setOnHold(true)
-        await h.system.endOtherCall(phoneCall)
-
-        #expect(h.engine.isOnHold)
-        #expect(h.system.holdRequests.map(\.onHold) == [true])
+        #expect(h.system.holdRequests.isEmpty)
+        #expect(transport.disconnectCount == 1)
+        #expect(!transport.sentSignals.contains(.held))
+        #expect(try h.loggedEntries().map(\.outcome) == [.completed])
     }
 
     /// iOS may never post an interruption's end (it did not after a phone call on
@@ -728,12 +665,12 @@ struct AgentCallHostTests {
         h.system.beginAudioInterruption()
         h.system.deactivateAudioSession()
         await h.system.awaitPendingWork()
-        #expect(InCallStatus.pausedText(for: h.engine.state, isOnHold: false, isInterrupted: h.engine.isInterrupted) == "Paused")
+        #expect(InCallStatus.pausedText(for: h.engine.state, isInterrupted: h.engine.isInterrupted) == "Paused")
 
         await h.system.activateAudioSession()
 
         #expect(!h.engine.isInterrupted)
-        #expect(InCallStatus.pausedText(for: h.engine.state, isOnHold: false, isInterrupted: h.engine.isInterrupted) == nil)
+        #expect(InCallStatus.pausedText(for: h.engine.state, isInterrupted: h.engine.isInterrupted) == nil)
         #expect(h.transport.isMicEnabled)
     }
 
@@ -927,43 +864,6 @@ struct AgentCallHostTests {
         #expect(h.engine.isMicWithheld)
     }
 
-    @Test func anAnsweredCallSaysConnectingOnlyOnceAcrossAHold() async throws {
-        let h = try soundsHarness()
-        h.ring()
-        await h.system.answerIncomingCall()
-        await h.system.activateAudioSession()
-        h.delays.fireAll()
-        #expect(h.announcer.announced == [.connecting])
-
-        await h.engine.setOnHold(true)
-        await h.engine.setOnHold(false)
-        await h.system.awaitPendingWork()
-        #expect(h.engine.state.isConnecting)
-        h.delays.fireAll()
-
-        #expect(h.announcer.announced == [.connecting])
-        #expect(h.announcer.startedRepeating.isEmpty)
-    }
-
-    /// A hold before the second is up stops the wait; the resume starts it again.
-    @Test func aHoldBeforeTheSecondIsUpWaitsAgainFromTheResume() async throws {
-        let h = try soundsHarness()
-        h.ring()
-        await h.system.answerIncomingCall()
-        await h.system.activateAudioSession()
-
-        await h.engine.setOnHold(true)
-        h.delays.fireAll() // the wait the hold stopped
-        #expect(h.announcer.announced.isEmpty)
-        await h.engine.setOnHold(false)
-        await h.system.awaitPendingWork()
-        #expect(h.delays.pendingCount == 1)
-        h.delays.fireAll()
-
-        #expect(h.announcer.announced == [.connecting])
-        #expect(h.announcer.startedRepeating.isEmpty)
-    }
-
     @Test func anAnsweredCallThatEndsBeforeTheSecondSaysNothing() async throws {
         let h = try soundsHarness()
         h.ring()
@@ -1029,48 +929,6 @@ struct AgentCallHostTests {
         #expect(h.engine.state.failureReason == .badToken)
         #expect(h.announcer.startedRepeating == [.connecting])
         #expect(!h.engine.isMicWithheld)
-    }
-
-    @Test func aHoldWhileConnectingNeedsNoWithholdAndTheResumeRingsAgain() async throws {
-        let h = try soundsHarness()
-        await h.placeCall()
-        await h.system.activateAudioSession()
-
-        await h.engine.setOnHold(true)
-        await h.system.awaitPendingWork()
-        #expect(!h.engine.isMicWithheld)
-        #expect(!h.transport.isMicEnabled) // held
-
-        await h.engine.setOnHold(false)
-        await h.system.awaitPendingWork()
-        #expect(h.announcer.startedRepeating == [.connecting, .connecting]) // the ringback plays again
-        #expect(!h.engine.isMicWithheld)
-        #expect(!h.transport.isMicEnabled) // still connecting
-
-        await agentIsReady(h)
-        h.announcer.finishAnnouncements()
-        await h.system.awaitPendingWork()
-        #expect(h.transport.isMicEnabled)
-    }
-
-    @Test func aHoldBeforeConnectedHasPlayedReleasesTheMic() async throws {
-        let h = try soundsHarness()
-        await h.placeCall()
-        await h.system.activateAudioSession()
-        await agentIsReady(h)
-        #expect(h.engine.isMicWithheld)
-
-        await h.engine.setOnHold(true)
-        await h.system.awaitPendingWork()
-        #expect(!h.engine.isMicWithheld)
-        await h.engine.setOnHold(false)
-        await h.system.awaitPendingWork()
-
-        #expect(!h.engine.isMicWithheld)
-        #expect(h.transport.isMicEnabled)
-        h.announcer.finishAnnouncements() // the interrupted "Connected" ends, and changes nothing
-        await h.system.awaitPendingWork()
-        #expect(h.transport.isMicEnabled)
     }
 
     /// A drop while the first "Connected" still plays: the reconnect cuts it off,
@@ -1462,7 +1320,7 @@ struct AgentCallHostTests {
         #expect(fields["transport"] as? String == "livekit")
         // An agent the server starts for a ring waits for call-connected only from a
         // registration that lists it.
-        #expect(fields["call_signals"] as? [String] == ["call-connected", "call-held", "call-resumed"])
+        #expect(fields["call_signals"] as? [String] == ["call-connected"])
         #expect(fields["voip_token"] as? String == "ab01")
         #expect(fields["platform"] as? String == "ios")
         #expect(fields["bundle_id"] as? String == "com.example.conduit")

@@ -44,8 +44,10 @@ enum PairingClient {
     }
 
     /// The call-control signals every call of this app carries (all three
-    /// transports deliver them), as the backend sees them on the wire.
-    static let callSignals = CallSignal.allCases.map(\.rawValue)
+    /// transports deliver them), as the backend sees them on the wire. Only
+    /// `call-connected`: the engine sends `call-held` and `call-resumed` only with
+    /// its experimental hold, which the app leaves off.
+    static let callSignals = [CallSignal.connected.rawValue]
 
     static func body(transport: TransportKind, ring: PairingRing?) -> [String: Any] {
         var body: [String: Any] = ["transport": transport.rawValue, "call_signals": callSignals]

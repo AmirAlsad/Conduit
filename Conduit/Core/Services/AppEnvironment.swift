@@ -93,13 +93,16 @@ final class AppEnvironment {
     /// The engine configuration the app ships. A placed call's ringback plays its
     /// start delay and first tone in full before the call shows connected and
     /// "Connected" is spoken; answered calls have no ringback and are never held
-    /// connecting. Calls start where iOS puts them (no speaker default).
+    /// connecting. Calls start where iOS puts them (no speaker default). Calls are
+    /// not holdable: the engine's call hold is experimental (audio did not come back
+    /// after a real phone call), so a phone call the user accepts ends the call.
     static func callEngineConfiguration(
         isPushToTalkEnabled: @escaping @MainActor () -> Bool = { false }
     ) -> CallEngineConfiguration {
         CallEngineConfiguration(
             unknownCallerName: "Agent",
             minimumOutgoingConnectingDuration: Ringback.minimumOutgoingConnectingDuration,
+            supportsHolding: false,
             isPushToTalkEnabled: isPushToTalkEnabled
         )
     }
