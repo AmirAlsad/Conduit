@@ -97,27 +97,27 @@ settings:
 # Package.resolved (copied in by options.postGenCommand), because the generated
 # .xcodeproj is gitignored and would otherwise float to newer, unverified SDKs.
 packages:
-  # The call engine and its Daily/LiveKit adapters, consumed by version (0.1.x
+  # The call engine and its Daily/LiveKit adapters, consumed by version (0.2.x
   # only: a 0.x minor may break). The Daily and LiveKit entries below stay
   # declared (no target links them directly) so their floors and the tracked
   # Package.resolved pins still apply.
   ConduitCallEngine:
     url: https://github.com/AmirAlsad/ConduitCallEngine.git
-    minorVersion: "0.1.0"
+    minorVersion: "0.2.0"
   PipecatClientIOS:
     url: https://github.com/pipecat-ai/pipecat-client-ios.git
-    from: "1.2.0"
+    from: "1.3.0"
   PipecatClientIOSDaily:
     url: https://github.com/pipecat-ai/pipecat-client-ios-daily.git
-    from: "1.2.0"
+    from: "1.3.0"
   PipecatClientIOSSmallWebrtc:
     url: https://github.com/AmirAlsad/pipecat-client-ios-small-webrtc.git
     revision: bf829f57679fd8c534241f538dac7edd42bb433f
   LiveKit:
     url: https://github.com/livekit/client-sdk-swift.git
-    # Floor at 2.15.1 to pull the latest LiveKitWebRTC (webrtc-xcframework
-    # 144.7559.10) — App Review hygiene (Guideline 2.5.1 binary scan).
-    from: "2.15.1"
+    # Floor at 2.19.0, the engine package's own floor and the version the
+    # November 2026 device run used (LiveKitWebRTC 150.7871.4).
+    from: "2.19.0"
 
 targets:
   Conduit:
@@ -167,6 +167,15 @@ targets:
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: false
         SWIFT_EMIT_LOC_STRINGS: true
         TARGETED_DEVICE_FAMILY: "1"
+        # The engine's fakes, linked into Debug and simulator builds only (see the
+        # ConduitCallEngineTesting dependency below).
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - $(CONDUIT_ENGINE_FAKES)
+        "CONDUIT_ENGINE_FAKES[sdk=iphonesimulator*]": $(BUILT_PRODUCTS_DIR)/ConduitCallEngineTesting.o
+      configs:
+        Debug:
+          CONDUIT_ENGINE_FAKES: $(BUILT_PRODUCTS_DIR)/ConduitCallEngineTesting.o
     dependencies:
       - package: PipecatClientIOS
       - package: PipecatClientIOSSmallWebrtc
@@ -176,8 +185,13 @@ targets:
         product: ConduitCallEngineDaily
       - package: ConduitCallEngine
         product: ConduitCallEngineLiveKit
+      # The engine's fakes (FakeTransport, SimulatedCallSystem): built for every
+      # configuration but linked only by this target's OTHER_LDFLAGS, so a Release
+      # device build carries none of them. The code that uses them is behind
+      # `#if DEBUG || targetEnvironment(simulator)`.
       - package: ConduitCallEngine
         product: ConduitCallEngineTesting
+        link: false
 
   ConduitTests:
     type: bundle.unit-test
