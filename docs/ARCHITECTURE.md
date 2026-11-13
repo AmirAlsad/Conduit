@@ -8,18 +8,14 @@
 > and `Shared/` components, and the SmallWebRTC adapter. Adding an agent to
 > Contacts is permission-free (system Add-Contact sheet). Recents has
 > swipe-to-delete, and agents can ring the user (VoIP push; see
-> [INBOUND_CALLS](./INBOUND_CALLS.md)). The LiveKit call path is device-verified
-> (pairing connect, two-way audio, native route button, reconnection — against the
-> deployed reference engine, June 2026), and so is the **inbound path** (cold ring,
-> answer, decline, inline creds, Focus-filtered → missed + local notification,
-> busy report-and-end, redeploy survival — June 2026, LiveKit agent). The device
-> verification above dates to June and November 2026, on engine 0.1.x. The app now
-> consumes engine 0.2.x — pre-connect while ringing, ring timeouts and
-> cancel pushes, call-control signals to the agent, engine-driven sound cues, a join
-> deadline — which is built and unit-tested, with device verification pending
-> ([DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md)). The engine's call hold is
-> experimental and the app leaves it off: a phone call ends the call
-> ([ROADMAP](./ROADMAP.md) has the follow-up).
+> [INBOUND_CALLS](./INBOUND_CALLS.md)). The app consumes engine 0.2.x — pre-connect
+> while ringing, ring timeouts and cancel pushes, call-control signals to the agent,
+> engine-driven sound cues, a join deadline. The latest device session (2026-11-12,
+> iPhone 17, iOS 27.0, Daily, LiveKit and SmallWebRTC) and what it did not cover
+> (among them Focus-filtered rings, which iOS 27.0 did not filter, and the SiriKit
+> contact path) are recorded in [DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md). The
+> engine's call hold is experimental and the app leaves it off: a phone call ends
+> the call ([ROADMAP](./ROADMAP.md) has the follow-up).
 > See [CORE_SYSTEMS](./CORE_SYSTEMS.md).
 
 ## Overview
@@ -28,8 +24,9 @@ Conduit is a **thin audio pipe**: a native iOS app that turns a voice agent you
 already run into a hands-free phone call. The app neither hosts nor knows the
 agent's models — it places the call, routes the audio (including to the car over
 Bluetooth/CarPlay), and shows call status. There is **no backend of ours**: the
-user brings their own connection (Daily / LiveKit credentials they mint
-themselves), so the app has no accounts, no token service, and no per-minute cost.
+user brings their own connection (Daily or LiveKit credentials they mint
+themselves, or a SmallWebRTC server they run), so the app has no accounts, no token
+service, and no per-minute cost.
 
 ## The Three-Layer Model
 
@@ -168,14 +165,15 @@ convention are in [CONVENTIONS](./CONVENTIONS.md).
 > `Core/Services/AgentCalls/` is the one place that turns an `Agent` into a
 > `CallTarget` and reacts to the engine's callbacks.
 
-## App Surface (planned, from the plan)
+## App Surface
 
 Modeled on the iOS Phone app — three tabs plus two detail/modal surfaces:
 
 - **Recents** (home) — the call log; redial-the-last-one behavior; cold-start
   empty state funnels to "add your first agent."
 - **Contacts** — the list of agents, each treated as a contact (quick-call button).
-- **Settings** — sparse: About + the global always-listening vs. push-to-talk toggle.
+- **Settings** — the global always-listening vs. push-to-talk toggle, and About (the
+  version, the privacy note, and a link to connecting your agent).
 - **Agent Detail** — a contact-card view of one agent with a prominent Call
   button, plus "Add to Contacts" (the permission-free system Add-Contact sheet).
 - **Add / Edit Agent** (sheet) — the bring-your-own configuration surface

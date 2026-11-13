@@ -7,7 +7,7 @@
   - `Features/`: feature modules (Views, ViewModels, Models, Services, Coordinators).
   - `Shared/`: reusable components and navigation helpers.
   - `Resources/` and `Assets.xcassets`: fonts, JSON/audio, and xcassets.
-  - `Debug/`: DEBUG-only tooling (call trace, Cue Lab, Daily ring-join switch, device spikes); compiled out of Release.
+  - `Debug/`: DEBUG-only tooling (call trace, Cue Lab, device spikes); compiled out of Release.
 - `ConduitCallEngine` (package): the call engine (state machine, CallKit, PushKit, reconnection, Daily/LiveKit adapters, fakes) as a separate Swift package, consumed by version from `github.com/AmirAlsad/ConduitCallEngine` in `project.yml` (`minorVersion: "0.2.0"`, 0.2.x only). Its source and tests live in its own repo.
 - `Config/`: shared build settings (`Base.xcconfig`) and per-developer local overrides.
 - `ConduitTests/` and `ConduitUITests/`: test targets.
@@ -44,7 +44,7 @@
 
 ## Testing Guidelines
 - Host unit tests in `ConduitTests/`, UI tests in `ConduitUITests/`, engine unit tests in the `ConduitCallEngine` package's `Tests/`.
-- The simulator cannot exercise CallKit or capture the mic over WebRTC: logic and state machines unit-test in the sim against the package's fakes (`ConduitCallEngineTesting`); the transport/CallKit boundary and audio routing are device-only / manual. Anything since the engine 0.2.x adoption (hold, pre-connect, cues, the SDK bumps) is built and unit-tested, not yet device-verified. See CLAUDE.md for the test-scope table.
+- The simulator cannot exercise CallKit or capture the mic over WebRTC: logic and state machines unit-test in the sim against the package's fakes (`ConduitCallEngineTesting`); the transport/CallKit boundary and audio routing are device-only / manual. Device verification last ran on 2026-11-12 (engine 0.2.0, all three transports); the Results block of `docs/DEVICE_VERIFICATION.md` records what passed and what was not run, so claim nothing beyond it. The app leaves the engine's experimental call hold off: a phone call the user accepts ends the call. See CLAUDE.md for the test-scope table.
 - Name test methods/functions descriptively and cover both new behavior and regressions.
 
 ## Commit & Pull Request Guidelines

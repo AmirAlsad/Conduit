@@ -13,17 +13,19 @@ backend of ours, no accounts, no per-minute cost.
 | [ROADMAP](./ROADMAP.md) | Where Conduit goes next and why in that order — the verification-debt-first sequence (M7+) toward calling and being called by your own agent. |
 | [ARCHITECTURE](./ARCHITECTURE.md) | The three-layer model (CallKit / WebRTC transport / the user's agent), folder structure (the app and the `ConduitCallEngine` package), the key seams. |
 | [CONVENTIONS](./CONVENTIONS.md) | Code style, naming, AccessibilityID convention, the per-developer build override model, logging standards. |
-| [CORE_SYSTEMS](./CORE_SYSTEMS.md) | Shared infrastructure: what lives in the `ConduitCallEngine` package vs. the app, the protocol seams + fakes, SwiftData models, AppEnvironment, the call state machine, reconnection/spoken state, the audio-session/CallKit wiring, audio-interruption handling, hold, pre-connect, and the inbound-call path. |
+| [CORE_SYSTEMS](./CORE_SYSTEMS.md) | Shared infrastructure: what lives in the `ConduitCallEngine` package vs. the app, the protocol seams + fakes, SwiftData models, AppEnvironment, the call state machine, reconnection/spoken state, the audio-session/CallKit wiring, audio-interruption handling, why calls are not held, pre-connect, and the inbound-call path. |
 | [CONNECTION_CONTRACT](./CONNECTION_CONTRACT.md) | How a user's agent backend connects to Conduit — the pairing-endpoint request/response shapes, the direct-room fallback, and the call-lifecycle expectations (grace window, the end-call signal). Hand this to whoever runs the agent. *(published)* |
 | [INBOUND_CALLS](./INBOUND_CALLS.md) | How a user's own server rings the user through Conduit (agent-initiated VoIP-push calls) — token registration/unregistration, the push payload, ring timeouts and cancels, pre-connect, the call-control messages (`call-connected`, `call-held`, `call-resumed`) and when the agent should start speaking, and ring-status receipts. The inbound companion to the connection contract. *(published)* |
 | [AGENT_WORKFLOW](./AGENT_WORKFLOW.md) | Operational playbook for agents driving the app: build nuances, UI verification, flow testing, the reporting contract, and the shell fallback. |
-| [DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md) | The by-hand run sheet for everything the simulator can't run (real calls, routing, rings, Siri), used for before/after runs around call-stack changes and transport-SDK bumps. Includes the engine 0.2.0 sheet (hold, pre-connect, cancels, cues, the Cue Lab), written and not yet run. |
+| [DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md) | The by-hand run sheet for everything the simulator can't run (real calls, routing, rings, Siri), used for before/after runs around call-stack changes and transport-SDK bumps, with the record of each run (the latest: the engine 0.2.0 session of 2026-11-12) and what it did not cover. |
 | [index](./index.md) | Landing page of the published docs site. *(published)* |
-| [using-conduit](./using-conduit.md) | The long-form explanations behind in-app settings (push-to-talk, Daily audio routing, Add to Contacts, privacy) — each linked from a "Learn more" in the app. *(published)* |
+| [using-conduit](./using-conduit.md) | The user guide: push-to-talk, where the sound comes from, what you hear on a call, Siri, calls from your agent, missed calls, microphone access, Add to Contacts, privacy. Several sections are linked from a "Learn more" in the app (`ExternalLinks.swift`). *(published)* |
+| [privacy](./privacy.md) | The privacy policy: what the app sends where (credentials, registration, ring outcomes, call audio), and what it never collects. *(published)* |
 | [connect-your-agent](./connect-your-agent.md) | User-facing orientation: pairing vs. direct, one endpoint per agent, where the example backend fits. *(published)* |
 | [backend/quickstart](./backend/quickstart.md) | Run the example backend and point the app at it. *(published)* |
 | [backend/bring-your-own-pipeline](./backend/bring-your-own-pipeline.md) | Swap your own agent pipeline into the example backend. *(published)* |
 | [backend/direct-mode](./backend/direct-mode.md) | Direct credentials, the provision script, and the Daily/LiveKit webhooks. *(published)* |
+| [backend/inbound-calls](./backend/inbound-calls.md) | Ringing the user from the example backend (APNs setup, registration, `ring.py`). *(published)* |
 | [backend/deploy](./backend/deploy.md) | Deploying the example backend (Docker, Railway, post-deploy steps). *(published)* |
 
 **The docs site.** Pages marked *(published)* are built into the public site at
@@ -32,10 +34,6 @@ backend of ours, no accounts, no per-minute cost.
 internal development documentation, kept off the site via `exclude_docs`. The app
 links to the published pages through `Core/Utilities/ExternalLinks.swift` — if a
 published page's filename changes, update both the `nav` and `ExternalLinks`.
-
-Feature docs (`docs/features/<Feature>.md`) are added as features land — see the
-plan's three-tab structure (Recents, Contacts, Settings) plus Agent Detail and
-the in-call screen.
 
 ## Load Order for Agents
 
@@ -46,8 +44,8 @@ each builds on the last instead of grepping blindly:
    CallKit↔WebRTC seam before touching anything.
 2. **`CONVENTIONS.md`** next — house style, naming, the AccessibilityID and build
    override rules you must follow.
-3. **`CORE_SYSTEMS.md`** for shared infrastructure (call/transport/audio/reconnect).
-4. The **relevant feature doc** under `docs/features/` last, once features exist.
+3. **`CORE_SYSTEMS.md`** for shared infrastructure (call/transport/audio/reconnect)
+   and the feature surfaces (the in-call screen, Siri dialing).
 
 ## Project Facts (orientation)
 
@@ -56,7 +54,7 @@ each builds on the last instead of grepping blindly:
   `project.yml` change or fresh clone. Scheme: `Conduit`. The `ConduitCallEngine`
   package resolves from GitHub by version like the other dependencies.
   The tracked root `Package.resolved` pins the SDKs.
-- **Structure:** `Conduit/{App, Core, Features, Shared, Resources}`; the call
+- **Structure:** `Conduit/{App, Core, Features, Shared, Debug, Resources}` (`Debug/` is DEBUG-only tooling); the call
   engine lives in the `ConduitCallEngine` package (state machine, CallKit,
   PushKit, Daily/LiveKit adapters, fakes), the app keeps agents, history, pairing,
   the SmallWebRTC adapter, Siri, and the UI.

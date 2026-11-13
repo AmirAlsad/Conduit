@@ -11,9 +11,11 @@ everything above them is testable at sim speed.
 
 **Verification status.** Device runs are recorded in
 [DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md). Statements below that something was
-"device-verified" date to the runs they name (June and November 2026, engine 0.1.x
-and the SDK versions of the time). Everything the 0.2 adoption added is **built and
-unit-tested; device verification pending**: a session is planned and has not run.
+"device-verified" date to the runs they name (June and November 2026). The engine
+0.2 adoption was run on a device on 2026-11-12 (iPhone 17, iOS 27.0, Daily, LiveKit
+and SmallWebRTC); its Results block lists what passed and what was not run (among
+them a phone call ending the call on the final build, Focus-filtered rings, the
+SiriKit contact path and an incoming call on AirPods).
 
 ## Where the code lives
 
@@ -22,15 +24,15 @@ app. `project.yml` consumes it by version from
 `github.com/AmirAlsad/ConduitCallEngine` (`minorVersion: "0.2.0"`, 0.2.x only),
 pinned in the tracked `Package.resolved`, which also pins the transport SDKs
 (Pipecat iOS client 1.3.0 and its Daily transport, Daily 0.41.0, LiveKit 2.19.0,
-the SmallWebRTC fork by revision; bumped with the 0.2 adoption, regression calls on
-them pending). The app links four of the package's products:
+the SmallWebRTC fork by revision; bumped with the 0.2 adoption and regression-called
+on a device on 2026-11-12). The app links four of the package's products:
 
 | Product | Holds |
 |---|---|
 | `ConduitCallEngine` | `CallEngine` (the state machine) and its host surface (`CallEngineDelegate`, `CallEngineConfiguration`, `CallTarget`, `ActiveCall`, `IncomingCall`, `CallRecord`); `CallState` and the outcome / failure / direction models; `CallTransport` with `TransportEvent`, `TransportError`, `CallConnection`, `CallSignal` / `CallSignalDelivery`, `AudioDeviceInfo`, `AudioRouteKind`; `ConnectRequest`, `RingPreparation`, `CallCue`; the CallKit provider, audio-session and audio-interruption seams; PushKit registration and incoming-push parsing; ring-status receipts; `ReconnectionPolicy`; `CallEngineLog`. Imports no transport SDK. |
 | `ConduitCallEngineDaily` | `PipecatDailyTransport` |
 | `ConduitCallEngineLiveKit` | `LiveKitTransport`, `LiveKitConnectGate`, `LiveKitAudioRouter` |
-| `ConduitCallEngineTesting` | `FakeTransport`, `SimulatedCallSystem`, `CallEngine.simulated(...)`; the app links it for the simulator and its tests |
+| `ConduitCallEngineTesting` | `FakeTransport`, `SimulatedCallSystem`, `CallEngine.simulated(...)`; the app links and imports it only in Debug and simulator builds (the simulator's engine, previews, tests), never in a Release device build |
 
 The app keeps `Agent` / `CallLogEntry` and persistence, the Keychain, contacts,
 pairing (`PairingClient`), the SmallWebRTC adapter, the spoken-state announcer and
@@ -288,9 +290,9 @@ activations included, lands in the trace with its timestamp and still reaches
 Console through `CallEngineLog.writeToOSLog`; Release builds leave the package's
 logging at its default.
 
-The **Cue Lab** (`Debug/CueLab/`, DEBUG only) is a panel on the call screen for
-finding out why the spoken cues are inaudible on Daily calls and in the last retry
-phase of a LiveKit outage. During a live call it plays one short cue through each
+The **Cue Lab** (`Debug/CueLab/`, DEBUG only) is a panel on the call screen, built
+to find out why the spoken cues were inaudible on Daily calls and in the last retry
+phase of a LiveKit outage on the 0.1.1 run. During a live call it plays one short cue through each
 candidate path, one button each: `AVSpeechSynthesizer` speaking through the app's
 audio session and through its own, the speech rendered to a file and played with
 `AVAudioPlayer`, rendered to a buffer and played with `AVAudioEngine`; the ringback
@@ -298,9 +300,13 @@ with `AVAudioPlayer`, as a system sound and as an alert sound; and, on LiveKit
 calls, the SDK's `SoundPlayer` for the speech and the ring, with two LiveKit
 ducking switches. It never activates,
 deactivates or reconfigures the audio session (CallKit owns it); every press logs
-session and route snapshots before and after to the call trace. Which paths are
-heard on which transport, from which output, is read off the tester's report and
-the trace. The announcer's own mechanism is unchanged until that is known.
+session and route snapshots before and after to the call trace. What it showed on
+a device (iPhone 17, iOS 27.0): speech in the app's audio session was inaudible for
+the whole of a Daily call, while speech in the system's own speech session was
+heard on Daily and LiveKit and left the call's session unchanged; so the announcer
+now speaks through the system's session (see "Reconnection + spoken state"). The
+ringback's two playback methods were compared the same way (DEVICE_VERIFICATION
+O4c), which is why the ringback is chosen by route.
 
 ## Models & persistence (SwiftData)
 
@@ -343,7 +349,7 @@ generic-password items keyed by `(service, KeychainTokenRef.account)`, with
 `kSecAttrAccessibleAfterFirstUnlock` so a call can connect from the lock screen /
 CarPlay after the first post-boot unlock. `setToken` is update-or-add (no
 duplicate items on re-save); `token` returns `nil` (not an error) when absent;
-`delete` treats "not found" as success. **Secrets never leave the Keychain** —
+`delete` treats "not found" as success. **Secrets are stored only in the Keychain** —
 SwiftData persists only the `KeychainTokenRef`. An agent can hold **two**
 independent secrets under separate refs both derived from its id — the **pairing
 API key** (`agent.token.<id>`, also `Agent.keychainTokenRef`) and the **direct-room
@@ -404,7 +410,11 @@ push credentials are returned for every purpose without a network call; a direct
 agent returns its room; a pairing agent re-pairs every time, and a request made
 while the phone rings adds `ring: {call_id, joins_before_answer}` to the pairing
 body (`PairingRing`; `joins_before_answer` when the transport joins before the
-answer), so the user's backend can dispatch its agent for that ring. Every pairing
+answer), so the user's backend can dispatch its agent for that ring. A ring to a fixed-room
+(direct) agent with no inline credentials is capped at the `credentials` tier
+(`AgentCallHost.callEngine(_:targetForIncomingCall:)`): that room's bot was never
+told whether this app sends `call-connected`, so it may greet on the device's join,
+and the device must not join before the answer. Every pairing
 request also lists the call-control signals the app's calls carry
 (`call_signals`: `call-connected` only, since the engine sends `call-held` and
 `call-resumed` only with its experimental hold, which the app leaves off), so the
@@ -412,7 +422,7 @@ backend's agent waits for `call-connected` before it greets. A backend that pred
 fields ignores them. **Pre-connect
 policy:** `AgentCallHost` allows each ring whatever its push's `preconnect` asks
 for (`CallTarget.ringPreparation = IncomingCall.requestedPreparation`), since the
-sender is the user's own backend; the engine still lowers `media` to `credentials`
+sender is the user's own backend (except the fixed-room cap above); the engine still lowers `media` to `credentials`
 for a transport that cannot join while ringing (SmallWebRTC; LiveKit and Daily
 join). Outgoing targets allow none. Conduit's delegate is `AgentCallHost`
 (`Core/Services/AgentCalls/AgentCallHost.swift`): it writes `CallLogEntry` rows
@@ -427,7 +437,7 @@ after the cue, so it never starts while the call screen slides up and a call tha
 ends sooner never rings); on an answered call there is never a ringback, and if it is
 still connecting `AgentCallHost.connectingPromptDelay` (1 s) after the answer it
 says "Connecting" once per call,
-`.start(.retrying)` repeats "Retrying", `.stop` ends the loop at once,
+`.start(.retrying)` repeats "Retrying connection", `.stop` ends the loop at once,
 `.moment(.connected)` / `.moment(.reconnected)` say "Connected" (the engine sends
 `.moment(.connected)` only once CallKit has activated the call's audio, so it is
 said into a live session), except `.moment(.connected)` of a call answered with its
@@ -462,7 +472,7 @@ speaking (`cutOffPending()`: a "Retrying connection" repeat, "Disconnected"), wh
 is stale by then. The release opens the mic, and
 the engine then tells the agent `call-connected`: the moment to start speaking.
 The host releases at once when "Connected" will not come: the call ends or fails.
-"Disconnected" and "Retrying" are not withheld for: the
+"Disconnected" and "Retrying connection" are not withheld for: the
 transport is down while they play. The engine ends a withhold with the call, and
 releases one still in place 5 seconds after the call connected with its audio
 activated (`micWithholdTimeout`), logging a warning, which also sends
@@ -510,7 +520,7 @@ Key behaviors:
   the loudspeaker; with AirPods or a car connected it plays there. The speaker is
   the user's choice: the in-app route picker (on every transport), the native call
   screen's audio button (LiveKit; not Daily), Bluetooth and CarPlay,
-  and a route the user picked stays through reconnects and holds. With the setting
+  and a route the user picked stays through reconnects. With the setting
   on, the engine would select the speaker once per call after connect, through
   `transport.setAudioDevice`, only when the list has no Bluetooth or wired route (it
   goes through the transport because the WebRTC SDK manages the session and reverts
@@ -642,11 +652,13 @@ presents as a `.fullScreenCover` from `RootTabView`, gated on
   CallKit hands the audio back; if it ever lingers, unmuting (or a push-to-talk
   press) reopens the mic, or End.
 - **Controls** group into one frosted pill: Mute (or Push-to-Talk when always-on
-  listening is off), the Daily-backed route menu and the red End; the PTT caption sits below the pill.
+  listening is off), the route menu (every transport; it routes through the
+  transport) and the red End; the PTT caption sits below the pill.
 - **Active-speaker ring.** A subtle ring around the avatar while the agent speaks
   (`ActiveSpeakerRingModifier`, binary on `isBotSpeaking`) — the group-FaceTime
   "active tile" cue, replacing the old amplitude glow.
-- **Minimize / return.** A down-chevron (top-left, `closeButton` id, "Minimize")
+- **Minimize / return.** A down-chevron (top-left, `minimizeButton` id, "Minimize"; the ended call's Close
+  button is `closeButton`)
   sets `AppEnvironment.isCallScreenMinimized`, which dismisses only the projection —
   the engine, transport, and audio session stay up (the view has no
   call-ending teardown; ending is exclusively the End button / hangup signal).
@@ -707,19 +719,27 @@ player nor anything else here activates, deactivates or configures `AVAudioSessi
 waits); the route is only read. In DEBUG builds the choice, the route, the waits,
 the player's make / `prepareToPlay()` / `play()` results with their times, the
 silencing and the stop go to the call trace (`ringback:` and `ringback (audio player):`
-lines); Release builds compile none of it. A phrase the synthesizer has not started (its `didStart`) within 1.5 s of the request is stale: everything queued or speaking is cut off and its completions run, so a late phrase is never heard after its moment and the first "Connected"'s withhold cannot outlast that bound by much. The retrying loop never queues a repeat while its previous one has not finished; that repeat is skipped and the next tick speaks. In DEBUG builds each phrase's request, `didStart`, `didFinish`, `didCancel` and cut-off go to the call trace (`speech: ...` lines). The real `SpeechSpokenStateAnnouncer` uses
-`AVSpeechSynthesizer`, and the tone as above; it must mix with
-(never deactivate) the CallKit-owned session — that ducking/session wiring is
-finalized in WS-3. `AgentCallHost` drives it from the engine's cue events (see
+lines); Release builds compile none of it. **Speech** goes through the system's
+own speech session: the synthesizer's `usesApplicationAudioSession` is false, so it
+never touches the call's session. On a device (iPhone 17, iOS 27.0) speech in the
+app's session was inaudible for a whole Daily call, while the system's session was
+heard on Daily and LiveKit and left the call's session unchanged. A phrase the synthesizer has not started (its `didStart`) within 1.5 s of the request is stale: everything queued or speaking is cut off and its completions run, so a late phrase is never heard after its moment and the first "Connected"'s withhold cannot outlast that bound by much. The retrying loop never queues a repeat while its previous one has not finished; that repeat is skipped and the next tick speaks. In DEBUG builds each phrase's request, `didStart`, `didFinish`, `didCancel` and cut-off go to the call trace (`speech: ...` lines). The real `SpeechSpokenStateAnnouncer` uses
+`AVSpeechSynthesizer` in the system's speech session and the route-aware ringback
+above; neither activates, deactivates or configures the CallKit-owned session.
+`AgentCallHost` drives it from the engine's cue events (see
 above), not from state transitions, so a loop stops by the time the call ends.
 
-Known limitation (device-observed on the 0.1.1 run): the spoken cues were audible on
-LiveKit calls but not during Daily calls, and they went silent during the final retry
-phase of a LiveKit outage; the cause is not established. Moving to the engine's cues
-changes *when* a cue plays, not how its audio is produced, so it is not expected to
-fix this. The DEBUG Cue Lab (above) is how the cause is to be found, and which
-mechanism the announcer should use is an open decision (see
-[ROADMAP](./ROADMAP.md)); nothing about the announcer's audio path has changed.
+Device record (2026-11-12, iPhone 17, iOS 27.0, Daily and LiveKit; see the Results
+in [DEVICE_VERIFICATION](./DEVICE_VERIFICATION.md)): on a placed call the ring
+starts after half a second and "Connected" plays with the mic closed, and the agent
+echoes the user only afterwards, never the cue; on an answered call whose agent is
+there nothing is spoken; during outages of 10 s to 45 s the cues play and
+"Connected" comes within a second of recovery, with the mic open at once; at the
+ear the ring is the quiet system sound and on AirPods the audio player at call
+volume. The cues were heard during Daily calls, which on the 0.1.1 run they were
+not (the system speech session is the change); whether they are heard in the last
+retry phase of a long LiveKit outage was not recorded. Not yet tried: CarPlay and wired headsets, and an incoming
+call on AirPods.
 
 ## Audio-session / CallKit integration (built, M3)
 
