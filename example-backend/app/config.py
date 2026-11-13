@@ -146,11 +146,11 @@ class Settings(BaseSettings):
 
     # Ring deadline for bots dispatched for a pre-connected ring (docs/INBOUND_CALLS.md):
     # a bot that hears no answer within the ring's timeout plus this margin ends.
-    # ring_timeout_secs is the ring length ASSUMED when the push carried no
-    # ring_timeout (the request set none, or the device doesn't list the feature):
-    # the phone then rings for its own configured timeout, 60 s by default, which
-    # an app can change or turn off. Set this to match your app's, or always send
-    # ring_timeout (a firm bound: the app clamps it to [10 s, its own timeout]).
+    # ring_timeout_secs is the ring_timeout a pre-connected ring sends when the
+    # request set none (to a device that lists the feature; the app clamps it to
+    # [10 s, its own timeout]), and the ring length ASSUMED for a device that
+    # doesn't list it, which rings for its own configured timeout (60 s by default,
+    # which an app can change or turn off): set it to match your app's.
     ring_timeout_secs: int = Field(default=60, gt=0)
     ring_deadline_margin_secs: float = 15.0
     # Agent-first ringing: a ring that starts its bot before the push (inline, and

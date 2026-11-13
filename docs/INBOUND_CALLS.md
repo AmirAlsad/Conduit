@@ -307,8 +307,11 @@ Your agent must:
    adds the time the push was held for it; the reference engine adds its whole
    `RING_BOT_WAIT_SECS` bound). Use the `ring_timeout` you sent; if the push carried none,
    the phone rings for the app's own configured timeout (60 s by default, but it
-   can be longer or unlimited), which you can only assume. Send `ring_timeout`
-   when you want a firm bound.
+   can be longer or unlimited), which you can only assume. So **send
+   `ring_timeout` with every `preconnect` ring** to a registration that lists
+   it: the reference engine sends the length it would assume
+   (`RING_TIMEOUT_SECS`, 60) when you asked for none, which never lengthens a
+   ring.
 4. Use receipts as a fallback, not as the signal: wait for `call-connected`, and
    let `answered` release the greeting only if `call-connected` has not come 5 or
    more seconds (10 is safer) after both the receipt and the device being in the

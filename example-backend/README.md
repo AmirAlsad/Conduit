@@ -212,7 +212,7 @@ to join and hear the agent. `uv run pytest` runs the suite.
 | POST | `/inbound/register/{agent_id}` | bearer | The app registers its VoIP push token, plus (newer builds) the caller `display_name` and `handle` and the device's `push_features` (inbound calls) |
 | DELETE | `/inbound/register/{agent_id}` | bearer | The app deleted the agent — drop its registration |
 | POST | `/inbound/status/{agent_id}` | bearer | The app reports how a ring ended (answered / declined / busy / suppressed_by_focus / unanswered / canceled; unknown statuses are accepted). The first one releases or ends the ring's bot |
-| POST | `/admin/ring/{agent_id}` | bearer | Ring the registered device — agent-initiated inbound call (push echoes the registered `display_name`/`handle`, when present; optional `ring_timeout`, sent only if the device lists that push feature; `preconnect` defaults to the best tier the device's registration takes). A ring whose agent starts before the push (inline, or a pre-connected pairing ring) is pushed once the agent's bot is in the room, at most `RING_BOT_WAIT_SECS` later |
+| POST | `/admin/ring/{agent_id}` | bearer | Ring the registered device — agent-initiated inbound call (push echoes the registered `display_name`/`handle`, when present; `ring_timeout`, sent only if the device lists that push feature, and then with every pre-connected ring (`RING_TIMEOUT_SECS` unless given); `preconnect` defaults to the best tier the device's registration takes). A ring whose agent starts before the push (inline, or a pre-connected pairing ring) is pushed once the agent's bot is in the room, at most `RING_BOT_WAIT_SECS` later |
 | POST | `/admin/ring/{agent_id}/cancel` | bearer | Withdraw a ring still ringing: before its push (the engine is still waiting for the bot: the push never goes out), in band (the bot leaves a pre-connected room) or a cancel push (only if the device lists `cancel`). A ring bot is asked and refuses once it has seen the call answered. 404 unknown ring, 409 once it ended, once its bot saw the answer, or when the device can't take a cancel push |
 | POST | `/admin/disconnect` | bearer | Force-end an agent in a room (drop test) |
 | GET  | `/health` | none | Liveness / keep-warm |
@@ -364,11 +364,12 @@ return them as `BotBuild(gates=…)` — see `bot/pipelines/live.py`.
   the room; after it, the agent is ended and a late request gets a fresh room.
 - **`RING_TIMEOUT_SECS`** (default `60`, must be > 0) and
   **`RING_DEADLINE_MARGIN_SECS`** (default `15`) — a ring bot ends when the ring's
-  timeout plus the margin passes without an answer. `RING_TIMEOUT_SECS` is only
-  the ring length *assumed* for a push that carried no `ring_timeout`: the phone
-  then rings for its own configured timeout (60 s by default, but the app can make
-  it longer or unlimited), so match it to your app's. A sender that wants a firm
-  bound should always send `ring_timeout` (to devices that list the feature).
+  timeout plus the margin passes without an answer. A pre-connected ring to a
+  device that lists the `ring_timeout` push feature always carries one, as the
+  push contract asks: the request's, else `RING_TIMEOUT_SECS`. For a device that
+  doesn't list it, `RING_TIMEOUT_SECS` is the ring length *assumed*: the phone
+  rings for its own configured timeout (60 s by default, but the app can make it
+  longer or unlimited), so match it to your app's.
 - **`CALL_CONNECTED_GRACE_SECS`** (default `10`, must be >= 5, the push
   contract's floor) — how long an awaiting bot waits for a `call-connected` that
   may have been lost, counted from the later of knowing the user answered and the

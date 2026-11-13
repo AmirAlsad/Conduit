@@ -129,8 +129,36 @@ def test_ring_response_reports_the_ring_timeout_sent():
         _setup(c)
         r = c.post("/admin/ring/loopback", json={"ring_timeout": 30}, headers=AUTH)
         assert r.json()["ring_timeout"] == 30
-        r = c.post("/admin/ring/loopback", json={}, headers=AUTH)
+        r = c.post("/admin/ring/loopback", json={"preconnect": "none"}, headers=AUTH)
         assert r.json()["ring_timeout"] is None
+
+
+def test_every_pre_connected_ring_carries_a_ring_timeout(monkeypatch):
+    # The push contract: send ring_timeout with every preconnect ring, so the bot
+    # started for it knows how long the phone rings. Unrequested, the length the
+    # engine assumes (RING_TIMEOUT_SECS); the app only ever shortens a ring with it.
+    monkeypatch.setattr(settings, "ring_timeout_secs", 45)
+    for body in ({}, {"inline": True}, {"preconnect": "credentials"}):
+        with TestClient(app) as c:
+            _setup(c)
+            r = c.post("/admin/ring/loopback", json=body, headers=AUTH)
+            assert r.status_code == 200, r.text
+            payload = app.state.apns.sends[-1][2]
+            assert payload["preconnect"] in ("media", "credentials")
+            assert payload["ring_timeout"] == "45"
+            assert r.json()["ring_timeout"] == 45
+            assert app.state.rings.get(payload["call_id"]).ring_timeout == 45
+            # The ring bot's deadline is that same ring length.
+            assert _deadline(_argv()) == 45 + settings.ring_deadline_margin_secs + settings.ring_bot_wait_secs
+
+
+def test_a_plain_ring_still_carries_no_ring_timeout():
+    with TestClient(app) as c:
+        _setup(c)
+        for body in ({"preconnect": "none"}, {"preconnect": "none", "inline": True}):
+            r = c.post("/admin/ring/loopback", json=body, headers=AUTH)
+            assert r.status_code == 200, r.text
+            assert "ring_timeout" not in app.state.apns.sends[-1][2]
 
 
 # Lists preconnect (and cancel) but not ring_timeout.

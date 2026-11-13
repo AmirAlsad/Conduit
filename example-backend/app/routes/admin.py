@@ -107,15 +107,21 @@ async def ring(
         payload["display_name"] = reg.display_name
     if reg.handle is not None:
         payload["handle"] = reg.handle
-    # Push values are strings, like every other key. A device that doesn't list
-    # the feature rings for its own default, which the ring bot's deadline assumes.
-    ring_timeout = req.ring_timeout if "ring_timeout" in reg.push_features else None
-    if req.ring_timeout is not None and ring_timeout is None:
-        event(_log, "ring.ring_timeout_unsupported", agent=agent_id)
-    if ring_timeout is not None:
-        payload["ring_timeout"] = str(ring_timeout)
     sends_call_connected = CALL_CONNECTED in reg.call_signals
     preconnect = _preconnect_tier(agent_id, req.preconnect, reg, sends_call_connected)
+    # Push values are strings, like every other key. A device that doesn't list
+    # the feature rings for its own default, which the ring bot's deadline assumes.
+    takes_ring_timeout = "ring_timeout" in reg.push_features
+    ring_timeout = req.ring_timeout if takes_ring_timeout else None
+    if req.ring_timeout is not None and ring_timeout is None:
+        event(_log, "ring.ring_timeout_unsupported", agent=agent_id)
+    if ring_timeout is None and takes_ring_timeout and preconnect is not None:
+        # The push contract asks for ring_timeout with every pre-connected ring,
+        # so the ring and the bot started for it end together: the length the
+        # engine would assume anyway (the app only ever shortens a ring with it).
+        ring_timeout = settings.ring_timeout_secs
+    if ring_timeout is not None:
+        payload["ring_timeout"] = str(ring_timeout)
     if preconnect is not None:
         payload["preconnect"] = preconnect
     ring = TrackedRing(

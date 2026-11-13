@@ -259,7 +259,10 @@ uv run python scripts/ring.py --agent live --preconnect none   # a plain ring
   `unanswered`. The engine puts it in the push only when the registration lists
   the `ring_timeout` push feature; otherwise the phone rings for its own
   default, the ring bot's deadline assumes that default, and the ring response's
-  `ring_timeout` is `null`.
+  `ring_timeout` is `null`. A pre-connected ring to a registration that lists
+  the feature always carries one, as the push contract asks: the one you gave,
+  else `RING_TIMEOUT_SECS` (60), so the ring and its bot end together. A plain
+  ring (no `preconnect` sent) carries one only when you give it.
 - **`preconnect`** asks the app to prepare while the phone rings. **Every ring
   asks for it by default**: the best tier the registration takes, `media` when it
   lists the `preconnect` push feature and the `call-connected` call signal,
@@ -309,12 +312,13 @@ A ring bot differs from a normal bot in three ways:
 - It ends by itself if nobody answers within the ring's timeout (at least 10 s)
   plus `RING_DEADLINE_MARGIN_SECS` (15), plus `RING_BOT_WAIT_SECS` (8) for a bot
   started before the push, which may go out that much later (agent-first
-  ringing, above). When the push carried no `ring_timeout`
-  the engine cannot know how long the phone will ring, since the app's timeout is
-  configurable (60 s by default, longer or unlimited if the user changed it), so it
-  assumes `RING_TIMEOUT_SECS` (default 60, must be above 0): set it to match your
-  app, or a bot ends mid-ring on a phone still ringing. A sender that wants a firm
-  bound should always send `ring_timeout`.
+  ringing, above). Every pre-connected ring to a device that lists the
+  `ring_timeout` push feature carries one (`RING_TIMEOUT_SECS` when you gave
+  none), so its bot's deadline is firm. Only a device that does not list the
+  feature leaves the engine guessing: the app's timeout is configurable (60 s by
+  default, longer or unlimited if the developer changed it), so the engine
+  assumes `RING_TIMEOUT_SECS` (default 60, must be above 0); set it to match your
+  app, or a bot ends mid-ring on a phone still ringing.
 - Like every bot for an app that lists `call-connected` (in its `/connect` body,
   or, for an `--inline` ring, its registration), it is dispatched with
   `--await-connected`: no audio and no greeting until the app's `call-connected`
