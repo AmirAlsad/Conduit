@@ -26,7 +26,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install mkdocs-material
+      # Pinned so a new release can't change or break the published site unseen.
+      - run: pip install mkdocs-material==9.8.1 mkdocs==1.6.1
       - run: mkdocs build --strict
       - uses: actions/upload-pages-artifact@v3
         with:
