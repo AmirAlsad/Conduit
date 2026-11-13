@@ -151,6 +151,9 @@ async def ring(
                 state,
                 agent.agent_id,
                 transport,
+                # A smallwebrtc offer URL on the address this ring was sent
+                # through, like the push's status_url.
+                base_url=str(request.base_url),
                 ring_flags=ring_flags,
                 # The bot starts before the app asks for anything, so only the
                 # registration says whether the app sends call-connected.

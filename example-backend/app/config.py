@@ -198,7 +198,9 @@ class Settings(BaseSettings):
     apns_use_sandbox: bool = False
 
     # --- Deployment / ops ---
-    public_base_url: str | None = None  # for webhook registration at deploy time
+    # Not read by the server: the default --base-url of scripts/*.py. The engine
+    # builds its own URLs (status_url, a smallwebrtc offer URL) from the request.
+    public_base_url: str | None = None
     log_level: str = "INFO"
 
     def require(self, *names: str) -> None:

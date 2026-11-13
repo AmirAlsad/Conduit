@@ -102,16 +102,46 @@ def test_connect_pairing_smallwebrtc_remembers_that_the_client_sends_call_connec
         assert fake.minted == [("loopback", True)]
 
 
-def test_connect_pairing_smallwebrtc_prefers_public_base_url(monkeypatch):
+def test_connect_pairing_smallwebrtc_uses_the_address_the_phone_reached(monkeypatch):
+    # PUBLIC_BASE_URL is the scripts' default (often a deployed host); a phone
+    # pairing over the LAN must get an offer URL on the LAN address it used.
     monkeypatch.setattr(settings, "public_base_url", "https://engine.example.com")
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://192.168.1.50:8000") as c:
         app.state.smallwebrtc = FakeSmallWebRTC()
         r = c.post(
             "/connect/loopback", json={"transport": "smallwebrtc"}, headers=AUTH
         )
         assert r.status_code == 200, r.text
         room_url = r.json()["connection"]["room_url"]
-        assert room_url == "https://engine.example.com/webrtc/loopback/offer"
+        assert room_url == "http://192.168.1.50:8000/webrtc/loopback/offer"
+
+
+def _register_smallwebrtc(c, **extra):
+    body = {
+        "voip_token": "ab12cd34",
+        "bundle_id": "com.example.Conduit",
+        "agent_id": "7b1bbe22-93b8-4a5e-9e2f-0c1a2b3c4d5e",
+        "transport": "smallwebrtc",
+        **extra,
+    }
+    assert c.post("/inbound/register/loopback", json=body, headers=AUTH).status_code == 200
+
+
+def test_an_inline_smallwebrtc_ring_pushes_an_offer_url_on_the_rings_address(monkeypatch):
+    from test_inbound import FakeApns
+
+    monkeypatch.setattr(settings, "public_base_url", "")
+    with TestClient(app, base_url="http://192.168.1.50:8000") as c:
+        app.state.smallwebrtc = FakeSmallWebRTC()
+        app.state.apns = FakeApns()
+        _register_smallwebrtc(c)
+        r = c.post("/admin/ring/loopback", json={"inline": True}, headers=AUTH)
+        assert r.status_code == 200, r.text
+        ((_, _, payload),) = app.state.apns.sends
+        # The same address the push's status_url uses.
+        assert payload["room_url"] == "http://192.168.1.50:8000/webrtc/loopback/offer"
+        assert payload["status_url"].startswith("http://192.168.1.50:8000/")
+        assert payload["token"] == "minted-token"
 
 
 def test_credentials_smallwebrtc_is_pairing_only():

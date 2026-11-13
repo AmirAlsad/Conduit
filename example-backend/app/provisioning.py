@@ -115,12 +115,12 @@ async def provision_pairing(
     if transport == "smallwebrtc":
         # No room, no dispatch: the client's offer POST is the rendezvous and the
         # bot spawns in-process when it lands (app/transports/smallwebrtc.py).
-        # The "credential" is the offer URL plus a short-lived bearer for it.
-        base = (settings.public_base_url or base_url or "").rstrip("/")
+        # The "credential" is the offer URL plus a short-lived bearer for it, on
+        # the address the request reached us at: a phone pairing over the LAN
+        # gets the LAN address, whatever PUBLIC_BASE_URL (a scripts default) says.
+        base = (base_url or "").rstrip("/")
         if not base:
-            raise TransportUnavailable(
-                "smallwebrtc needs a reachable base URL (set PUBLIC_BASE_URL)."
-            )
+            raise TransportUnavailable("smallwebrtc needs the request's base URL.")
         token = state.smallwebrtc.mint_token(
             agent_id, settings.pairing_token_ttl_secs, await_connected=await_connected
         )

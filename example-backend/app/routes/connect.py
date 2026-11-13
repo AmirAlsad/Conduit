@@ -117,9 +117,8 @@ async def _provision(request: Request, req: ConnectRequest, *, direct: bool) -> 
                 ring_timeout=tracked.ring_timeout if tracked else None,
                 joins_before_answer=req.ring.joins_before_answer,
             )
-        # base_url backs smallwebrtc's offer URL when PUBLIC_BASE_URL is unset:
-        # the device reached us at this address, so the offer URL at the same
-        # host is correct by construction (the LAN case).
+        # base_url is smallwebrtc's offer URL host: the device reached us at
+        # this address, so the offer URL there is correct by construction.
         payload, room_key = await provision_pairing(
             state,
             agent.agent_id,

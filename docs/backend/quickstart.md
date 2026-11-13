@@ -85,7 +85,8 @@ uv run python scripts/pair.py --agent loopback --transport smallwebrtc \
 ```
 
 Scan the QR, allow the **local network** prompt iOS shows on first connect, and
-call. Phone and laptop must share a network (the phone's hotspot counts); allow
+call. The offer URL the phone is given is on the address it paired through, so
+pair with the LAN address even if `PUBLIC_BASE_URL` names a deployed host. Phone and laptop must share a network (the phone's hotspot counts); allow
 incoming connections if macOS's firewall asks. Media is UDP peer-to-peer, so
 this transport is for LAN / self-hosted-with-UDP setups — it won't work behind
 an HTTP-only host like Railway.

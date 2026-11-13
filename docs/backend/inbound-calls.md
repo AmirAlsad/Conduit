@@ -167,7 +167,7 @@ Two modes:
 
     !!! warning "Inline must match the app's transport"
         The app joins inline credentials over the transport **configured for that
-        agent in the app**. Pass `--transport daily|livekit` to match it — a
+        agent in the app**. Pass `--transport daily|livekit|smallwebrtc` to match it — a
         mismatch (e.g. a Daily room pushed to an agent the app dials over LiveKit)
         fails at answer time. Without `--transport` the engine uses the
         transport the app registered for the agent, and for an app that
@@ -176,6 +176,8 @@ Two modes:
         ring's room prepared at ring time uses `--transport`, else the
         registered transport, and with neither prepares nothing; when the app
         asks for another, it gets a fresh room and the prepared one is ended.
+        An inline SmallWebRTC ring pushes the engine's offer URL on the address
+        you rang through (`--base-url`), so ring through one the phone can reach.
 
 ### Agent-first ringing
 
