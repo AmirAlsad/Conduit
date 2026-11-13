@@ -160,7 +160,7 @@ struct AgentCallHostTests {
     }
 
     @Test func ringThatRingsOutWritesMissedRowAndNotifies() async throws {
-        let h = try AgentCallHostHarness(ringTimeout: .seconds(60), sleep: AgentCallHostHarness.realTimeSleep)
+        let h = try AgentCallHostHarness(ringTimeout: .seconds(60), sleep: AgentCallHostHarness.parkedSleep)
         h.ring()
         #expect(h.engine.state == .incomingRinging)
 
@@ -605,7 +605,7 @@ struct AgentCallHostTests {
     // MARK: - Join deadline
 
     @Test func anAgentThatNeverJoinsWritesAgentUnreachableRow() async throws {
-        let h = try AgentCallHostHarness(joinTimeout: .seconds(30), sleep: AgentCallHostHarness.realTimeSleep)
+        let h = try AgentCallHostHarness(joinTimeout: .seconds(30), sleep: AgentCallHostHarness.parkedSleep)
         await h.placeCall()
         #expect(h.engine.state.isConnecting)
 
@@ -774,7 +774,7 @@ struct AgentCallHostTests {
     /// is said and nothing withheld, so the agent is told at CallKit's activation.
     @Test func aCallReadyAtTheAnswerSaysNothingAndTellsTheAgentAtTheActivation() async throws {
         let h = try AgentCallHostHarness(
-            pairingEndpoint: endpoint, transportKind: .livekit, sleep: AgentCallHostHarness.realTimeSleep
+            pairingEndpoint: endpoint, transportKind: .livekit, sleep: AgentCallHostHarness.parkedSleep
         )
         h.transport.canConnectWhileRinging = true
         h.ring(preconnect: "media")
@@ -800,7 +800,7 @@ struct AgentCallHostTests {
     /// Its reconnects are cued as any call's are, with nothing withheld.
     @Test func aCallReadyAtTheAnswerStillMarksItsReconnects() async throws {
         let h = try AgentCallHostHarness(
-            pairingEndpoint: endpoint, transportKind: .livekit, sleep: AgentCallHostHarness.realTimeSleep
+            pairingEndpoint: endpoint, transportKind: .livekit, sleep: AgentCallHostHarness.parkedSleep
         )
         h.transport.canConnectWhileRinging = true
         h.ring(preconnect: "media")

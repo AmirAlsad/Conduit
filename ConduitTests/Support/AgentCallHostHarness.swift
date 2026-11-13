@@ -99,11 +99,9 @@ final class AgentCallHostHarness {
     let agent: Agent
     private(set) var pushCompletions = 0
 
-    /// A real-time `sleep`, for a test that ends a timer with `fireTimer(_:)`; the
-    /// default `sleep` runs every timer out at once.
-    static let realTimeSleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     /// A `sleep` no timer outlasts by itself: every one ends only through
-    /// `fireTimer(_:)` (or when the engine cancels it).
+    /// `fireTimer(_:)` (or when the engine cancels it), so no test depends on how
+    /// fast it runs. The default `sleep` runs every timer out at once.
     static let parkedSleep: (Duration) async throws -> Void = { _ in try await Task.sleep(for: .seconds(24 * 60 * 60)) }
 
     /// `pairingEndpoint` makes the agent pairing-mode: `token` is then its API key
